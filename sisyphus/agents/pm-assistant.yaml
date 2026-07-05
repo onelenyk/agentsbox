@@ -10,3 +10,4 @@ opencode_config:
 output_fields:
   status: required
   summary: required
+runner: opencode-default

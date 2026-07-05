@@ -12,3 +12,4 @@ output_fields:
   summary: required
   risk: optional
   platforms: optional
+runner: opencode-default

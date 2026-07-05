@@ -59,6 +59,82 @@ async def _terminate_process(proc: asyncio.subprocess.Process) -> None:
         await proc.wait()
 
 
+async def _watch_for_result(output_dir: Path, proc: asyncio.subprocess.Process, timeout: float) -> bool:
+    """Poll for result.json; kill process early when found. Returns True if found."""
+    result_path = output_dir / "result.json"
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if result_path.exists():
+            proc.terminate()
+            return True
+        await asyncio.sleep(1)
+    return False
+
+
+async def _read_stdout_with_error_detection(proc, timeout, output_dir):
+    """Read stdout line by line. Kill process immediately on JSON error.
+
+    Returns (stdout_bytes, stderr_bytes, error_detected).
+    """
+    lines = []
+    stderr_data = b""
+    deadline = time.monotonic() + timeout
+
+    stderr_task = asyncio.create_task(proc.stderr.read())
+
+    while time.monotonic() < deadline:
+        try:
+            line = await asyncio.wait_for(proc.stdout.readline(), timeout=1)
+        except asyncio.TimeoutError:
+            if proc.returncode is not None:
+                break
+            continue
+
+        if not line:
+            break
+
+        line_str = line.decode("utf-8", errors="replace")
+        lines.append(line_str)
+
+        # Detect opencode server errors
+        if '"type":"error"' in line_str or 'UnknownError' in line_str or 'Unexpected server error' in line_str:
+            await _terminate_process(proc)
+            try:
+                stderr_data = await asyncio.wait_for(stderr_task, timeout=5)
+            except asyncio.TimeoutError:
+                pass
+            return b"".join([ln.encode() for ln in lines]), stderr_data, True
+
+    await proc.wait()
+    try:
+        stderr_data = await asyncio.wait_for(stderr_task, timeout=5)
+    except asyncio.TimeoutError:
+        pass
+
+    return b"".join([ln.encode() for ln in lines]), stderr_data, False
+
+
+def _extract_opencode_error(stdout_bytes: bytes) -> str:
+    """Extract error message from opencode JSON error output."""
+    text = stdout_bytes.decode("utf-8", errors="replace")
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if data.get("type") == "error":
+            error_info = data.get("error", {})
+            name = error_info.get("name", "UnknownError")
+            message = error_info.get("message", "")
+            if message:
+                return f"opencode_error: {name}: {message}"
+            return f"opencode_error: {name}"
+    return "opencode_error: unknown error detected in stdout"
+
+
 async def launch_agent(
     agent_def: dict,
     prompt: str,
@@ -66,12 +142,31 @@ async def launch_agent(
     output_dir: str,
     timeout: int = 300,
     cancel_event: Optional[asyncio.Event] = None,
+    runner_name: Optional[str] = None,
 ) -> AgentResult:
-    """Spawn opencode subprocess, capture output, validate result.
+    """Spawn AI runner subprocess, capture output, validate result.
 
     Handles timeout (SIGTERM → 5s → SIGKILL), cancellation via Event,
     output capping at 10MB, and schema validation against BaseResult.
+    
+    Runner selection: if *runner_name* is given, looks up that runner.
+    Otherwise falls back to agent_def's "runner" field, then default runner,
+    then hardcoded "opencode" as last resort.
     """
+    from .runners import get_runner_by_name, get_default_runner
+
+    if runner_name:
+        runner = get_runner_by_name(runner_name)
+    else:
+        runner = get_runner_by_name(agent_def.get("runner", ""))
+    if not runner:
+        runner = get_default_runner()
+    if not runner:
+        runner = {"binary": "opencode", "model": "", "api_key_env": "", "base_url": "", "extra_args": "[]"}
+
+    binary = runner["binary"]
+    extra_args = json.loads(runner.get("extra_args", "[]") or "[]")
+
     start_time = time.monotonic()
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -79,55 +174,84 @@ async def launch_agent(
     env = os.environ.copy()
     env["SISYPHUS_OUTPUT_DIR"] = str(output_dir)
     env["SISYPHUS_WORKTREE"] = str(worktree_path)
+    if runner.get("model"):
+        env["SISYPHUS_MODEL"] = runner["model"]
+
+    api_env = runner.get("api_key_env", "")
+    if api_env:
+        key = os.environ.get(api_env, "")
+        if key:
+            env[api_env] = key
+            env["OPENROUTER_API_KEY"] = key
+
+    if runner.get("base_url"):
+        env["OPENROUTER_BASE_URL"] = runner["base_url"]
 
     agent_env = agent_def.get("opencode_config", {}).get("env", {})
     env.update(agent_env)
 
+    args = [binary, "run"] + extra_args + [
+        prompt,
+        "--format", "json",
+        "--auto",
+    ]
+    if worktree_path and worktree_path != "/tmp":
+        args.extend(["--dir", str(worktree_path)])
+    if runner.get("model"):
+        args.extend(["--model", runner["model"]])
+
     try:
         proc = await asyncio.create_subprocess_exec(
-            "opencode",
-            "-p", prompt,
-            "-c", str(worktree_path),
-            "-f", "json",
+            *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
+            cwd=str(worktree_path) if worktree_path and worktree_path != "/tmp" else None,
         )
     except FileNotFoundError:
         return AgentResult(
             status="error",
-            error="opencode binary not found in PATH. Install opencode or set correct PATH.",
+            error=f"Runner binary '{binary}' not found. Check runner config or install it.",
         )
     except Exception as e:
         return AgentResult(
             status="error",
-            error=f"Failed to spawn opencode process: {e}",
+            error=f"Failed to spawn '{binary}' process: {e}",
         )
 
     try:
         if cancel_event:
-            communicate_task = asyncio.create_task(proc.communicate())
+            read_task = asyncio.create_task(_read_stdout_with_error_detection(proc, timeout, output_path))
             cancel_task = asyncio.create_task(cancel_event.wait())
 
             done, pending = await asyncio.wait(
-                [communicate_task, cancel_task],
+                [read_task, cancel_task],
                 timeout=timeout,
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
             if cancel_task in done:
-                communicate_task.cancel()
+                read_task.cancel()
                 try:
-                    await communicate_task
+                    await read_task
                 except (asyncio.CancelledError, Exception):
                     pass
                 await _terminate_process(proc)
-
                 duration = (time.monotonic() - start_time) * 1000
                 return AgentResult(status="cancelled", duration_ms=duration)
 
-            if communicate_task in done:
-                stdout, stderr = communicate_task.result()
+            if read_task in done:
+                stdout, stderr, error_detected = read_task.result()
+                if error_detected:
+                    await _terminate_process(proc)
+                    duration = (time.monotonic() - start_time) * 1000
+                    error_msg = _extract_opencode_error(stdout)
+                    stdout_str = stdout.decode("utf-8", errors="replace")[:OUTPUT_SIZE_CAP]
+                    stderr_str = stderr.decode("utf-8", errors="replace")[:OUTPUT_SIZE_CAP]
+                    return AgentResult(
+                        status="failed", duration_ms=duration,
+                        error=error_msg, raw_stdout=stdout_str, raw_stderr=stderr_str,
+                    )
             else:
                 await _terminate_process(proc)
                 duration = (time.monotonic() - start_time) * 1000
@@ -137,9 +261,17 @@ async def launch_agent(
                     error=f"Agent exceeded {timeout}s timeout",
                 )
         else:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout
-            )
+            stdout, stderr, error_detected = await _read_stdout_with_error_detection(proc, timeout, output_path)
+            if error_detected:
+                await _terminate_process(proc)
+                duration = (time.monotonic() - start_time) * 1000
+                error_msg = _extract_opencode_error(stdout)
+                stdout_str = stdout.decode("utf-8", errors="replace")[:OUTPUT_SIZE_CAP]
+                stderr_str = stderr.decode("utf-8", errors="replace")[:OUTPUT_SIZE_CAP]
+                return AgentResult(
+                    status="failed", duration_ms=duration,
+                    error=error_msg, raw_stdout=stdout_str, raw_stderr=stderr_str,
+                )
     except asyncio.TimeoutError:
         await _terminate_process(proc)
         duration = (time.monotonic() - start_time) * 1000

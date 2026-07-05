@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Runners — Sisyphus{% endblock %}
+{% block content %}
+<div class="header-bar">
+    <h1>AI Runners</h1>
+    <button class="btn btn-primary" hx-get="/api/runners/new-form" hx-target="body" hx-swap="beforeend">+ Add Runner</button>
+</div>
+<div id="runners-list" hx-get="/api/runners/list" hx-trigger="load, runnersUpdated from:body, every 30s" hx-swap="innerHTML">
+    <div class="empty-state"><p>Loading...</p></div>
+</div>
+{% endblock %}

@@ -169,6 +169,86 @@ async def repos_update(name: str):
     resp.headers["HX-Trigger"] = "reposUpdated"
     return resp
 
+# ── Runner CRUD ────────────────────────────────────────────────────────
+
+@router.get("/runners", response_class=HTMLResponse)
+async def runners_page(request: Request):
+    return _tmpl().TemplateResponse("runners.html", {"request": request, "active_page": "runners"})
+
+@router.get("/api/runners/list", response_class=HTMLResponse)
+async def runners_list_view(request: Request):
+    from core.runners import list_runners
+    return _tmpl().TemplateResponse("runners_list.html", {"request": request, "runners": list_runners()})
+
+@router.get("/api/runners/new-form", response_class=HTMLResponse)
+async def runners_new_form(request: Request):
+    return _tmpl().TemplateResponse("runners_new.html", {"request": request})
+
+@router.post("/api/runners")
+async def runners_add(name: str = Form(...), binary: str = Form(...), type: str = Form("opencode"),
+                       model: str = Form(""), api_key_env: str = Form(""), base_url: str = Form("")):
+    from core.runners import add_runner
+    from fastapi.responses import Response
+    add_runner(name, binary, type, model, api_key_env, base_url)
+    resp = Response(status_code=200)
+    resp.headers["HX-Trigger"] = "runnersUpdated"
+    return resp
+
+@router.get("/api/runners/{runner_id}/edit-form", response_class=HTMLResponse)
+async def runners_edit_form(request: Request, runner_id: str):
+    from core.runners import get_runner
+    runner = get_runner(runner_id)
+    if not runner:
+        return HTMLResponse("<p>Runner not found</p>")
+    return _tmpl().TemplateResponse("runners_edit.html", {"request": request, "runner": runner})
+
+@router.post("/api/runners/{runner_id}/edit")
+async def runners_edit(runner_id: str, name: str = Form(""), binary: str = Form(""),
+                        type: str = Form(""), model: str = Form(""), api_key_env: str = Form(""),
+                        base_url: str = Form("")):
+    from core.runners import update_runner
+    from fastapi.responses import Response
+    fields = {}
+    if name: fields["name"] = name
+    if binary: fields["binary"] = binary
+    if type: fields["type"] = type
+    if model: fields["model"] = model
+    if api_key_env: fields["api_key_env"] = api_key_env
+    if base_url: fields["base_url"] = base_url
+    update_runner(runner_id, **fields)
+    resp = Response(status_code=200)
+    resp.headers["HX-Trigger"] = "runnersUpdated"
+    return resp
+
+@router.post("/api/runners/{runner_id}/delete")
+async def runners_delete(runner_id: str):
+    from core.runners import delete_runner
+    from fastapi.responses import Response
+    delete_runner(runner_id)
+    resp = Response(status_code=200)
+    resp.headers["HX-Trigger"] = "runnersUpdated"
+    return resp
+
+@router.post("/api/runners/{runner_id}/set-default")
+async def runners_set_default(runner_id: str):
+    from core.runners import set_default_runner
+    from fastapi.responses import Response
+    set_default_runner(runner_id)
+    resp = Response(status_code=200)
+    resp.headers["HX-Trigger"] = "runnersUpdated"
+    return resp
+
+@router.post("/api/runners/{runner_id}/health")
+async def runners_health(runner_id: str):
+    from core.runners import health_check
+    from fastapi.responses import Response
+    await health_check(runner_id)
+    resp = Response(status_code=200)
+    resp.headers["HX-Trigger"] = "runnersUpdated"
+    return resp
+
+# ── Board ──────────────────────────────────────────────────────────────
+
 @router.get("/api/cards/board", response_class=HTMLResponse)
 async def board(request: Request):
     conn = get_conn()
