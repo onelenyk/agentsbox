@@ -59,85 +59,6 @@ async def _terminate_process(proc: asyncio.subprocess.Process) -> None:
         await proc.wait()
 
 
-async def _watch_for_result(output_dir: Path, proc: asyncio.subprocess.Process, timeout: float) -> bool:
-    """Poll for result.json after minimum delay; kill process when found. Returns True if exited early."""
-    result_path = output_dir / "result.json"
-    min_wait = 30
-    deadline = time.monotonic() + timeout
-    started = time.monotonic()
-    while time.monotonic() < deadline:
-        elapsed = time.monotonic() - started
-        if elapsed > min_wait and result_path.exists():
-            proc.terminate()
-            return True
-        await asyncio.sleep(2)
-    return False
-
-
-async def _read_stdout_with_error_detection(proc, timeout, output_dir):
-    """Read stdout line by line. Kill process immediately on JSON error.
-
-    Returns (stdout_bytes, stderr_bytes, error_detected).
-    """
-    lines = []
-    stderr_data = b""
-    deadline = time.monotonic() + timeout
-
-    stderr_task = asyncio.create_task(proc.stderr.read())
-
-    while time.monotonic() < deadline:
-        try:
-            line = await asyncio.wait_for(proc.stdout.readline(), timeout=1)
-        except asyncio.TimeoutError:
-            if proc.returncode is not None:
-                break
-            continue
-
-        if not line:
-            break
-
-        line_str = line.decode("utf-8", errors="replace")
-        lines.append(line_str)
-
-        # Detect opencode server errors — only match actual error type JSON events
-        if '"type":"error"' in line_str:
-            await _terminate_process(proc)
-            try:
-                stderr_data = await asyncio.wait_for(stderr_task, timeout=5)
-            except asyncio.TimeoutError:
-                pass
-            return b"".join([ln.encode() for ln in lines]), stderr_data, True
-
-    await proc.wait()
-    try:
-        stderr_data = await asyncio.wait_for(stderr_task, timeout=5)
-    except asyncio.TimeoutError:
-        pass
-
-    return b"".join([ln.encode() for ln in lines]), stderr_data, False
-
-
-def _extract_opencode_error(stdout_bytes: bytes) -> str:
-    """Extract error message from opencode JSON error output."""
-    text = stdout_bytes.decode("utf-8", errors="replace")
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if data.get("type") == "error":
-            error_info = data.get("error", {})
-            name = error_info.get("name", "UnknownError")
-            message = error_info.get("message", "")
-            if message:
-                return f"opencode_error: {name}: {message}"
-            return f"opencode_error: {name}"
-    return "opencode_error: unknown error detected in stdout"
-
-
 async def launch_agent(
     agent_def: dict,
     prompt: str,
@@ -222,91 +143,20 @@ async def launch_agent(
 
     try:
         if cancel_event:
-            read_task = asyncio.create_task(_read_stdout_with_error_detection(proc, timeout, output_path))
+            comm_task = asyncio.create_task(proc.communicate())
             cancel_task = asyncio.create_task(cancel_event.wait())
-            watch_task = asyncio.create_task(_watch_for_result(output_path, proc, timeout))
-
-            done, pending = await asyncio.wait(
-                [read_task, cancel_task, watch_task],
-                timeout=timeout,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-
+            done, _ = await asyncio.wait([comm_task, cancel_task], timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
             if cancel_task in done:
-                for t in [read_task, watch_task]:
-                    t.cancel()
-                try:
-                    await read_task
-                except (asyncio.CancelledError, Exception):
-                    pass
+                comm_task.cancel()
                 await _terminate_process(proc)
-                duration = (time.monotonic() - start_time) * 1000
-                return AgentResult(status="cancelled", duration_ms=duration)
-
-            if read_task in done:
-                stdout, stderr, error_detected = read_task.result()
-                if error_detected:
-                    await _terminate_process(proc)
-                    duration = (time.monotonic() - start_time) * 1000
-                    error_msg = _extract_opencode_error(stdout)
-                    stdout_str = stdout.decode("utf-8", errors="replace")[:OUTPUT_SIZE_CAP]
-                    stderr_str = stderr.decode("utf-8", errors="replace")[:OUTPUT_SIZE_CAP]
-                    return AgentResult(
-                        status="failed", duration_ms=duration,
-                        error=error_msg, raw_stdout=stdout_str, raw_stderr=stderr_str,
-                    )
-            
-            if watch_task in done:
-                await _terminate_process(proc)
-                try:
-                    stdout, stderr, _ = await read_task
-                except Exception:
-                    stdout, stderr = b"", b""
+                return AgentResult(status="cancelled", duration_ms=(time.monotonic()-start_time)*1000)
+            if comm_task in done:
+                stdout, stderr = comm_task.result()
             else:
                 await _terminate_process(proc)
-                duration = (time.monotonic() - start_time) * 1000
-                return AgentResult(
-                    status="timeout",
-                    duration_ms=duration,
-                    error=f"Agent exceeded {timeout}s timeout",
-                )
+                return AgentResult(status="timeout", duration_ms=(time.monotonic()-start_time)*1000, error=f"Agent exceeded {timeout}s timeout")
         else:
-            read_task = asyncio.create_task(_read_stdout_with_error_detection(proc, timeout, output_path))
-            watch_task = asyncio.create_task(_watch_for_result(output_path, proc, timeout))
-
-            done, pending = await asyncio.wait(
-                [read_task, watch_task],
-                timeout=timeout,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-
-            if read_task in done:
-                stdout, stderr, error_detected = read_task.result()
-                if error_detected:
-                    await _terminate_process(proc)
-                    duration = (time.monotonic() - start_time) * 1000
-                    error_msg = _extract_opencode_error(stdout)
-                    stdout_str = stdout.decode("utf-8", errors="replace")[:OUTPUT_SIZE_CAP]
-                    stderr_str = stderr.decode("utf-8", errors="replace")[:OUTPUT_SIZE_CAP]
-                    return AgentResult(
-                        status="failed", duration_ms=duration,
-                        error=error_msg, raw_stdout=stdout_str, raw_stderr=stderr_str,
-                    )
-            
-            if watch_task in done:
-                await _terminate_process(proc)
-                try:
-                    stdout, stderr, _ = await asyncio.wait_for(read_task, timeout=10)
-                except Exception:
-                    stdout, stderr = b"", b""
-            else:
-                await _terminate_process(proc)
-                duration = (time.monotonic() - start_time) * 1000
-                return AgentResult(
-                    status="timeout",
-                    duration_ms=duration,
-                    error=f"Agent exceeded {timeout}s timeout",
-                )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except asyncio.TimeoutError:
         await _terminate_process(proc)
         duration = (time.monotonic() - start_time) * 1000
