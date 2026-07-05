@@ -67,6 +67,7 @@ async def launch_agent(
     timeout: int = 300,
     cancel_event: Optional[asyncio.Event] = None,
     runner_name: Optional[str] = None,
+    step_id: str = "",
 ) -> AgentResult:
     """Spawn AI runner subprocess, capture output, validate result.
 
@@ -188,13 +189,13 @@ async def launch_agent(
     )
 
     run_id = _derive_run_id(output_dir)
-    step_id = output_path.name
+    step = step_id or output_path.name
     log_content = f"=== STDOUT ===\n{stdout_str}\n=== STDERR ===\n{stderr_str}"
-    save_agent_log(run_id, step_id, log_content)
+    save_agent_log(run_id, step, log_content)
 
     # Save stdout as analysis.md
     from core.resources import save_analysis_md
-    save_analysis_md(run_id, step_id, stdout_str)
+    save_analysis_md(run_id, step, stdout_str)
 
     result_json_path = output_path / "result.json"
 
@@ -227,7 +228,7 @@ async def launch_agent(
         error_msg = stderr_str[:200] if proc.returncode != 0 and stderr_str else None
         
         from core.resources import save_result_json
-        save_result_json(run_id, step_id, parsed)
+        save_result_json(run_id, step, parsed)
         
         if proc.returncode != 0:
             return AgentResult(
