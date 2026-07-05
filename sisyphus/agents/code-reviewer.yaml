@@ -12,3 +12,4 @@ output_fields:
   verdict: required
   summary: required
   risk: optional
+runner: opencode-default

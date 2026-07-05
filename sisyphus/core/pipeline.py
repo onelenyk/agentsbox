@@ -360,6 +360,7 @@ async def _run_step(
 
     return await launch_agent(
         agent_def, prompt, worktree_path, output_dir, timeout, cancel_event,
+        runner_name=agent_def.get("runner"),
     )
 
 
