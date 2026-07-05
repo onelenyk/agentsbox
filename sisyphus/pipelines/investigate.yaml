@@ -1,0 +1,6 @@
+name: investigate
+description: "Single-agent code investigation"
+steps:
+  - id: engineer
+    agent: android-engineer
+    depends_on: []

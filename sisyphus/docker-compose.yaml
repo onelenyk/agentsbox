@@ -1,0 +1,11 @@
+services:
+  sisyphus:
+    build: .
+    container_name: sisyphus
+    volumes:
+      - ./workspace:/workspace
+    env_file:
+      - .env
+    tty: true
+    stdin_open: true
+    entrypoint: ["tail", "-f", "/dev/null"]

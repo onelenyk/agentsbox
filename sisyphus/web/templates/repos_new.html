@@ -1,0 +1,15 @@
+<div class="modal-overlay active" onclick="if(event.target===this)this.remove()">
+    <div class="modal" onclick="event.stopPropagation()">
+        <h2>Add Repository</h2>
+        <form hx-post="/api/repos" hx-target="#modal-container" hx-swap="outerHTML" hx-on:after-request="htmx.trigger('#repos-list', 'load')">
+            <div class="form-group"><label>Name</label><input type="text" name="name" placeholder="android-driver" required></div>
+            <div class="form-group"><label>Source (local path or git URL)</label><input type="text" name="source" placeholder="/Users/... or git@..." required></div>
+            <div class="form-group"><label>Platform</label><select name="platform"><option value="android">Android</option><option value="ios">iOS</option><option value="kmp">KMP</option></select></div>
+            <div class="form-group"><label>Branch</label><input type="text" name="branch" value="Staging"></div>
+            <div class="form-actions">
+                <button type="button" class="btn" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+                <button type="submit" class="btn btn-primary" hx-on:after-request="htmx.trigger('#repos-list', 'load')">Clone & Add</button>
+            </div>
+        </form>
+    </div>
+</div>

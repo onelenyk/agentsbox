@@ -1,0 +1,14 @@
+name: "iOS Engineer"
+model: "deepseek"
+role: "iOS code analysis — creates Fix Plan with file-by-file changes"
+access: analyze
+skills: [gitlab-workflow, sdlc-handoff]
+opencode_config:
+  tools: [bash, read, grep, glob]
+  max_tokens: 16000
+  timeout: 1800
+  idle_timeout: 600
+output_fields:
+  status: required
+  summary: required
+  risk: optional

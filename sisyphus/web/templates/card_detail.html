@@ -1,0 +1,65 @@
+<div class="detail-panel">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h2 style="margin:0">{{ card.description[:80] }}</h2>
+        <span class="status status-{{ card.status }}">{{ card.status }}</span>
+    </div>
+    <div class="info-row"><span class="label">Pipeline</span><span class="value">{{ card.pipeline_name }}</span></div>
+    {% if repo_name %}
+    <div class="info-row"><span class="label">Repo</span><span class="value">{{ repo_name }}</span></div>
+    {% endif %}
+    <div class="info-row"><span class="label">Created</span><span class="value">{{ card.created_at[:19] }}</span></div>
+
+    <div style="display:flex;gap:8px;margin-top:16px">
+        {% if card.status == "running" %}
+        <button class="btn btn-danger" hx-post="/api/cards/{{ card.id }}/cancel" hx-swap="none">Cancel</button>
+        {% endif %}
+        {% if card.status == "failed" %}
+        <button class="btn btn-primary" hx-post="/api/cards/{{ card.id }}/resume" hx-swap="none">Resume</button>
+        {% endif %}
+    </div>
+
+    {% if steps %}
+    <h3 style="margin-top:20px">Steps</h3>
+    <table class="steps-table">
+        <tr><th>Agent</th><th>Status</th><th>Order</th><th>Duration</th></tr>
+        {% for s in steps %}
+        <tr>
+            <td>{{ s.agent_name }}</td>
+            <td><span class="status-dot" style="background:{% if s.status=='completed' %}#3fb950{% elif s.status=='running' %}#58a6ff{% elif s.status=='failed' %}#f85149{% else %}#8b949e{% endif %};display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px"></span>{{ s.status }}</td>
+            <td>{{ s.step_order }}</td>
+            <td>{{ s.duration if s.duration else '—' }}</td>
+        </tr>
+        {% if s.error %}
+        <tr>
+            <td colspan="4" style="color:#f85149;font-size:12px;padding:4px 12px 8px">{{ s.error }}</td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+    </table>
+
+    <h3 style="margin-top:16px">Pipeline Flow</h3>
+    <div class="mermaid">
+graph LR
+{% for s in steps %}
+    {{ s.agent_name|replace(' ','_')|replace('-','_') }}["{{ s.agent_name }}"]
+{% endfor %}
+{% for i in range(steps|length - 1) %}
+    {{ steps[i].agent_name|replace(' ','_')|replace('-','_') }} --> {{ steps[i+1].agent_name|replace(' ','_')|replace('-','_') }}
+{% endfor %}
+{% for s in steps %}
+    style {{ s.agent_name|replace(' ','_')|replace('-','_') }} {% if s.status == 'completed' %}fill:#1b3a2d,stroke:#3fb950{% elif s.status == 'running' %}fill:#1f3a5f,stroke:#58a6ff{% elif s.status == 'failed' %}fill:#3d1f1f,stroke:#f85149{% else %}fill:#21262d,stroke:#30363d{% endif %}
+{% endfor %}
+    </div>
+    {% endif %}
+
+    {% if resources %}
+    <h3 style="margin-top:16px">Resources</h3>
+    {% for r in resources %}
+    <div class="resource-item">
+        <a href="#" hx-get="/api/resources/{{ run.id }}/{{ r.filename }}" hx-target="#resource-content">{{ r.filename }}</a>
+        <span style="color:#8b949e;font-size:11px">{{ r.resource_type }}</span>
+    </div>
+    {% endfor %}
+    <div id="resource-content"></div>
+    {% endif %}
+</div>

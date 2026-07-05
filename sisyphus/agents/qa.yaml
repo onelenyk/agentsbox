@@ -1,0 +1,13 @@
+name: "QA Engineer"
+model: "deepseek"
+role: "Validates Fix Plan completeness and consistency across all findings"
+access: read
+skills: [sdlc-handoff]
+opencode_config:
+  tools: [bash, read]
+  max_tokens: 8000
+  timeout: 600
+output_fields:
+  status: required
+  summary: required
+  risk: optional

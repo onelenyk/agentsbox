@@ -1,0 +1,42 @@
+<div id="newCardModal" class="modal-overlay active" onclick="if(event.target===this)this.classList.remove('active')">
+    <div class="modal" onclick="event.stopPropagation()">
+        <h2>New Card</h2>
+        <form hx-post="/api/cards" hx-target="#newCardModal" hx-swap="outerHTML" id="newCardForm">
+            <input type="hidden" name="run_now" id="runNowField" value="0">
+            <div class="form-group">
+                <label>Pipeline</label>
+                <select name="pipeline" required>
+                    {% for p in pipelines %}
+                    <option value="{{ p }}">{{ p }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Platform</label>
+                <select name="platforms" hx-get="/api/repos/resolve" hx-target="#repo-hint" hx-trigger="change">
+                    <option value="android">Android</option>
+                    <option value="ios">iOS</option>
+                    <option value="kmp">KMP</option>
+                </select>
+                <div id="repo-hint" style="font-size:11px;color:#8b949e;margin-top:4px"></div>
+            </div>
+            <div class="form-group">
+                <label>Git Repo URL (optional)</label>
+                <input type="text" name="repo_url" placeholder="/tmp/sisyphus-workspace/repos/test-project">
+            </div>
+            <div class="form-group">
+                <label>Description</label>
+                <textarea name="description" rows="3" required placeholder="What should the agent do?"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Jira URL (optional)</label>
+                <input type="text" name="jira_url" placeholder="https://vanongo.atlassian.net/browse/SLN-...">
+            </div>
+            <div class="form-actions" style="display:flex;gap:8px">
+                <button type="button" class="btn btn-secondary" onclick="this.closest('.modal-overlay').classList.remove('active')">Cancel</button>
+                <button type="submit" class="btn btn-secondary" onclick="document.getElementById('runNowField').value='0'">Add to Backlog</button>
+                <button type="submit" class="btn btn-primary" onclick="document.getElementById('runNowField').value='1'">Create & Run</button>
+            </div>
+        </form>
+    </div>
+</div>

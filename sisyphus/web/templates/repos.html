@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="header-bar">
+    <h1>Repositories</h1>
+    <button class="btn btn-primary" hx-get="/api/repos/new-form" hx-target="body" hx-swap="beforeend">+ Add Repo</button>
+</div>
+<div id="repos-list" hx-get="/api/repos/list" hx-trigger="load, reposUpdated from:body, every 30s" hx-swap="innerHTML">
+    <div class="empty-state"><p>Loading...</p></div>
+</div>
+{% endblock %}

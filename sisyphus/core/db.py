@@ -1,0 +1,40 @@
+import sqlite3
+import os
+
+DB_PATH = os.environ.get("SISYPHUS_DB", os.path.join(os.environ.get("WORKSPACE_ROOT", "/workspace"), "sisyphus.db"))
+
+def get_conn():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=5000")
+    return conn
+
+def init_db():
+    conn = get_conn()
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS cards (
+            id TEXT PRIMARY KEY, pipeline_name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'created', platforms TEXT DEFAULT '["android"]',
+            description TEXT, jira_url TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS runs (
+            id TEXT PRIMARY KEY, card_id TEXT NOT NULL REFERENCES cards(id),
+            status TEXT NOT NULL DEFAULT 'running', loop_count INTEGER DEFAULT 0,
+            started_at TEXT NOT NULL, finished_at TEXT, error TEXT
+        );
+        CREATE TABLE IF NOT EXISTS steps (
+            id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id),
+            agent_name TEXT NOT NULL, step_order INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending', loop_count INTEGER DEFAULT 0,
+            started_at TEXT, completed_at TEXT, result_json TEXT, error TEXT
+        );
+        CREATE TABLE IF NOT EXISTS resources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL REFERENCES runs(id),
+            step_id TEXT NOT NULL REFERENCES steps(id), filename TEXT NOT NULL,
+            resource_type TEXT NOT NULL DEFAULT 'agent_output', step_order INTEGER DEFAULT 0, created_at TEXT NOT NULL
+        );
+    """)
+    conn.commit()
+    conn.close()

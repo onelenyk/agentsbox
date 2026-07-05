@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}History — Sisyphus{% endblock %}
+{% block content %}
+<div class="header-bar">
+    <h1>Run History</h1>
+    <select hx-get="/history" hx-target="#history-content" hx-trigger="change" name="status" 
+            style="background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:6px 12px;border-radius:6px;font-size:13px">
+        <option value="">All Status</option>
+        <option value="completed">Completed</option>
+        <option value="failed">Failed</option>
+        <option value="running">Running</option>
+    </select>
+</div>
+<div id="history-content">
+{% if runs %}
+<table>
+  <thead>
+    <tr><th>Run ID</th><th>Card</th><th>Pipeline</th><th>Status</th><th>Started</th><th>Finished</th></tr>
+  </thead>
+  <tbody>
+  {% for r in runs %}
+  <tr>
+    <td style="font-family:monospace;font-size:12px">{{ r.id[:12] }}</td>
+    <td style="font-family:monospace;font-size:12px">{{ r.card_id[:12] }}</td>
+    <td style="font-size:12px">{{ r.pipeline_name or "—" }}</td>
+    <td><span class="status-badge {{ r.status }}">{{ r.status }}</span></td>
+    <td style="font-size:12px;color:#8b949e">{{ r.started_at[:16] if r.started_at else '—' }}</td>
+    <td style="font-size:12px;color:#8b949e">{{ r.finished_at[:16] if r.finished_at else '—' }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty-state"><p>No runs found.</p></div>
+{% endif %}
+</div>
+{% endblock %}
