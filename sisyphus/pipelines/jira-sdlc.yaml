@@ -1,0 +1,28 @@
+name: jira-sdlc
+description: "Full SDLC pipeline: Jira → Fix Plan (6 steps)"
+steps:
+  - id: pm
+    agent: pm
+    setup:
+      - tool: fetch_jira
+    depends_on: []
+
+  - id: assistant
+    agent: pm-assistant
+    depends_on: pm
+
+  - id: tech-lead
+    agent: tech-lead
+    depends_on: assistant
+
+  - id: engineer
+    agent: android-engineer
+    depends_on: tech-lead
+
+  - id: reviewer
+    agent: code-reviewer
+    depends_on: engineer
+
+  - id: qa
+    agent: qa
+    depends_on: reviewer

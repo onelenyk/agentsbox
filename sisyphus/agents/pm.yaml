@@ -1,0 +1,14 @@
+name: "PM"
+model: "deepseek"
+role: "Product Manager — coordinates SDLC pipeline from Jira to Fix Plan"
+access: read
+skills: [jira-reader]
+opencode_config:
+  tools: [bash, read]
+  max_tokens: 8000
+  timeout: 600
+output_fields:
+  status: required
+  summary: required
+  risk: optional
+  platforms: optional

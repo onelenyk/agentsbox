@@ -1,0 +1,12 @@
+name: "PM Assistant"
+model: "deepseek"
+role: "Gathers context from Jira issues and linked issues"
+access: read
+skills: [jira-reader]
+opencode_config:
+  tools: [bash, read]
+  max_tokens: 8000
+  timeout: 600
+output_fields:
+  status: required
+  summary: required

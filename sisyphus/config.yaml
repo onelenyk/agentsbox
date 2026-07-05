@@ -1,0 +1,21 @@
+default_model: deepseek
+default_timeout: 300
+gitlab:
+  base_url: ${GITLAB_BASE_URL}
+  token: ${GITLAB_TOKEN}
+jira:
+  base_url: ${JIRA_BASE_URL}
+  email: ${JIRA_EMAIL}
+  token: ${JIRA_API_TOKEN}
+log_level: info
+max_review_loops: 3
+openrouter:
+  api_key: ${OPENROUTER_API_KEY}
+  base_url: https://openrouter.ai/api/v1
+repos: []
+scheduler:
+  jobs:
+  - minutes: 60
+    name: orphan-cleanup
+    trigger: interval
+workspace_root: /workspace

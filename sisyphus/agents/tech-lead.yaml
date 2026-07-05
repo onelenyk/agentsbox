@@ -1,0 +1,14 @@
+name: "Tech Lead"
+model: "deepseek"
+role: "Technical analysis — determines affected platforms and root cause"
+access: read
+skills: [sdlc-handoff]
+opencode_config:
+  tools: [bash, read, grep, glob]
+  max_tokens: 12000
+  timeout: 900
+output_fields:
+  status: required
+  summary: required
+  risk: optional
+  platforms: optional

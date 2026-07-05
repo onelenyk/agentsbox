@@ -1,0 +1,14 @@
+name: "Code Reviewer"
+model: "deepseek"
+role: "Reviews Fix Plans — approves or requests changes with specific feedback"
+access: read
+skills: [gitlab-workflow, sdlc-handoff]
+opencode_config:
+  tools: [bash, read, grep, glob]
+  max_tokens: 12000
+  timeout: 1200
+output_fields:
+  status: required
+  verdict: required
+  summary: required
+  risk: optional

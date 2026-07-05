@@ -1,0 +1,5 @@
+.env
+workspace/
+*.pyc
+__pycache__/
+sisyphus.db
