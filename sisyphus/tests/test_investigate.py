@@ -6,7 +6,7 @@ from core.state import create_card, create_run, create_step
 
 class TestInvestigate:
     def test_single_step_pipeline(self, db_path):
-        card = create_card("investigate", ["android"], "find hardcoded colors")
+        card = create_card("investigate", "android", "test")
         run = create_run(card["id"])
         step = create_step(run["id"], "Android Engineer", 1)
         assert step["status"] == "pending"
@@ -14,7 +14,7 @@ class TestInvestigate:
         assert card["pipeline_name"] == "investigate"
 
     def test_invalid_pipeline_reference(self, db_path):
-        card = create_card("nonexistent-pipeline", ["android"], "test")
+        card = create_card("nonexistent-pipeline", "android", "test")
         assert card["pipeline_name"] == "nonexistent-pipeline"
         assert card["status"] == "backlog"
 

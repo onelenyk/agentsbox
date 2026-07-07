@@ -34,7 +34,7 @@ def db_path(tmp_path):
 @pytest.fixture
 def card(db_path):
     from core.state import create_card
-    return create_card("investigate", ["android"], "test card")
+    return create_card("investigate", "test", "test card")
 
 
 @pytest.fixture

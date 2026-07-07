@@ -30,15 +30,13 @@ class TestResolvePipelinePath:
 
 class TestCreateCardOnly:
     def test_create_card_only_basics(self, db_path):
-        card = create_card_only("investigate", ["android"], "test card")
+        card = create_card_only("investigate", "android", "test")
         assert card["status"] == "backlog"
         assert card["id"].startswith("card-")
         assert card["pipeline_name"] == "investigate"
 
     def test_create_card_only_with_jira(self, db_path):
-        card = create_card_only(
-            "jira-sdlc", ["ios"], "jira card", jira_url="https://jira.example.com/ISSUE-1",
-        )
+        card = create_card_only("jira-sdlc", "ios", "test", jira_url="https://jira.example.com/ISSUE-1")
         assert card["status"] == "backlog"
         assert card["pipeline_name"] == "jira-sdlc"
         assert card["jira_url"] == "https://jira.example.com/ISSUE-1"
@@ -48,7 +46,7 @@ class TestCreateAndRun:
     def test_create_and_run_returns_dict(self, db_path):
         with patch("core.pipeline.run_pipeline") as mock_run:
             mock_run.return_value = {"status": "completed", "run_id": "run-mocked"}
-            result = create_and_run("investigate", ["android"], "test run")
+            result = create_and_run("investigate", "android", "test")
         assert isinstance(result, dict)
         assert result["status"] == "completed"
         assert result["run_id"] == "run-mocked"
@@ -56,7 +54,7 @@ class TestCreateAndRun:
     def test_create_and_run_has_run_id(self, db_path):
         with patch("core.pipeline.run_pipeline") as mock_run:
             mock_run.return_value = {"status": "completed", "run_id": "run-mocked"}
-            result = create_and_run("investigate", ["android"], "test run id")
+            result = create_and_run("investigate", "android", "test")
         assert "run_id" in result
         assert result["run_id"].startswith("run-")
 
@@ -64,14 +62,14 @@ class TestCreateAndRun:
 class TestCreateAndRunAsync:
     def test_create_and_run_async_returns_card_id(self, db_path):
         card_id = asyncio.run(
-            create_and_run_async("investigate", ["android"], "async test"),
+            create_and_run_async("investigate", "android", "test"),
         )
         assert isinstance(card_id, str)
         assert card_id.startswith("card-")
 
     def test_create_and_run_async_card_in_db(self, db_path):
         card_id = asyncio.run(
-            create_and_run_async("investigate", ["android"], "async db test"),
+            create_and_run_async("investigate", "android", "test"),
         )
         card = get_card(card_id)
         assert card is not None
@@ -97,7 +95,7 @@ class TestResumeCard:
     def test_resume_card_runs_without_error(self, db_path):
         from core.state import create_run, create_step
 
-        card = create_card_only("investigate", ["android"], "resume test")
+        card = create_card_only("investigate", "android", "test")
         run = create_run(card["id"])
         create_step(run["id"], "Android Engineer", 1)
 
@@ -114,7 +112,7 @@ class TestResumeCard:
             assert "not found" in str(e)
 
     def test_resume_card_no_run_raises(self, db_path):
-        card = create_card_only("investigate", ["android"], "no run resume")
+        card = create_card_only("investigate", "android", "test")
         try:
             asyncio.run(resume_card(card["id"]))
             assert False, "Expected ValueError"
@@ -124,7 +122,7 @@ class TestResumeCard:
 
 class TestCancelCard:
     def test_cancel_card_sets_failed(self, db_path):
-        card = create_card_only("investigate", ["android"], "cancel test")
+        card = create_card_only("investigate", "android", "test")
         asyncio.run(cancel_card(card["id"]))
         updated = get_card(card["id"])
         assert updated is not None
@@ -140,7 +138,7 @@ class TestCancelCard:
 
 class TestGetCardDetail:
     def test_get_card_detail_keys(self, db_path):
-        card = create_card_only("investigate", ["android"], "detail test")
+        card = create_card_only("investigate", "android", "test")
         detail = get_card_detail(card["id"])
         assert isinstance(detail, dict)
         assert "card" in detail
@@ -150,7 +148,7 @@ class TestGetCardDetail:
         assert "repo_name" in detail
 
     def test_get_card_detail_card_matches(self, db_path):
-        card = create_card_only("investigate", ["android"], "detail match")
+        card = create_card_only("investigate", "android", "test")
         detail = get_card_detail(card["id"])
         assert detail["card"]["id"] == card["id"]
 
@@ -171,50 +169,48 @@ class TestGetCardDetail:
 
 class TestListCardsFiltered:
     def test_list_cards_filtered_by_pipeline(self, db_path):
-        create_card_only("investigate", ["android"], "card a")
-        create_card_only("jira-sdlc", ["ios"], "card b")
-        create_card_only("investigate", ["kmp"], "card c")
+        create_card_only("investigate", "android", "test")
+        create_card_only("jira-sdlc", "ios", "test")
+        create_card_only("investigate", "kmp", "test")
 
         result = list_cards_filtered(pipeline="investigate")
         assert len(result) == 2
         assert all(c["pipeline_name"] == "investigate" for c in result)
 
     def test_list_cards_filtered_by_status(self, db_path):
-        create_card_only("investigate", ["android"], "backlog card")
-        create_card_only("jira-sdlc", ["ios"], "another backlog")
+        create_card_only("investigate", "android", "test")
+        create_card_only("jira-sdlc", "ios", "test")
 
         result = list_cards_filtered(status="backlog")
         assert len(result) >= 2
         assert all(c["status"] == "backlog" for c in result)
 
     def test_list_cards_filtered_by_platform(self, db_path):
-        create_card_only("investigate", ["android"], "android card")
-        create_card_only("jira-sdlc", ["ios"], "ios card")
-        create_card_only("investigate", ["kmp"], "kmp card")
+        create_card_only("investigate", "android", "test")
+        create_card_only("jira-sdlc", "ios", "test")
+        create_card_only("investigate", "kmp", "test")
 
-        result = list_cards_filtered(platform="android")
+        result = list_cards_filtered(repo="android")
         assert len(result) >= 1
         for c in result:
-            plats = c.get("platforms", "[]")
-            import json
-            assert "android" in (json.loads(plats) if isinstance(plats, str) else plats)
+            assert c.get("repo_name") == "android"
 
     def test_list_cards_filtered_combined(self, db_path):
-        create_card_only("investigate", ["android"], "investigate android")
-        create_card_only("jira-sdlc", ["android"], "jira android")
-        create_card_only("investigate", ["ios"], "investigate ios")
+        create_card_only("investigate", "android", "test")
+        create_card_only("jira-sdlc", "android", "test")
+        create_card_only("investigate", "ios", "test")
 
-        result = list_cards_filtered(pipeline="investigate", platform="android")
+        result = list_cards_filtered(pipeline="investigate", repo="android")
         assert len(result) == 1
         assert result[0]["pipeline_name"] == "investigate"
 
     def test_list_cards_filtered_no_match(self, db_path):
-        create_card_only("investigate", ["android"], "only card")
+        create_card_only("investigate", "android", "test")
         result = list_cards_filtered(pipeline="nonexistent")
         assert result == []
 
     def test_list_cards_filtered_all(self, db_path):
-        create_card_only("investigate", ["android"], "card a")
-        create_card_only("jira-sdlc", ["ios"], "card b")
+        create_card_only("investigate", "android", "test")
+        create_card_only("jira-sdlc", "ios", "test")
         result = list_cards_filtered()
         assert len(result) >= 2

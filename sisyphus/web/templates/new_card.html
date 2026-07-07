@@ -12,17 +12,12 @@
                 </select>
             </div>
             <div class="form-group">
-                <label>Platform</label>
-                <select name="platforms" hx-get="/api/repos/resolve" hx-target="#repo-hint" hx-trigger="change">
-                    <option value="android">Android</option>
-                    <option value="ios">iOS</option>
-                    <option value="kmp">KMP</option>
+                <label>Repository</label>
+                <select name="repo" required>
+                    {% for r in repos %}
+                    <option value="{{ r.name }}">{{ r.name }}</option>
+                    {% endfor %}
                 </select>
-                <div id="repo-hint" style="font-size:11px;color:#8b949e;margin-top:4px"></div>
-            </div>
-            <div class="form-group">
-                <label>Git Repo URL (optional)</label>
-                <input type="text" name="repo_url" placeholder="/tmp/sisyphus-workspace/repos/test-project">
             </div>
             <div class="form-group">
                 <label>Description</label>

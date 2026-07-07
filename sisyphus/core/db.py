@@ -18,6 +18,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS cards (
             id TEXT PRIMARY KEY, pipeline_name TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'created', platforms TEXT DEFAULT '["android"]',
+            repo_name TEXT DEFAULT '',
             description TEXT, jira_url TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS runs (
@@ -37,5 +38,9 @@ def init_db():
             resource_type TEXT NOT NULL DEFAULT 'agent_output', step_order INTEGER DEFAULT 0, created_at TEXT NOT NULL
         );
     """)
+    try:
+        conn.execute("ALTER TABLE cards ADD COLUMN repo_name TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass  # column already exists
     conn.commit()
     conn.close()

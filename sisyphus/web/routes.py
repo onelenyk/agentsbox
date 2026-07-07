@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 from fastapi import APIRouter, Request, Form
 from fastapi.responses import HTMLResponse
@@ -36,7 +35,8 @@ async def new_form(request: Request):
     import yaml
     pd = Path(__file__).parent.parent / "pipelines"
     pipe_names = [f.stem for f in sorted(pd.glob("*.yaml"))]
-    return _tmpl().TemplateResponse("new_card.html", {"request": request, "pipelines": pipe_names})
+    from core.repos import list_repos
+    return _tmpl().TemplateResponse("new_card.html", {"request": request, "pipelines": pipe_names, "repos": list_repos()})
 
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
@@ -102,7 +102,7 @@ async def repos_new_form(request: Request):
     return _tmpl().TemplateResponse("repos_new.html", {"request": request})
 
 @router.post("/api/repos")
-async def repos_add(name: str = Form(...), source: str = Form(...), platform: str = Form(...), branch: str = Form("Staging")):
+async def repos_add(name: str = Form(...), source: str = Form(...), platform: str = Form(""), branch: str = Form("main")):
     from core.repos import add_repo
     from fastapi.responses import Response
     try:
@@ -112,14 +112,6 @@ async def repos_add(name: str = Form(...), source: str = Form(...), platform: st
         return resp
     except Exception as e:
         return HTMLResponse(f'<div class="error-banner">Error: {e}</div>')
-
-@router.get("/api/repos/resolve")
-async def repos_resolve(platform: str = "android"):
-    from core.repos import get_repo_by_platform
-    repo = get_repo_by_platform(platform)
-    if repo:
-        return f"Repo: {repo['name']} ({repo['branch']})"
-    return "No repo configured for this platform"
 
 @router.get("/api/repos/health")
 async def repos_health():
@@ -283,14 +275,7 @@ async def board(request: Request):
     
     for col_cards in cols.values():
         for card in col_cards:
-            platforms = card.get("platforms", "[]")
-            if isinstance(platforms, str):
-                try:
-                    card["platform_list"] = json.loads(platforms)
-                except (json.JSONDecodeError, TypeError):
-                    card["platform_list"] = []
-            else:
-                card["platform_list"] = platforms if isinstance(platforms, list) else []
+            card["repo_name"] = card.get("repo_name", "")
     return _tmpl().TemplateResponse("board_content.html", {"request": request, "columns": cols})
 
 @router.get("/api/cards/{card_id}/detail", response_class=HTMLResponse)
@@ -315,13 +300,12 @@ async def resource_view(request: Request, run_id: str, filename: str, step_id: s
     return HTMLResponse(f'<pre style="font-size:12px;color:#c9d1d9;background:#0d1117;padding:12px;border-radius:6px;overflow-x:auto;max-height:300px;margin-top:8px">{content}</pre>')
 
 @router.post("/api/cards")
-async def create(request: Request, pipeline: str = Form(...), platforms: str = Form("android"), description: str = Form(...), jira_url: str = Form(""), repo_url: str = Form(""), run_now: str = Form("0")):
+async def create(request: Request, pipeline: str = Form(...), repo: str = Form(...), description: str = Form(...), jira_url: str = Form(""), repo_url: str = Form(""), run_now: str = Form("0")):
     from core.operations import create_card_only, create_and_run_async
-    pl = [p.strip() for p in platforms.split(",")]
     if run_now == "1":
-        await create_and_run_async(pipeline, pl, description, jira_url or None, repo_url or None)
+        await create_and_run_async(pipeline, repo, description, jira_url or None, repo_url or None)
     else:
-        create_card_only(pipeline, pl, description, jira_url or None)
+        create_card_only(pipeline, repo, description, jira_url or None)
     from fastapi.responses import Response
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "cardCreated"

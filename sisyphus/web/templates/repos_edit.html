@@ -3,7 +3,6 @@
         <h2>Edit {{ repo.name }}</h2>
         <form hx-post="/api/repos/{{ repo.name }}/edit" hx-target="#modal-container" hx-swap="outerHTML" hx-on:after-request="htmx.trigger('#repos-list', 'load')">
             <div class="form-group"><label>Source</label><input type="text" name="source" value="{{ repo.source }}"></div>
-            <div class="form-group"><label>Platform</label><select name="platform"><option value="android" {{ 'selected' if repo.platform=='android' else '' }}>Android</option><option value="ios" {{ 'selected' if repo.platform=='ios' else '' }}>iOS</option><option value="kmp" {{ 'selected' if repo.platform=='kmp' else '' }}>KMP</option></select></div>
             <div class="form-group"><label>Branch</label><input type="text" name="branch" value="{{ repo.branch }}"></div>
             <div class="form-actions">
                 <button type="button" class="btn" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
