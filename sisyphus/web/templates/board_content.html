@@ -11,9 +11,9 @@
                 {% if card.current_agent %}
                 <span class="badge">{{ card.current_agent }}</span>
                 {% endif %}
-                {% for p in card.platform_list %}
-                <span class="platform-badge">{{ p }}</span>
-                {% endfor %}
+                {% if card.repo_name %}
+                <span class="repo-badge">{{ card.repo_name }}</span>
+                {% endif %}
             </div>
             <div class="card-stats">
                 <span class="stat-time-created" data-created="{{ card.created_at }}"></span>

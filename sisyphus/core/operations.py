@@ -17,7 +17,7 @@ from typing import Optional
 
 from core.db import get_conn
 from core.fsm import transition_step
-from core.repos import get_repo_by_platform
+from core.repos import get_repo
 from core.resources import list_resources
 from core.state import (
     create_card,
@@ -56,7 +56,7 @@ def resolve_pipeline_path(name: str) -> Path:
 
 def create_card_only(
     pipeline_name: str,
-    platforms: list,
+    repo_name: str,
     description: str,
     jira_url: Optional[str] = None,
 ) -> dict:
@@ -65,7 +65,7 @@ def create_card_only(
     ``core.state.create_card`` already defaults to ``status='backlog'``.
     """
     return create_card(
-        pipeline_name, platforms, description or "No description", jira_url,
+        pipeline_name, repo_name, description or "No description", jira_url,
     )
 
 
@@ -73,7 +73,7 @@ def create_card_only(
 
 def create_and_run(
     pipeline_name: str,
-    platforms: list,
+    repo_name: str,
     description: str,
     jira_url: Optional[str] = None,
     repo_url: Optional[str] = None,
@@ -85,7 +85,7 @@ def create_and_run(
     """
     from core.pipeline import run_pipeline
 
-    card = create_card_only(pipeline_name, platforms, description, jira_url)
+    card = create_card_only(pipeline_name, repo_name, description, jira_url)
     path = str(resolve_pipeline_path(pipeline_name))
     return asyncio.run(run_pipeline(path, card, gitlab_repo_url=repo_url))
 
@@ -94,13 +94,13 @@ def create_and_run(
 
 async def create_and_run_async(
     pipeline_name: str,
-    platforms: list,
+    repo_name: str,
     description: str,
     jira_url: Optional[str] = None,
     repo_url: Optional[str] = None,
 ) -> str:
     """Create card + fire pipeline in background. Returns *card_id* immediately."""
-    card = create_card_only(pipeline_name, platforms, description, jira_url)
+    card = create_card_only(pipeline_name, repo_name, description, jira_url)
     update_card_status(card["id"], "created")
     asyncio.create_task(
         _run_bg_async(pipeline_name, card, gitlab_repo_url=repo_url),
@@ -115,20 +115,19 @@ async def run_card(
 ) -> None:
     """Run pipeline for an existing card.
 
-    Auto-resolves *repo_url* from the card's first platform via
-    ``get_repo_by_platform`` when none is provided.
+    Auto-resolves *repo_url* from the card's ``repo_name`` via
+    ``get_repo`` when none is provided.
     """
     card = get_card(card_id)
     if not card:
         raise ValueError(f"Card {card_id} not found")
 
-    # Auto-resolve repo from platform
-    if not repo_url:
-        platforms = _parse_platforms(card.get("platforms", "[]"))
-        if platforms:
-            repo = get_repo_by_platform(platforms[0])
-            if repo:
-                repo_url = repo["source"]
+    # Auto-resolve repo from repo_name
+    repo_name = card.get("repo_name", "")
+    if not repo_url and repo_name:
+        repo = get_repo(repo_name)
+        if repo:
+            repo_url = repo["source"]
 
     update_card_status(card_id, "running")
     asyncio.create_task(
@@ -139,11 +138,11 @@ async def run_card(
 # ── 6. resume_card ─────────────────────────────────────────────────────
 
 async def resume_card(card_id: str) -> None:
-    """Resume a failed card from the last failed/pending step.
+    """Resume a failed card.
 
-    Finds ALL steps in (failed, timeout, error, cancelled, pending) for
-    the latest run, resets each to ``"running"`` via ``transition_step``,
-    then re-runs the pipeline synchronously.
+    Finds all failed/pending steps in the latest run, marks them as
+    cancelled (superseded), and fires a fresh pipeline execution in
+    the background.
     """
     card = get_card(card_id)
     if not card:
@@ -166,12 +165,17 @@ async def resume_card(card_id: str) -> None:
     ]
 
     for s in failed_pending:
-        transition_step(s["id"], "running")
+        # Reset to running (now allowed by FSM for terminal statuses),
+        # then immediately cancel — marks old steps as superseded so they
+        # don't appear as orphaned "running" steps.
+        if transition_step(s["id"], "running"):
+            transition_step(s["id"], "cancelled", error="superseded_by_resume")
 
-    from core.pipeline import run_pipeline
+    update_card_status(card_id, "running")
 
-    path = str(resolve_pipeline_path(card["pipeline_name"]))
-    await run_pipeline(path, card)
+    # Fire background execution via the shared helper so card/run
+    # statuses stay in sync and cancel events are wired correctly.
+    asyncio.create_task(_run_bg_async(card["pipeline_name"], card))
 
 
 # ── 7. cancel_card ─────────────────────────────────────────────────────
@@ -224,7 +228,8 @@ def get_card_detail(card_id: str) -> dict:
 
     Returns a dict with keys: ``card``, ``run`` (latest), ``steps``
     (with duration computed from started_at/completed_at),
-    ``resources``, and ``repo_name`` (resolved from the first platform).
+    ``resources``, and ``repo_name`` (resolved from ``repo_name`` field
+    with backward compat for legacy ``platforms`` field).
     """
     card = get_card(card_id)
     if not card:
@@ -257,9 +262,20 @@ def get_card_detail(card_id: str) -> dict:
         else:
             s["duration"] = "\u2014"
 
-    # Resolve repo_name from first platform
-    platforms = _parse_platforms(card.get("platforms", "[]"))
-    repo = get_repo_by_platform(platforms[0]) if platforms else None
+    # Resolve repo_name from card's repo_name field, with
+    # backward compat for old cards that only have platforms.
+    repo_name = card.get("repo_name", "")
+    if not repo_name:
+        raw = card.get("platforms", "[]")
+        try:
+            platforms = json.loads(raw) if isinstance(raw, str) else (raw if isinstance(raw, list) else [])
+        except (json.JSONDecodeError, TypeError):
+            platforms = []
+        if platforms:
+            from core.repos import get_repo_by_platform as _resolve
+            repo = _resolve(platforms[0])
+            repo_name = repo["name"] if repo else None
+    repo = get_repo(repo_name) if repo_name else None
     repo_name = repo["name"] if repo else None
 
     return {
@@ -276,7 +292,7 @@ def get_card_detail(card_id: str) -> dict:
 def list_cards_filtered(
     pipeline: Optional[str] = None,
     status: Optional[str] = None,
-    platform: Optional[str] = None,
+    repo: Optional[str] = None,
 ) -> list:
     """List cards with optional filters. Returns raw card dicts."""
     cards = list_cards(status_filter=status)
@@ -285,10 +301,8 @@ def list_cards_filtered(
     for c in cards:
         if pipeline and c.get("pipeline_name") != pipeline:
             continue
-        if platform:
-            plats = _parse_platforms(c.get("platforms", "[]"))
-            if platform not in plats:
-                continue
+        if repo and c.get("repo_name") != repo:
+            continue
         filtered.append(c)
 
     return filtered
@@ -349,15 +363,4 @@ def _kill_opencode_for_card(card_id: str) -> None:
         pass  # pgrep might fail — non-critical
 
 
-# ── Internal: _parse_platforms ─────────────────────────────────────────
 
-def _parse_platforms(raw) -> list:
-    """Parse platforms field (JSON string or list) into a Python list."""
-    if isinstance(raw, list):
-        return raw
-    if isinstance(raw, str):
-        try:
-            return json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            return []
-    return []

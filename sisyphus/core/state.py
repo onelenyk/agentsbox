@@ -10,10 +10,10 @@ _VALID_TRANSITIONS = {
     "pending": {"running"},
     "running": {"completed", "failed", "timeout", "cancelled", "error"},
     "completed": set(),
-    "failed": set(),
-    "timeout": set(),
-    "cancelled": set(),
-    "error": {"running"},  # retry from error allowed
+    "failed": {"running"},
+    "timeout": {"running"},
+    "cancelled": {"running"},
+    "error": {"running"},
 }
 
 _TERMINAL_STATES = {"completed", "failed", "timeout", "cancelled"}
@@ -32,20 +32,19 @@ def _dict_from_row(row) -> dict:
 
 def create_card(
     pipeline_name: str,
-    platforms: list,
+    repo_name: str,
     description: str,
     jira_url: Optional[str] = None,
 ) -> dict:
     card_id = f"card-{uuid4().hex[:8]}"
     now = _now()
-    platforms_json = json.dumps(platforms)
     conn = get_conn()
     conn.execute(
         """
-        INSERT INTO cards (id, pipeline_name, status, platforms, description, jira_url, created_at, updated_at)
-        VALUES (?, ?, 'backlog', ?, ?, ?, ?, ?)
+        INSERT INTO cards (id, pipeline_name, status, platforms, repo_name, description, jira_url, created_at, updated_at)
+        VALUES (?, ?, 'backlog', ?, ?, ?, ?, ?, ?)
         """,
-        (card_id, pipeline_name, platforms_json, description, jira_url, now, now),
+        (card_id, pipeline_name, json.dumps([]), repo_name, description, jira_url, now, now),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM cards WHERE id = ?", (card_id,)).fetchone()

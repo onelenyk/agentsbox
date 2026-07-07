@@ -9,7 +9,7 @@ from core.schemas import BaseResult
 
 class TestPipelineBasics:
     def test_create_card(self, db_path):
-        card = create_card("jira-sdlc", ["android"], "test jira task")
+        card = create_card("jira-sdlc", "android", "test")
         assert card["status"] == "backlog"
         assert card["pipeline_name"] == "jira-sdlc"
         assert card["id"].startswith("card-")

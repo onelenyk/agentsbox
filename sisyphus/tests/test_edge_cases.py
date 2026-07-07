@@ -42,8 +42,8 @@ class TestCrashRecovery:
 
 class TestConcurrentRuns:
     def test_two_parallel_cards(self, db_path):
-        card1 = create_card("investigate", ["android"], "task 1")
-        card2 = create_card("investigate", ["ios"], "task 2")
+        card1 = create_card("investigate", "android", "test")
+        card2 = create_card("investigate", "ios", "test")
 
         run1 = create_run(card1["id"])
         run2 = create_run(card2["id"])
@@ -92,15 +92,15 @@ class TestConcurrentRuns:
 
 class TestStateQueries:
     def test_list_cards_filtered(self, db_path):
-        create_card("investigate", ["android"], "task a")
-        create_card("jira-sdlc", ["ios"], "task b")
-        create_card("investigate", ["kmp"], "task c")
+        create_card("investigate", "android", "test")
+        create_card("jira-sdlc", "ios", "test")
+        create_card("investigate", "kmp", "test")
 
         all_cards = list_cards()
         assert len(all_cards) >= 3
 
     def test_list_cards_with_status_filter(self, db_path):
-        create_card("investigate", ["android"], "task filter test")
+        create_card("investigate", "android", "test")
 
         backlog_cards = list_cards(status_filter="backlog")
         assert len(backlog_cards) >= 1
@@ -161,7 +161,7 @@ class TestFSMEdgeCases:
 
         transition_step(step["id"], "running")
         assert transition_step(step["id"], "timeout")
-        assert not transition_step(step["id"], "running")
+        assert transition_step(step["id"], "running")
 
     def test_unknown_step(self, db_path):
         assert not transition_step("step-nonexistent", "running")
@@ -176,11 +176,7 @@ class TestFSMEdgeCases:
 
 class TestIdempotency:
     def test_card_get_card_roundtrip(self, db_path, card):
-        fetched = create_card(
-            pipeline_name="jira-sdlc",
-            platforms=["android"],
-            description="roundtrip test",
-        )
+        fetched = create_card(pipeline_name="jira-sdlc", repo_name="android", description="roundtrip test")
         assert fetched["id"] != card["id"]
 
         refetched = list(None for c in list_cards() if c["id"] == fetched["id"])

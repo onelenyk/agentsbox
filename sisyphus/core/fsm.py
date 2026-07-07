@@ -4,6 +4,10 @@ from .state import update_step_status, get_step
 ALLOWED_TRANSITIONS = {
     "pending": ["running"],
     "running": ["completed", "failed", "timeout", "cancelled", "error"],
+    "failed": ["running"],
+    "timeout": ["running"],
+    "error": ["running"],
+    "cancelled": ["running"],
 }
 
 TERMINAL_STATUSES = {"completed", "failed", "timeout", "cancelled", "error"}
@@ -22,8 +26,7 @@ def transition_step(
 
     current_status = step.get("status", "pending")
 
-    # Terminal statuses reject ALL further transitions
-    if current_status in TERMINAL_STATUSES:
+    if current_status in TERMINAL_STATUSES and new_status != "running":
         return False
 
     # Check if transition is allowed

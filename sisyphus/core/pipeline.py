@@ -92,17 +92,14 @@ async def run_pipeline(
     bare_path = None
     repo_name = None
 
-    # Auto-resolve repo from platform if no URL provided
+    # Auto-resolve repo from repo_name
     if not gitlab_repo_url:
-        from core.repos import get_repo_by_platform
-        platform = card.get("platforms", ["android"])
-        if isinstance(platform, str):
-            platform = json.loads(platform)
-        if isinstance(platform, list):
-            platform = platform[0] if platform else "android"
-        repo = get_repo_by_platform(platform)
-        if repo:
-            gitlab_repo_url = repo["source"]
+        repo_name = card.get("repo_name", "")
+        if repo_name:
+            from core.repos import get_repo
+            repo = get_repo(repo_name)
+            if repo:
+                gitlab_repo_url = repo["source"]
 
     if gitlab_repo_url:
         repo_name = get_repo_name_from_url(gitlab_repo_url)
@@ -317,6 +314,8 @@ async def run_pipeline(
                 except Exception:
                     pass
 
+    update_card_status(card["id"], "completed")
+    update_run_status(run_id, "completed")
     return {"run_id": run_id, "status": "completed"}
 
 

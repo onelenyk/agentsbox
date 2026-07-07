@@ -43,24 +43,51 @@ def cli():
 @cli.command()
 @click.option("--desc", help="Task description")
 @click.option("--jira", help="Jira issue URL")
-@click.option("--platforms", default="android", help="Comma-separated platforms")
+@click.option("--repo", default=None, help="Repository name (auto-detected if not set)")
 @click.option("--pipeline", default="investigate", help="Pipeline name")
 @click.option("--detach", is_flag=True, help="Run in background (fire-and-forget)")
-def run(desc, jira, platforms, pipeline, detach):
+def run(desc, jira, repo, pipeline, detach):
     """Create a card and run a pipeline."""
     from core.operations import create_and_run, create_and_run_async
+    from core.repos import list_repos
 
-    platform_list = [p.strip() for p in platforms.split(",")]
+    if repo is None:
+        repos = list_repos()
+        if not repos:
+            click.echo("ERROR: No repos configured. Add one at /repos or via --repo.")
+            return
+        repo = repos[0]["name"]
 
     if detach:
-        card_id = asyncio.run(create_and_run_async(pipeline, platform_list, desc or "No description", jira))
+        card_id = asyncio.run(create_and_run_async(pipeline, repo, desc or "No description", jira))
         click.echo(f"Card {card_id} created. Running in background.")
     else:
-        result = create_and_run(pipeline, platform_list, desc or "No description", jira)
+        result = create_and_run(pipeline, repo, desc or "No description", jira)
         if result["status"] == "completed":
             click.echo(f"Pipeline completed.")
         else:
             click.echo(f"Pipeline failed: {result.get('error', 'Unknown error')}")
+
+
+@cli.command()
+@click.option("--desc", help="Task description")
+@click.option("--jira", help="Jira issue URL")
+@click.option("--repo", default=None, help="Repository name (auto-detected if not set)")
+@click.option("--pipeline", default="investigate", help="Pipeline name")
+def create(desc, jira, repo, pipeline):
+    """Create a card in backlog (no pipeline execution)."""
+    from core.operations import create_card_only
+    from core.repos import list_repos
+
+    if repo is None:
+        repos = list_repos()
+        if not repos:
+            click.echo("ERROR: No repos configured. Add one at /repos or via --repo.")
+            return
+        repo = repos[0]["name"]
+
+    card = create_card_only(pipeline, repo, desc or "No description", jira)
+    click.echo(f"Card {card['id']} created in backlog.")
 
 
 @cli.command()
@@ -117,12 +144,12 @@ def status(card_id, verbose):
             click.echo("No cards found.")
             return
 
-        click.echo(f"{'CARD':<12} {'PIPELINE':<16} {'STATUS':<12} {'PLATFORMS':<20}")
+        click.echo(f"{'CARD':<12} {'PIPELINE':<16} {'STATUS':<12} {'REPO':<20}")
         click.echo("-" * 62)
         for c in cards:
-            platforms = c.get("platforms", "[]")
+            repo_name = c.get("repo_name", "")
             click.echo(
-                f"{c['id']:<12} {c['pipeline_name']:<16} {c['status']:<12} {platforms:<20}"
+                f"{c['id']:<12} {c['pipeline_name']:<16} {c['status']:<12} {repo_name:<20}"
             )
 
 
@@ -217,22 +244,23 @@ def resume(card_id):
 @cli.command("list")
 @click.option("--pipeline", help="Filter by pipeline name")
 @click.option("--status", help="Filter by status (created, running, completed, failed)")
-@click.option("--platform", help="Filter by platform")
-def list_cmd(pipeline, status, platform):
+@click.option("--repo", help="Filter by repository name")
+def list_cmd(pipeline, status, repo):
     """List cards with optional filters."""
     from core.operations import list_cards_filtered
 
-    cards = list_cards_filtered(pipeline=pipeline, status=status, platform=platform)
+    cards = list_cards_filtered(pipeline=pipeline, status=status, repo=repo)
     if not cards:
         click.echo("No cards found.")
         return
 
-    click.echo(f"{'CARD':<12} {'PIPELINE':<16} {'STATUS':<12} {'CREATED':<20}")
-    click.echo("-" * 62)
+    click.echo(f"{'CARD':<12} {'PIPELINE':<16} {'STATUS':<12} {'REPO':<20} {'CREATED':<20}")
+    click.echo("-" * 82)
     for c in cards:
         created = c.get("created_at", "")[:19]
+        repo_name = c.get("repo_name", "")
         click.echo(
-            f"{c['id']:<12} {c['pipeline_name']:<16} {c['status']:<12} {created:<20}"
+            f"{c['id']:<12} {c['pipeline_name']:<16} {c['status']:<12} {repo_name:<20} {created:<20}"
         )
 
 
