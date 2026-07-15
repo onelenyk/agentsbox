@@ -253,16 +253,14 @@ def sisyphus_server_start(port: int = 7677) -> dict[str, Any]:
     if result.stdout.strip():
         return {"running": True, "pid": result.stdout.strip(), "port": port, "url": f"http://localhost:{port}"}
 
-    # Start server in background
-    web_dir = os.path.join(os.path.dirname(__file__), "web")
+    ws_root = os.environ.get("WORKSPACE_ROOT", os.path.join(os.path.dirname(__file__), "workspace"))
     proc = subprocess.Popen(
         ["python3", "-m", "uvicorn", "web.app:app", "--host", "0.0.0.0", "--port", str(port)],
-        env={
-            **os.environ,
-            "WORKSPACE_ROOT": os.environ.get("WORKSPACE_ROOT", "./workspace"),
-        },
+        env={**os.environ, "WORKSPACE_ROOT": ws_root},
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL,
+        close_fds=True,
         start_new_session=True,
     )
     return {"running": True, "pid": proc.pid, "port": port, "url": f"http://localhost:{port}"}
