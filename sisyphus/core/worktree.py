@@ -32,7 +32,7 @@ def create_worktree(bare_path: str, run_id: str, step_id: str,
     This avoids Git admin directory name truncation issues when
     worktrees are nested inside the bare clone.
     """
-    worktree_dir = REPOS_DIR / "worktrees"
+    worktree_dir = (REPOS_DIR / "worktrees").resolve()
     worktree_path = worktree_dir / f"{run_id}_{step_id}"
 
     if worktree_path.exists():
@@ -76,7 +76,7 @@ def create_worktree(bare_path: str, run_id: str, step_id: str,
 def remove_worktree(bare_path: str, run_id: str, step_id: str,
                     force: bool = True) -> bool:
     """Remove a git worktree. Returns True if successful."""
-    worktree_path = REPOS_DIR / "worktrees" / f"{run_id}_{step_id}"
+    worktree_path = (REPOS_DIR / "worktrees" / f"{run_id}_{step_id}").resolve()
 
     if not worktree_path.exists():
         return True
