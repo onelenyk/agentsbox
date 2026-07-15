@@ -241,6 +241,63 @@ def sisyphus_runner_set_default(name: str) -> dict[str, Any]:
     return {"success": True, "name": name}
 
 
+# ── Server (3) ───────────────────────────────────────────────────────────────
+
+def sisyphus_server_start(port: int = 7677) -> dict[str, Any]:
+    """Start the Sisyphus web server (uvicorn) on specified port."""
+    import os
+    import subprocess
+
+    # Check if already running
+    result = subprocess.run(["lsof", "-ti", f":{port}"], capture_output=True, text=True)
+    if result.stdout.strip():
+        return {"running": True, "pid": result.stdout.strip(), "port": port, "url": f"http://localhost:{port}"}
+
+    # Start server in background
+    web_dir = os.path.join(os.path.dirname(__file__), "web")
+    proc = subprocess.Popen(
+        ["python3", "-m", "uvicorn", "web.app:app", "--host", "0.0.0.0", "--port", str(port)],
+        env={
+            **os.environ,
+            "WORKSPACE_ROOT": os.environ.get("WORKSPACE_ROOT", "./workspace"),
+        },
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    return {"running": True, "pid": proc.pid, "port": port, "url": f"http://localhost:{port}"}
+
+
+def sisyphus_server_stop(port: int = 7677) -> dict[str, Any]:
+    """Stop the Sisyphus web server running on specified port."""
+    import os
+    import signal
+    import subprocess
+
+    result = subprocess.run(["lsof", "-ti", f":{port}"], capture_output=True, text=True)
+    if not result.stdout.strip():
+        return {"running": False, "port": port}
+    for pid_str in result.stdout.strip().split("\n"):
+        try:
+            os.kill(int(pid_str), signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    return {"running": False, "port": port, "stopped": True}
+
+
+def sisyphus_server_status(port: int = 7677) -> dict[str, Any]:
+    """Check if the Sisyphus web server is running on specified port."""
+    import subprocess
+
+    result = subprocess.run(["lsof", "-ti", f":{port}"], capture_output=True, text=True)
+    running = bool(result.stdout.strip())
+    return {
+        "running": running,
+        "port": port,
+        "pid": result.stdout.strip() if running else None,
+    }
+
+
 # ── Tool Registry ────────────────────────────────────────────────────────────
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
@@ -558,6 +615,51 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "required": ["name"],
         },
     },
+    {
+        "name": "sisyphus_server_start",
+        "description": "Start the Sisyphus web server (uvicorn) on specified port",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "port": {
+                    "type": "integer",
+                    "description": "Port to listen on (default: 7677)",
+                    "default": 7677,
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "sisyphus_server_stop",
+        "description": "Stop the Sisyphus web server running on specified port",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "port": {
+                    "type": "integer",
+                    "description": "Port to kill (default: 7677)",
+                    "default": 7677,
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "sisyphus_server_status",
+        "description": "Check if the Sisyphus web server is running on specified port",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "port": {
+                    "type": "integer",
+                    "description": "Port to check (default: 7677)",
+                    "default": 7677,
+                },
+            },
+            "required": [],
+        },
+    },
 ]
 
 
@@ -578,6 +680,9 @@ HANDLERS: dict[str, Any] = {
     "sisyphus_delete_runner": sisyphus_delete_runner,
     "sisyphus_runner_health": sisyphus_runner_health,
     "sisyphus_runner_set_default": sisyphus_runner_set_default,
+    "sisyphus_server_start": sisyphus_server_start,
+    "sisyphus_server_stop": sisyphus_server_stop,
+    "sisyphus_server_status": sisyphus_server_status,
 }
 
 
