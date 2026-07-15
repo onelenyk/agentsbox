@@ -6,7 +6,6 @@ become thin wrappers calling these functions.
 """
 
 import asyncio
-import json
 import logging
 import os
 import signal
@@ -262,20 +261,7 @@ def get_card_detail(card_id: str) -> dict:
         else:
             s["duration"] = "\u2014"
 
-    # Resolve repo_name from card's repo_name field, with
-    # backward compat for old cards that only have platforms.
-    repo_name = card.get("repo_name", "")
-    if not repo_name:
-        raw = card.get("platforms", "[]")
-        try:
-            platforms = json.loads(raw) if isinstance(raw, str) else (raw if isinstance(raw, list) else [])
-        except (json.JSONDecodeError, TypeError):
-            platforms = []
-        if platforms:
-            from core.repos import get_repo_by_platform as _resolve
-            repo = _resolve(platforms[0])
-            repo_name = repo["name"] if repo else None
-    repo = get_repo(repo_name) if repo_name else None
+    repo = get_repo(card.get("repo_name", "")) if card.get("repo_name") else None
     repo_name = repo["name"] if repo else None
 
     return {
