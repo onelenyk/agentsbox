@@ -25,12 +25,6 @@ def get_repo(name):
             return r
     return None
 
-def get_repo_by_platform(platform):
-    for r in load_repos():
-        if r.get("platform") == platform:
-            return r
-    return None
-
 def list_repos():
     repos = load_repos()
     for r in repos:
@@ -50,7 +44,7 @@ def _save_repo_config(name, source, platform, branch):
     config = yaml.safe_load(config_path.read_text()) or {}
     repos = config.get("repos", [])
     repos = [r for r in repos if r.get("name") != name]
-    repos.append({"name": name, "source": source, "platform": platform, "branch": branch})
+    repos.append({"name": name, "source": source, "branch": branch})
     config["repos"] = repos
     config_path.write_text(yaml.dump(config, default_flow_style=False, allow_unicode=True))
     from core.config import reload_config
@@ -75,7 +69,6 @@ def update_repo_config(name, source=None, platform=None, branch=None):
     for r in repos:
         if r["name"] == name:
             if source: r["source"] = source
-            if platform: r["platform"] = platform
             if branch: r["branch"] = branch
             break
     config_path = Path(__file__).parent.parent / "config.yaml"
