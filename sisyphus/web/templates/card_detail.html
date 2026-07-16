@@ -56,7 +56,7 @@ graph LR
     <h3 style="margin-top:16px">Resources</h3>
     {% for r in resources %}
     <div class="resource-item">
-        <a href="#" hx-get="/api/resources/{{ run.id }}/{{ r.filename }}" hx-target="#resource-content">{{ r.filename }}</a>
+        <a href="#" hx-get="/api/resources/{{ run.id }}/{{ r.filename }}?step_id={{ r.step_id }}" hx-target="#resource-content">{{ r.filename }}</a>
         <span style="color:#8b949e;font-size:11px">{{ r.resource_type }}</span>
     </div>
     {% endfor %}
