@@ -129,9 +129,7 @@ async def run_card(
             repo_url = repo["source"]
 
     update_card_status(card_id, "running")
-    asyncio.create_task(
-        _run_bg_async(card["pipeline_name"], card, gitlab_repo_url=repo_url),
-    )
+    await _run_bg_async(card["pipeline_name"], card, gitlab_repo_url=repo_url)
 
 
 # ── 6. resume_card ─────────────────────────────────────────────────────
