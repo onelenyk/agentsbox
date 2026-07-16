@@ -17,15 +17,21 @@ def _cleanup_job():
         logger.warning(f"Scheduler cleanup failed: {e}")
 
 def _process_backlog():
-    """Scan for pending cards and auto-run them."""
+    """Scan for pending cards and auto-run them (max 1 at a time)."""
     import asyncio
     from core.state import list_cards
     from core.operations import run_card
 
     try:
         cards = list_cards()
+
+        running = [c for c in cards if c["status"] == "running"]
+        if running:
+            return
+
         pending = [c for c in cards if c["status"] in ("backlog", "created")]
-        for card in pending:
+        if pending:
+            card = pending[0]
             try:
                 asyncio.run(run_card(card["id"]))
                 logger.info("Scheduler: auto-ran card %s", card["id"])
