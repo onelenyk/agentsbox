@@ -12,7 +12,10 @@ max_review_loops: 3
 openrouter:
   api_key: ${OPENROUTER_API_KEY}
   base_url: https://openrouter.ai/api/v1
-repos: []
+repos:
+- branch: main
+  name: sisyphus
+  source: /Users/lenyk/workproject/agentsbox
 scheduler:
   jobs:
   - minutes: 60
