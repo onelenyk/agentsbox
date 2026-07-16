@@ -19,12 +19,14 @@ os.environ.setdefault("WORKSPACE_ROOT", os.path.join(os.path.dirname(__file__), 
 
 from core.db import init_db
 from core.recovery import recover_orphaned_steps
+from core.scheduler import start_scheduler
 
 # Initialize on startup
 init_db()
 recovered = recover_orphaned_steps()
 if recovered:
     print(f"[sisyphus-mcp] Recovered {recovered} orphaned steps", file=sys.stderr)
+start_scheduler()
 
 
 # ── Tool Functions ──────────────────────────────────────────────────────────
