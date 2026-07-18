@@ -41,12 +41,13 @@ def cli():
 
 
 @cli.command()
+@click.option("--name", help="Card name (short title)")
 @click.option("--desc", help="Task description")
 @click.option("--jira", help="Jira issue URL")
 @click.option("--repo", default=None, help="Repository name (auto-detected if not set)")
 @click.option("--pipeline", default="investigate", help="Pipeline name")
 @click.option("--detach", is_flag=True, help="Run in background (fire-and-forget)")
-def run(desc, jira, repo, pipeline, detach):
+def run(name, desc, jira, repo, pipeline, detach):
     """Create a card and run a pipeline."""
     from core.operations import create_and_run, create_and_run_async
     from core.repos import list_repos
@@ -59,10 +60,10 @@ def run(desc, jira, repo, pipeline, detach):
         repo = repos[0]["name"]
 
     if detach:
-        card_id = asyncio.run(create_and_run_async(pipeline, repo, desc or "No description", jira))
+        card_id = asyncio.run(create_and_run_async(pipeline, repo, desc or "No description", jira, name=name or ""))
         click.echo(f"Card {card_id} created. Running in background.")
     else:
-        result = create_and_run(pipeline, repo, desc or "No description", jira)
+        result = create_and_run(pipeline, repo, desc or "No description", jira, name=name or "")
         if result["status"] == "completed":
             click.echo(f"Pipeline completed.")
         else:
@@ -70,11 +71,12 @@ def run(desc, jira, repo, pipeline, detach):
 
 
 @cli.command()
+@click.option("--name", help="Card name (short title)")
 @click.option("--desc", help="Task description")
 @click.option("--jira", help="Jira issue URL")
 @click.option("--repo", default=None, help="Repository name (auto-detected if not set)")
 @click.option("--pipeline", default="investigate", help="Pipeline name")
-def create(desc, jira, repo, pipeline):
+def create(name, desc, jira, repo, pipeline):
     """Create a card in backlog (no pipeline execution)."""
     from core.operations import create_card_only
     from core.repos import list_repos
@@ -86,7 +88,7 @@ def create(desc, jira, repo, pipeline):
             return
         repo = repos[0]["name"]
 
-    card = create_card_only(pipeline, repo, desc or "No description", jira)
+    card = create_card_only(pipeline, repo, desc or "No description", jira, name=name or "")
     click.echo(f"Card {card['id']} created in backlog.")
 
 
@@ -113,6 +115,8 @@ def status(card_id, verbose):
         steps = detail["steps"]
 
         click.echo(f"Card:    {card['id']}")
+        if card.get("name"):
+            click.echo(f"Name:    {card['name']}")
         click.echo(f"Pipeline: {card['pipeline_name']}")
         click.echo(f"Status:   {card['status']}")
         click.echo(f"Desc:     {card.get('description', 'N/A')}")

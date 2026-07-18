@@ -15,7 +15,8 @@ from collections import defaultdict, deque
 
 import yaml
 
-from core.state import create_run, create_step, update_step_status, update_card_status, update_run_status
+from core.state import create_run, create_step, get_step, update_step_status, update_card_status, update_run_status
+from core.launcher import AgentResult
 from core.fsm import transition_step
 from core.resources import get_available_resources, init_run_dir, save_resource
 from core.worktree import (
@@ -46,7 +47,7 @@ async def run_pipeline(
 
     Args:
         pipeline_yaml_path: Path to the pipeline YAML file.
-        card: Card dict (must contain ``id``, ``description``, ``platforms``).
+        card: Card dict (must contain ``id``, ``description``, ``repo_name``).
         gitlab_repo_url: Optional GitLab repo URL used to create bare clone
             and per-step worktrees.
         cancel_event: Optional ``asyncio.Event`` — set to cancel mid-flight.
@@ -129,12 +130,8 @@ async def run_pipeline(
             get_available_resources(run_id, min_order) if min_order >= 0 else []
         )
 
-        for s in wave_steps:
-            await _execute_setup_commands(
-                s, run_id, step_orders[s["id"]], resources
-            )
-
         review_retry_count = 0
+        setup_done = False
 
         while True:
             if cancel_event and cancel_event.is_set():
@@ -149,6 +146,15 @@ async def run_pipeline(
                 step = create_step(run_id, agent_def["name"], step_orders[sid])
                 transition_step(step["id"], "running")
                 step_records[sid] = step
+
+            # Run setup commands once, after steps exist in DB
+            if not setup_done:
+                for s in wave_steps:
+                    step = step_records[s["id"]]
+                    await _execute_setup_commands(
+                        s, step, run_id, step_orders[s["id"]], resources
+                    )
+                setup_done = True
 
             if review_retry_count > 0:
                 resources = (
@@ -202,9 +208,26 @@ async def run_pipeline(
                     if result.parsed_result
                     else None
                 )
-                transition_step(
+                ok = transition_step(
                     step["id"], result.status, result_json, result.error,
                 )
+                if not ok:
+                    refreshed = get_step(step["id"])
+                    actual_status = refreshed["status"] if refreshed else "unknown"
+                    logger.warning(
+                        "Step '%s' transition to '%s' failed (currently '%s')",
+                        sid, result.status, actual_status,
+                    )
+                    if actual_status in ("failed", "error", "timeout"):
+                        # Step was corrupted by concurrent recovery — but agent
+                        # produced valid output. Reset: error → running → completed.
+                        transition_step(step["id"], "running")
+                        transition_step(
+                            step["id"], "completed",
+                            json.dumps(result.parsed_result or {}),
+                            error="",
+                        )
+                        logger.info("Step '%s' status corrected from '%s' to 'completed'", sid, actual_status)
 
                 if result.status in ("failed", "timeout", "error"):
                     error_msg = (
@@ -345,7 +368,7 @@ async def _run_step(
     worktree_path = "/tmp"  # fallback when no repo
 
     if bare_path and repo_name:
-        branch = step_def.get("branch", "Staging")
+        branch = step_def.get("branch", "main")
         worktree_path = create_worktree(bare_path, run_id, sid, branch)
         access = agent_def.get("access", "read")
         set_access(worktree_path, access)
@@ -428,10 +451,11 @@ async def _rerun_engineer(
 
 
 async def _execute_setup_commands(
-    step_def: dict, run_id: str, step_order: int, resources: list,
+    step_def: dict, step_record: dict, run_id: str, step_order: int, resources: list,
 ) -> None:
     """Run each setup tool for a step before the agent launches."""
     sid = step_def["id"]
+    step_id = step_record["id"]  # DB step ID for FK references
     for tool_cmd in step_def.get("setup", []):
         tool_name = tool_cmd.get("tool", "")
         if not tool_name:
@@ -476,7 +500,7 @@ async def _execute_setup_commands(
             continue
 
         save_resource(
-            run_id, sid, f"{tool_name}_output.json", output,
+            run_id, step_id, f"{tool_name}_output.json", output,
             step_order=step_order, resource_type="tool_output",
         )
 

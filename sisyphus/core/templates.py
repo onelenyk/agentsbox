@@ -18,7 +18,7 @@ def render_prompt(
 
     Args:
         agent_def: agent YAML dict (name, role, access, output_fields, etc.)
-        card: card dict (description, platforms, etc.)
+        card: card dict (description, repo_name, etc.)
         step: step dict (id, worktree_path, etc.)
         resources: list of resource dicts from previous steps
     """

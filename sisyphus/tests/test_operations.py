@@ -78,10 +78,12 @@ class TestCreateAndRunAsync:
 
 class TestRunCard:
     def test_run_card_changes_status(self, db_path, card):
-        asyncio.run(run_card(card["id"]))
-        updated = get_card(card["id"])
-        assert updated is not None
-        assert updated["status"] == "running"
+        with patch("core.pipeline.run_pipeline") as mock_run:
+            mock_run.return_value = {"status": "completed", "run_id": "run-mocked"}
+            asyncio.run(run_card(card["id"]))
+            updated = get_card(card["id"])
+            assert updated is not None
+            assert updated["status"] == "completed"
 
     def test_run_card_unknown_raises(self, db_path):
         try:

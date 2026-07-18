@@ -96,7 +96,7 @@ async def launch_agent(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    env = os.environ.copy()
+    env = {k: v for k, v in os.environ.items() if k != "WORKSPACE_ROOT"}
     env["SISYPHUS_OUTPUT_DIR"] = str(output_dir)
     env["SISYPHUS_WORKTREE"] = str(worktree_path)
     if runner.get("model"):
@@ -191,11 +191,16 @@ async def launch_agent(
     run_id = _derive_run_id(output_dir)
     step = step_id or output_path.name
     log_content = f"=== STDOUT ===\n{stdout_str}\n=== STDERR ===\n{stderr_str}"
-    save_agent_log(run_id, step, log_content)
+    try:
+        save_agent_log(run_id, step, log_content)
+    except Exception:
+        pass
 
-    # Save stdout as analysis.md
-    from core.resources import save_analysis_md
-    save_analysis_md(run_id, step, stdout_str)
+    try:
+        from core.resources import save_analysis_md
+        save_analysis_md(run_id, step, stdout_str)
+    except Exception:
+        pass
 
     result_json_path = output_path / "result.json"
 

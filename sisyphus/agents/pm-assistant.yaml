@@ -10,4 +10,5 @@ opencode_config:
 output_fields:
   status: required
   summary: required
+  risk: optional
 runner: opencode-default

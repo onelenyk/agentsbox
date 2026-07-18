@@ -17,8 +17,7 @@ Write TWO files to SISYPHUS_OUTPUT_DIR:
 {
   "status": "completed",
   "summary": "Jira issue analysis summary (1 sentence)",
-  "risk": "low",
-  "platforms": ["android"]
+  "risk": "low"
 }
 ```
 

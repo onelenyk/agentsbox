@@ -4,7 +4,7 @@
         <h2>{{ col_name|capitalize }} <span class="count">{{ col_cards|length }}</span></h2>
         {% for card in col_cards %}
         <div class="card" hx-get="/api/cards/{{ card.id }}/detail" hx-target="#card-detail" onclick="document.getElementById('cardDetailPanel').classList.add('active')">
-            <div class="title">{{ card.description[:80] ~ '…' if card.description|length > 80 else card.description }}</div>
+            <div class="title">{{ (card.name if card.name else card.description)[:80] ~ '…' if (card.name if card.name else card.description)|length > 80 else (card.name if card.name else card.description) }}</div>
             <div class="meta">
                 <span class="pipeline-tag">{{ card.pipeline_name }}</span>
                 <span class="status-badge {{ card.status }}">{{ card.status }}</span>

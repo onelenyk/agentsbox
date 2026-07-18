@@ -58,6 +58,7 @@ def create_card_only(
     repo_name: str,
     description: str,
     jira_url: Optional[str] = None,
+    name: str = "",
 ) -> dict:
     """Create a card in 'backlog' status (NO pipeline execution).
 
@@ -65,6 +66,7 @@ def create_card_only(
     """
     return create_card(
         pipeline_name, repo_name, description or "No description", jira_url,
+        name=name,
     )
 
 
@@ -76,6 +78,7 @@ def create_and_run(
     description: str,
     jira_url: Optional[str] = None,
     repo_url: Optional[str] = None,
+    name: str = "",
 ) -> dict:
     """Create card + run pipeline synchronously. Blocks until done.
 
@@ -84,7 +87,7 @@ def create_and_run(
     """
     from core.pipeline import run_pipeline
 
-    card = create_card_only(pipeline_name, repo_name, description, jira_url)
+    card = create_card_only(pipeline_name, repo_name, description, jira_url, name=name)
     path = str(resolve_pipeline_path(pipeline_name))
     return asyncio.run(run_pipeline(path, card, gitlab_repo_url=repo_url))
 
@@ -97,9 +100,10 @@ async def create_and_run_async(
     description: str,
     jira_url: Optional[str] = None,
     repo_url: Optional[str] = None,
+    name: str = "",
 ) -> str:
     """Create card + fire pipeline in background. Returns *card_id* immediately."""
-    card = create_card_only(pipeline_name, repo_name, description, jira_url)
+    card = create_card_only(pipeline_name, repo_name, description, jira_url, name=name)
     update_card_status(card["id"], "created")
     asyncio.create_task(
         _run_bg_async(pipeline_name, card, gitlab_repo_url=repo_url),
@@ -225,8 +229,7 @@ def get_card_detail(card_id: str) -> dict:
 
     Returns a dict with keys: ``card``, ``run`` (latest), ``steps``
     (with duration computed from started_at/completed_at),
-    ``resources``, and ``repo_name`` (resolved from ``repo_name`` field
-    with backward compat for legacy ``platforms`` field).
+    ``resources``, and ``repo_name`` (resolved from ``repo_name`` field).
     """
     card = get_card(card_id)
     if not card:

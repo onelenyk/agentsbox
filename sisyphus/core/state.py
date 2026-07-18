@@ -1,4 +1,3 @@
-import json
 from datetime import datetime, timezone
 from typing import Optional, List
 from uuid import uuid4
@@ -35,16 +34,17 @@ def create_card(
     repo_name: str,
     description: str,
     jira_url: Optional[str] = None,
+    name: str = "",
 ) -> dict:
     card_id = f"card-{uuid4().hex[:8]}"
     now = _now()
     conn = get_conn()
     conn.execute(
         """
-        INSERT INTO cards (id, pipeline_name, status, platforms, repo_name, description, jira_url, created_at, updated_at)
+        INSERT INTO cards (id, pipeline_name, status, name, repo_name, description, jira_url, created_at, updated_at)
         VALUES (?, ?, 'backlog', ?, ?, ?, ?, ?, ?)
         """,
-        (card_id, pipeline_name, json.dumps([]), repo_name, description, jira_url, now, now),
+        (card_id, pipeline_name, name, repo_name, description, jira_url, now, now),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM cards WHERE id = ?", (card_id,)).fetchone()
@@ -152,6 +152,8 @@ def update_step_status(
             updates["result_json"] = result_json
         if error is not None:
             updates["error"] = error
+        elif status == "completed":
+            updates["error"] = ""
 
         set_clause = ", ".join(f"{k} = ?" for k in updates)
         values = list(updates.values()) + [step_id]
