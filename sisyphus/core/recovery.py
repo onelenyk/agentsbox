@@ -6,16 +6,19 @@ _TERMINAL_STEPS = {"completed", "failed", "timeout", "cancelled", "error"}
 
 
 def recover_orphaned_steps():
-    """On startup: mark all 'running' steps as 'error', then sync parent run/card status.
+    """On startup: mark orphaned 'running' steps as 'error', then sync parent run/card status.
 
-    Steps that were 'running' when orchestrator crashed are unrecoverable
-    without explicit user resume. After fixing steps, propagates terminal
-    statuses upward: runs inherit step outcomes, cards inherit run outcomes.
+    Only touches steps whose run was started more than 2 minutes ago to avoid
+    race conditions with active pipelines sharing the same SQLite database.
     """
     conn = get_conn()
     now = datetime.now(timezone.utc).isoformat()
 
-    cursor = conn.execute("SELECT id FROM steps WHERE status = 'running'")
+    cursor = conn.execute("""
+        SELECT s.id FROM steps s
+        WHERE s.status = 'running'
+        AND (s.started_at IS NULL OR datetime(s.started_at) < datetime('now', '-2 minutes'))
+    """)
     orphaned_steps = cursor.fetchall()
     for row in orphaned_steps:
         conn.execute(

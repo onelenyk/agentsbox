@@ -8,12 +8,27 @@ from core.recovery import recover_orphaned_steps
 
 class TestCrashRecovery:
     def test_recover_orphaned_steps(self, db_path, card):
+        from core.state import get_conn
+        from datetime import datetime, timezone, timedelta
+
         run = create_run(card["id"])
+        # Make the run appear old (>2 min) so recovery picks it up
+        old_time = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        conn = get_conn()
+        conn.execute("UPDATE runs SET started_at = ? WHERE id = ?", (old_time, run["id"]))
+        conn.commit()
+        conn.close()
+
         s1 = create_step(run["id"], "PM", 1)
         s2 = create_step(run["id"], "Engineer", 2)
 
         transition_step(s1["id"], "running")
         transition_step(s2["id"], "running")
+        # Make the step appear old (>2 min) so recovery picks it up
+        conn = get_conn()
+        conn.execute("UPDATE steps SET started_at = ? WHERE id IN (?, ?)", (old_time, s1["id"], s2["id"]))
+        conn.commit()
+        conn.close()
         transition_step(
             s1["id"], "completed",
             json.dumps({"status": "completed", "summary": "ok"}),

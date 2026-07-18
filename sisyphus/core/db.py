@@ -17,7 +17,8 @@ def init_db():
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS cards (
             id TEXT PRIMARY KEY, pipeline_name TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'created', platforms TEXT DEFAULT '["android"]',
+            status TEXT NOT NULL DEFAULT 'created',
+            name TEXT DEFAULT '',
             repo_name TEXT DEFAULT '',
             description TEXT, jira_url TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
         );
@@ -40,6 +41,10 @@ def init_db():
     """)
     try:
         conn.execute("ALTER TABLE cards ADD COLUMN repo_name TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    try:
+        conn.execute("ALTER TABLE cards ADD COLUMN name TEXT DEFAULT ''")
     except sqlite3.OperationalError:
         pass  # column already exists
     conn.commit()

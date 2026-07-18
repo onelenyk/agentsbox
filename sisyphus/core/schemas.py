@@ -8,4 +8,3 @@ class BaseResult(BaseModel):
     summary: str
     risk: Optional[Literal["low", "medium", "high"]] = None
     error: Optional[str] = None
-    platforms: Optional[list] = None

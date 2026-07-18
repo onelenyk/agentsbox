@@ -1,8 +1,11 @@
 <div class="detail-panel">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-        <h2 style="margin:0">{{ card.description[:80] }}</h2>
+        <h2 style="margin:0">{{ card.name or card.description[:80] }}</h2>
         <span class="status status-{{ card.status }}">{{ card.status }}</span>
     </div>
+    {% if card.name and card.description %}
+    <div class="info-row"><span class="label">Description</span><span class="value">{{ card.description }}</span></div>
+    {% endif %}
     <div class="info-row"><span class="label">Pipeline</span><span class="value">{{ card.pipeline_name }}</span></div>
     {% if repo_name %}
     <div class="info-row"><span class="label">Repo</span><span class="value">{{ repo_name }}</span></div>

@@ -297,15 +297,21 @@ async def resource_view(request: Request, run_id: str, filename: str, step_id: s
     content = read_resource(run_id, filename, step_id or None)
     if content is None:
         return HTMLResponse('<div style="color:#f85149;padding:12px">Resource not found</div>')
-    return HTMLResponse(f'<pre style="font-size:12px;color:#c9d1d9;background:#0d1117;padding:12px;border-radius:6px;overflow-x:auto;max-height:300px;margin-top:8px">{content}</pre>')
+    if filename.endswith('.json'):
+        import json
+        try:
+            content = json.dumps(json.loads(content), indent=2)
+        except Exception:
+            pass
+    return HTMLResponse(f'<pre style="font-size:13px;color:#c9d1d9;background:#0d1117;padding:16px;border-radius:6px;overflow:auto;max-height:80vh;white-space:pre-wrap;word-wrap:break-word;line-height:1.5">{content}</pre>')
 
 @router.post("/api/cards")
-async def create(request: Request, pipeline: str = Form(...), repo: str = Form(...), description: str = Form(...), jira_url: str = Form(""), repo_url: str = Form(""), run_now: str = Form("0")):
+async def create(request: Request, pipeline: str = Form(...), repo: str = Form(...), description: str = Form(...), jira_url: str = Form(""), repo_url: str = Form(""), run_now: str = Form("0"), name: str = Form("")):
     from core.operations import create_card_only, create_and_run_async
     if run_now == "1":
-        await create_and_run_async(pipeline, repo, description, jira_url or None, repo_url or None)
+        await create_and_run_async(pipeline, repo, description, jira_url or None, repo_url or None, name=name)
     else:
-        create_card_only(pipeline, repo, description, jira_url or None)
+        create_card_only(pipeline, repo, description, jira_url or None, name=name)
     from fastapi.responses import Response
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "cardCreated"
