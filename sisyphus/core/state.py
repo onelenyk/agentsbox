@@ -4,17 +4,6 @@ from uuid import uuid4
 
 from .db import get_conn
 
-# FSM: valid transitions for step status
-_VALID_TRANSITIONS = {
-    "pending": {"running"},
-    "running": {"completed", "failed", "timeout", "cancelled", "error"},
-    "completed": set(),
-    "failed": {"running"},
-    "timeout": {"running"},
-    "cancelled": {"running"},
-    "error": {"running"},
-}
-
 _TERMINAL_STATES = {"completed", "failed", "timeout", "cancelled"}
 
 
@@ -132,13 +121,6 @@ def update_step_status(
         row = conn.execute("SELECT * FROM steps WHERE id = ?", (step_id,)).fetchone()
         if not row:
             raise ValueError(f"Step {step_id} not found")
-
-        current_status = row["status"]
-        allowed = _VALID_TRANSITIONS.get(current_status, set())
-        if status not in allowed:
-            raise ValueError(
-                f"Cannot transition step {step_id} from '{current_status}' to '{status}'"
-            )
 
         now = _now()
         updates = {"status": status}

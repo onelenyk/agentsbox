@@ -257,6 +257,7 @@ async def run_pipeline(
 
                     if loop_tracker[reviewer_sid] > MAX_REVIEW_LOOPS:
                         step = step_records[reviewer_sid]
+                        # bypass FSM — forced failure
                         update_step_status(
                             step["id"], "failed",
                             error="max_review_loops_exceeded",
@@ -430,6 +431,7 @@ async def _rerun_engineer(
     )
 
     if isinstance(result, Exception):
+        # bypass FSM — exception path
         update_step_status(step_record["id"], "failed", error=str(result))
         return f"Engineer re-run crashed: {result}"
 
