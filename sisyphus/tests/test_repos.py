@@ -31,7 +31,7 @@ class TestGetRepo:
 
     REPOS = [
         {"name": "project-alpha", "source": "git@github.com:org/alpha.git", "branch": "main"},
-        {"name": "project-beta", "source": "git@github.com:org/beta.git", "branch": "Staging"},
+        {"name": "project-beta", "source": "git@github.com:org/beta.git", "branch": "main"},
     ]
 
     def test_returns_repo_dict_when_name_matches(self):

@@ -9,7 +9,7 @@ def load_repos():
     from core.config import get_config
     return get_config("repos", [])
 
-def add_repo(name, source, platform, branch="Staging"):
+def add_repo(name, source, platform, branch="main"):
     bare_path = REPOS_DIR / name
     REPOS_DIR.mkdir(parents=True, exist_ok=True)
     if not bare_path.exists():

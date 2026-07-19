@@ -7,7 +7,7 @@ Standardized output format for each role in the SDLC pipeline.
 
 ### PM
 ```
-## Jira Source | ## Branch: Staging | ## Issue Details | ## Screenshots | ## Acceptance Criteria
+## Jira Source | ## Branch: main | ## Issue Details | ## Screenshots | ## Acceptance Criteria
 ```
 
 ### Tech Lead
