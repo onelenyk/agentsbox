@@ -13,8 +13,9 @@ def fetch_jira(issue_key: str, base_url: str = None, email: str = None, token: s
     token = token or os.environ.get("JIRA_API_TOKEN", "")
     
     if not all([base_url, email, token]):
-        print(json.dumps({"error": "Missing Jira credentials. Set JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN"}))
-        sys.exit(1)
+        result = {"skipped": True, "reason": "Jira credentials not configured"}
+        print(json.dumps(result))
+        return result
     
     issue_url = f"{base_url}/rest/api/2/issue/{issue_key}"
     issue = _jira_get(issue_url, email, token)
@@ -56,3 +57,5 @@ if __name__ == "__main__":
         sys.exit(0)
     result = fetch_jira(sys.argv[1])
     print(json.dumps(result, indent=2))
+    if result.get("skipped"):
+        sys.exit(0)
