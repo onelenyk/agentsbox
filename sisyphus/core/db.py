@@ -3,7 +3,16 @@ import os
 
 DB_PATH = os.environ.get("SISYPHUS_DB", os.path.join(os.environ.get("WORKSPACE_ROOT", "/workspace"), "sisyphus.db"))
 
+def get_readonly_conn() -> sqlite3.Connection:
+    """Return a read-only SQLite connection (URI mode)."""
+    uri = f"file:{DB_PATH}?mode=ro"
+    conn = sqlite3.connect(uri, uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
 def get_conn():
+    if os.environ.get("SISYPHUS_DB_READONLY") == "1":
+        return get_readonly_conn()
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
@@ -13,6 +22,8 @@ def get_conn():
     return conn
 
 def init_db():
+    if os.environ.get("SISYPHUS_DB_READONLY") == "1":
+        return  # Read-only mode — skip DB initialization
     conn = get_conn()
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS cards (
