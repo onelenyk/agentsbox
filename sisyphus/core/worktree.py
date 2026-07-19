@@ -23,7 +23,7 @@ def init_bare_clone(repo_url: str, bare_path: str) -> str:
 
 
 def create_worktree(bare_path: str, run_id: str, step_id: str,
-                    branch: str = "Staging") -> str:
+                    branch: str = "main") -> str:
     """Create a git worktree for a specific pipeline step.
 
     Worktrees are placed outside the bare clone at:
@@ -95,11 +95,15 @@ def remove_worktree(bare_path: str, run_id: str, step_id: str,
 
 
 def set_access(worktree_path: str, level: str):
-    """Set file access permissions on a worktree.
+    """Set file access permissions on a worktree recursively.
 
-    read    → 555 (r-xr-xr-x)
-    analyze → 755 (rwxr-xr-x)
-    edit    → 755 (rwxr-xr-x)
+    Modes for directories:
+      read    → 555 (r-xr-xr-x)
+      analyze → 755 (rwxr-xr-x)
+      edit    → 755 (rwxr-xr-x)
+
+    Files under a read-only directory get 444 (r--r--r--).
+    Files under a writable directory get 644 (rw-r--r--).
     """
     mode_map = {
         "read": (stat.S_IRUSR | stat.S_IXUSR | stat.S_IRGRP
@@ -117,7 +121,20 @@ def set_access(worktree_path: str, level: str):
     if not path.exists():
         return
 
-    os.chmod(str(path), mode)
+    # Apply recursively to all files and directories
+    for entry in path.rglob("*"):
+        try:
+            if entry.is_dir():
+                entry.chmod(mode)
+            elif entry.is_file():
+                file_mode = stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH
+                if mode & stat.S_IWUSR:
+                    file_mode |= stat.S_IWUSR
+                entry.chmod(file_mode)
+        except OSError:
+            pass
+    # Root directory
+    path.chmod(mode)
 
 
 def cleanup_orphans(bare_path: str) -> int:
