@@ -38,18 +38,21 @@ def sisyphus_create_card(
     pipeline: str = "investigate",
     description: str = "",
     jira_url: str = "",
+    name: str = "",
 ) -> dict[str, Any]:
     """Create a card in backlog (no pipeline execution)."""
     from core.operations import create_card_only
 
     card = create_card_only(
         pipeline, repo, description or "No description", jira_url or None,
+        name=name,
     )
     return {
         "card_id": card["id"],
         "repo_name": card.get("repo_name", ""),
         "status": card["status"],
         "pipeline": card["pipeline_name"],
+        "name": card.get("name", ""),
     }
 
 
@@ -58,6 +61,7 @@ def sisyphus_run_card(
     pipeline: str = "investigate",
     description: str = "",
     jira_url: str = "",
+    name: str = "",
 ) -> dict[str, Any]:
     """Create card and run pipeline synchronously (blocks until done)."""
     import asyncio
@@ -65,6 +69,7 @@ def sisyphus_run_card(
 
     result = create_and_run(
         pipeline, repo, description or "No description", jira_url or None,
+        name=name,
     )
     return {
         "status": result["status"],
@@ -324,6 +329,10 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "type": "string",
                     "description": "Optional Jira URL",
                 },
+                "name": {
+                    "type": "string",
+                    "description": "Short card name/title",
+                },
             },
             "required": ["repo", "description"],
         },
@@ -350,6 +359,10 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "jira_url": {
                     "type": "string",
                     "description": "Optional Jira URL",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Short card name/title",
                 },
             },
             "required": ["repo", "description"],
