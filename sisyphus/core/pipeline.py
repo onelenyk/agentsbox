@@ -441,9 +441,6 @@ async def _rerun_engineer(
     transition_step(step_record["id"], result.status, result_json, result.error)
 
     if result.status in ("failed", "timeout", "error"):
-        update_step_status(
-            step_record["id"], result.status, result_json, result.error,
-        )
         return (
             f"Engineer re-run '{engineer_sid}' {result.status}: "
             f"{result.error or 'no error details'}"
@@ -494,6 +491,19 @@ async def _execute_setup_commands(
         if stderr:
             stderr_str = stderr.decode("utf-8", errors="replace")
             logger.debug("Setup tool '%s' stderr: %s", tool_name, stderr_str[:500])
+
+        # Check if the tool gracefully skipped (e.g., missing credentials)
+        if output.strip():
+            try:
+                parsed = json.loads(output)
+                if parsed.get("skipped"):
+                    logger.warning(
+                        "Setup tool '%s' skipped: %s",
+                        tool_name, parsed.get("reason", "unknown"),
+                    )
+                    continue
+            except json.JSONDecodeError:
+                pass  # Not JSON, proceed normally
 
         if proc.returncode != 0 and not output.strip():
             logger.warning(

@@ -39,7 +39,7 @@ name: investigate
 description: Investigate a codebase issue
 steps:
   - id: engineer
-    agent: android-engineer
+    agent: explorer
     depends_on: []
 """
         errors = validate_pipeline_string(yaml)
