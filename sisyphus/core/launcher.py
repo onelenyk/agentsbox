@@ -1,6 +1,7 @@
 """Agent launcher — spawns opencode subprocess with timeout, cancel, validation."""
 import asyncio
 import json
+import logging
 import os
 import time
 from dataclasses import dataclass
@@ -11,6 +12,8 @@ from pydantic import ValidationError
 
 from .resources import save_agent_log
 from .schemas import BaseResult
+
+logger = logging.getLogger(__name__)
 
 OUTPUT_SIZE_CAP = 10 * 1024 * 1024
 GRACEFUL_KILL_TIMEOUT = 5
@@ -99,6 +102,7 @@ async def launch_agent(
     env = {k: v for k, v in os.environ.items() if k != "WORKSPACE_ROOT"}
     env["SISYPHUS_OUTPUT_DIR"] = str(output_dir)
     env["SISYPHUS_WORKTREE"] = str(worktree_path)
+    env["SISYPHUS_DB_READONLY"] = "1"
     if runner.get("model"):
         env["SISYPHUS_MODEL"] = runner["model"]
 
@@ -249,16 +253,9 @@ async def launch_agent(
         )
 
     if proc.returncode is not None and proc.returncode != 0:
-        return AgentResult(
-            status="failed",
-            duration_ms=duration,
-            summary=result.summary,
-            verdict=result.verdict,
-            risk=result.risk,
-            error=f"Agent exited with code {proc.returncode}",
-            parsed_result=result.model_dump(),
-            raw_stdout=stdout_str,
-            raw_stderr=stderr_str,
+        logger.warning(
+            "Agent exited with code %s but result.json was valid — trusting result.json",
+            proc.returncode,
         )
 
     return AgentResult(
