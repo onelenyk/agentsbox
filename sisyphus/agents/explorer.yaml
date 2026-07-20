@@ -5,7 +5,7 @@ access: analyze
 opencode_config:
   tools: [read, grep, glob, bash]
   max_tokens: 16000
-  timeout: 120
+  timeout: 300
   idle_timeout: 60
 output_fields:
   status: required
