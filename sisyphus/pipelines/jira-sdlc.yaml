@@ -1,5 +1,7 @@
 name: jira-sdlc
 description: "Full SDLC pipeline: Jira → Fix Plan (6 steps)"
+shared_worktree: true
+branch: main
 steps:
   - id: pm
     agent: pm
