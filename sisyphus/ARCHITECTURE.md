@@ -1,8 +1,8 @@
 # Sisyphus Architecture
 
-## Container Design
+## Process Design
 
-Single Docker container running all services: scheduler, API, and agent launcher. No microservices — simplicity over scale.
+Runs directly on the host as one or more plain Python processes (CLI, web/API, MCP server), each capable of running the scheduler and agent launcher. No microservices, no container — simplicity over scale.
 
 ## Agent Lifecycle
 

@@ -21,4 +21,3 @@ scheduler:
   - minutes: 60
     name: orphan-cleanup
     trigger: interval
-workspace_root: /workspace
