@@ -16,6 +16,7 @@ from core.pipeline import (
     _find_step_def,
     _get_step_order,
     _agent_timeout,
+    _agent_idle_timeout,
 )
 from core.pipeline_validator import validate_pipeline_string
 
@@ -274,6 +275,47 @@ class TestAgentTimeout:
                 "opencode_config": {"timeout": 0},
             }
             assert _agent_timeout(step_def) == 0
+
+
+class TestAgentIdleTimeout:
+    """_agent_idle_timeout — extract idle_timeout from step or agent config."""
+
+    def test_step_override_wins(self):
+        """A step-level idle_timeout takes priority over agent config."""
+        step_def = {"agent": "custom-agent", "idle_timeout": 45}
+        with patch("core.pipeline.load_agent") as mock_load:
+            mock_load.return_value = {
+                "name": "custom-agent",
+                "opencode_config": {"idle_timeout": 600},
+            }
+            assert _agent_idle_timeout(step_def) == 45
+
+    def test_falls_back_to_agent_config(self):
+        """When no step-level override, uses the agent's opencode_config.idle_timeout."""
+        step_def = {"agent": "explorer"}
+        with patch("core.pipeline.load_agent") as mock_load:
+            mock_load.return_value = {
+                "name": "explorer",
+                "opencode_config": {"idle_timeout": 60},
+            }
+            assert _agent_idle_timeout(step_def) == 60
+
+    def test_none_when_not_configured_anywhere(self):
+        """No step or agent idle_timeout → disabled (None)."""
+        step_def = {"agent": "bare-agent"}
+        with patch("core.pipeline.load_agent") as mock_load:
+            mock_load.return_value = {"name": "bare-agent"}
+            assert _agent_idle_timeout(step_def) is None
+
+    def test_step_zero_disables(self):
+        """idle_timeout: 0 at step level explicitly disables it."""
+        step_def = {"agent": "custom-agent", "idle_timeout": 0}
+        with patch("core.pipeline.load_agent") as mock_load:
+            mock_load.return_value = {
+                "name": "custom-agent",
+                "opencode_config": {"idle_timeout": 600},
+            }
+            assert _agent_idle_timeout(step_def) is None
 
 
 class TestSharedWorktreeValidation:

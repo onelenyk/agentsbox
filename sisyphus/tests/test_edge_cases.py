@@ -1,9 +1,18 @@
 """Edge case tests for Sisyphus."""
 import json
+import os
+import subprocess
 
 from core.state import create_card, create_run, create_step, get_steps, list_cards
 from core.fsm import transition_step
 from core.recovery import recover_orphaned_steps
+
+
+def _dead_pid() -> int:
+    """A PID guaranteed to no longer be alive (spawned and reaped)."""
+    proc = subprocess.Popen(["true"])
+    proc.wait()
+    return proc.pid
 
 
 class TestCrashRecovery:
@@ -12,10 +21,13 @@ class TestCrashRecovery:
         from datetime import datetime, timezone, timedelta
 
         run = create_run(card["id"])
-        # Make the run appear old (>2 min) so recovery picks it up
+        # Make the run appear old AND owned by a dead process, so recovery picks it up
         old_time = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
         conn = get_conn()
-        conn.execute("UPDATE runs SET started_at = ? WHERE id = ?", (old_time, run["id"]))
+        conn.execute(
+            "UPDATE runs SET started_at = ?, pid = ? WHERE id = ?",
+            (old_time, _dead_pid(), run["id"]),
+        )
         conn.commit()
         conn.close()
 
@@ -53,6 +65,68 @@ class TestCrashRecovery:
 
         recovered = recover_orphaned_steps()
         assert recovered == 0
+
+    def test_recover_skips_step_owned_by_live_process(self, db_path, card):
+        """A step whose owning process is still alive must never be recovered,
+        no matter how long it's been running (regression test for the
+        idle-timeout / recovery race: a legitimately long-running step owned
+        by a live process used to get wrongly marked as orchestrator_crash)."""
+        from core.state import get_conn
+        from datetime import datetime, timezone, timedelta
+
+        run = create_run(card["id"])
+        old_time = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+        conn = get_conn()
+        conn.execute(
+            "UPDATE runs SET started_at = ?, pid = ? WHERE id = ?",
+            (old_time, os.getpid(), run["id"]),
+        )
+        conn.commit()
+        conn.close()
+
+        s1 = create_step(run["id"], "Engineer", 1)
+        transition_step(s1["id"], "running")
+        conn = get_conn()
+        conn.execute("UPDATE steps SET started_at = ? WHERE id = ?", (old_time, s1["id"]))
+        conn.commit()
+        conn.close()
+
+        recovered = recover_orphaned_steps()
+        assert recovered == 0
+
+        steps = get_steps(run["id"])
+        s1_after = [s for s in steps if s["id"] == s1["id"]][0]
+        assert s1_after["status"] == "running"
+
+    def test_recover_legacy_null_pid_falls_back_to_age(self, db_path, card):
+        """Runs created before the `pid` column existed have pid=NULL — recovery
+        must still fall back to the age-based heuristic for those."""
+        from core.state import get_conn
+        from datetime import datetime, timezone, timedelta
+
+        run = create_run(card["id"])
+        old_time = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        conn = get_conn()
+        conn.execute(
+            "UPDATE runs SET started_at = ?, pid = NULL WHERE id = ?",
+            (old_time, run["id"]),
+        )
+        conn.commit()
+        conn.close()
+
+        s1 = create_step(run["id"], "Engineer", 1)
+        transition_step(s1["id"], "running")
+        conn = get_conn()
+        conn.execute("UPDATE steps SET started_at = ? WHERE id = ?", (old_time, s1["id"]))
+        conn.commit()
+        conn.close()
+
+        recovered = recover_orphaned_steps()
+        assert recovered == 1
+
+        steps = get_steps(run["id"])
+        s1_after = [s for s in steps if s["id"] == s1["id"]][0]
+        assert s1_after["status"] == "error"
 
 
 class TestConcurrentRuns:

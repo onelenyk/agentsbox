@@ -62,21 +62,97 @@ async def _terminate_process(proc: asyncio.subprocess.Process) -> None:
         await proc.wait()
 
 
+async def _read_stream(stream: asyncio.StreamReader, buf: bytearray, activity: dict, cap: int) -> None:
+    """Read *stream* in chunks, stamping ``activity["ts"]`` on every chunk received.
+
+    Reading incrementally (instead of waiting for EOF) is what makes idle
+    detection possible — a `read()` that only resolves at EOF gives no signal
+    until the process has already finished. Output is capped at *cap* bytes
+    while reading, not after, so a long-idle-tolerant agent can't grow the
+    buffer unbounded before that cap is applied.
+    """
+    while True:
+        chunk = await stream.read(65536)
+        if not chunk:
+            return
+        activity["ts"] = time.monotonic()
+        if len(buf) < cap:
+            buf.extend(chunk[: cap - len(buf)])
+
+
+async def _monitored_communicate(
+    proc: asyncio.subprocess.Process,
+    timeout: Optional[int],
+    idle_timeout: Optional[int],
+    cancel_event: Optional[asyncio.Event],
+    poll_interval: float = 0.5,
+) -> tuple:
+    """Drive a subprocess to completion while enforcing total/idle timeouts and cancellation.
+
+    Returns ``(status, error, stdout_bytes, stderr_bytes)`` where status is
+    one of "completed", "timeout", "cancelled".
+    """
+    start_time = time.monotonic()
+    activity = {"ts": start_time}
+    stdout_buf, stderr_buf = bytearray(), bytearray()
+
+    stdout_task = asyncio.create_task(_read_stream(proc.stdout, stdout_buf, activity, OUTPUT_SIZE_CAP))
+    stderr_task = asyncio.create_task(_read_stream(proc.stderr, stderr_buf, activity, OUTPUT_SIZE_CAP))
+    waiters = {stdout_task, stderr_task}
+    cancel_task = None
+    if cancel_event is not None:
+        cancel_task = asyncio.create_task(cancel_event.wait())
+        waiters.add(cancel_task)
+
+    try:
+        while True:
+            # Wakes immediately on cancel/EOF, or after poll_interval — whichever first.
+            await asyncio.wait(waiters, timeout=poll_interval, return_when=asyncio.FIRST_COMPLETED)
+
+            if cancel_event is not None and cancel_event.is_set():
+                await _terminate_process(proc)
+                return "cancelled", None, bytes(stdout_buf), bytes(stderr_buf)
+
+            now = time.monotonic()
+            if timeout is not None and now - start_time > timeout:
+                await _terminate_process(proc)
+                return "timeout", f"Agent exceeded {timeout}s timeout", bytes(stdout_buf), bytes(stderr_buf)
+
+            if idle_timeout is not None and now - activity["ts"] > idle_timeout:
+                await _terminate_process(proc)
+                return (
+                    "timeout",
+                    f"Agent exceeded {idle_timeout}s idle timeout — no output",
+                    bytes(stdout_buf),
+                    bytes(stderr_buf),
+                )
+
+            if stdout_task.done() and stderr_task.done():
+                await proc.wait()
+                return "completed", None, bytes(stdout_buf), bytes(stderr_buf)
+    finally:
+        for t in (stdout_task, stderr_task, *([cancel_task] if cancel_task else [])):
+            if not t.done():
+                t.cancel()
+
+
 async def launch_agent(
     agent_def: dict,
     prompt: str,
     worktree_path: str,
     output_dir: str,
-    timeout: int = 300,
+    timeout: Optional[int] = 300,
+    idle_timeout: Optional[int] = None,
     cancel_event: Optional[asyncio.Event] = None,
     runner_name: Optional[str] = None,
     step_id: str = "",
 ) -> AgentResult:
     """Spawn AI runner subprocess, capture output, validate result.
 
-    Handles timeout (SIGTERM → 5s → SIGKILL), cancellation via Event,
-    output capping at 10MB, and schema validation against BaseResult.
-    
+    Handles total timeout and idle timeout (no output for N seconds) via
+    SIGTERM → 5s → SIGKILL, cancellation via Event, output capping at 10MB,
+    and schema validation against BaseResult.
+
     Runner selection: if *runner_name* is given, looks up that runner.
     Otherwise falls back to agent_def's "runner" field, then default runner,
     then hardcoded "opencode" as last resort.
@@ -147,29 +223,7 @@ async def launch_agent(
         )
 
     try:
-        if cancel_event:
-            comm_task = asyncio.create_task(proc.communicate())
-            cancel_task = asyncio.create_task(cancel_event.wait())
-            done, _ = await asyncio.wait([comm_task, cancel_task], timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
-            if cancel_task in done:
-                comm_task.cancel()
-                await _terminate_process(proc)
-                return AgentResult(status="cancelled", duration_ms=(time.monotonic()-start_time)*1000)
-            if comm_task in done:
-                stdout, stderr = comm_task.result()
-            else:
-                await _terminate_process(proc)
-                return AgentResult(status="timeout", duration_ms=(time.monotonic()-start_time)*1000, error=f"Agent exceeded {timeout}s timeout")
-        else:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
-        await _terminate_process(proc)
-        duration = (time.monotonic() - start_time) * 1000
-        return AgentResult(
-            status="timeout",
-            duration_ms=duration,
-            error=f"Agent exceeded {timeout}s timeout",
-        )
+        status, err, stdout, stderr = await _monitored_communicate(proc, timeout, idle_timeout, cancel_event)
     except Exception as e:
         try:
             proc.kill()
@@ -181,16 +235,8 @@ async def launch_agent(
 
     duration = (time.monotonic() - start_time) * 1000
 
-    stdout_str = (
-        stdout.decode("utf-8", errors="replace")[:OUTPUT_SIZE_CAP]
-        if stdout
-        else ""
-    )
-    stderr_str = (
-        stderr.decode("utf-8", errors="replace")[:OUTPUT_SIZE_CAP]
-        if stderr
-        else ""
-    )
+    stdout_str = stdout.decode("utf-8", errors="replace") if stdout else ""
+    stderr_str = stderr.decode("utf-8", errors="replace") if stderr else ""
 
     run_id = _derive_run_id(output_dir)
     step = step_id or output_path.name
@@ -199,6 +245,11 @@ async def launch_agent(
         save_agent_log(run_id, step, log_content)
     except Exception:
         pass
+
+    if status == "cancelled":
+        return AgentResult(status="cancelled", duration_ms=duration)
+    if status == "timeout":
+        return AgentResult(status="timeout", duration_ms=duration, error=err)
 
     try:
         from core.resources import save_analysis_md

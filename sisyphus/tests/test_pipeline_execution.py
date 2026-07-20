@@ -138,6 +138,41 @@ async def test_single_step_pipeline(db_path, card, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_fsm_race_preserves_real_status(db_path, card, tmp_path):
+    """Simulates the orphan-recovery race: a concurrent recovery pass flips the
+    step to 'error' behind the pipeline's back while the agent is still
+    running. When the agent later reports a real 'timeout', the FSM-repair
+    branch (core/pipeline.py) must re-apply that actual outcome — not
+    fabricate 'completed' — so the step's stored status matches reality."""
+    from core.state import update_step_status
+
+    pipeline_path = _write_pipeline_yaml(tmp_path, "fsm-race", [
+        {"id": "engineer", "agent": "engineer-agent"},
+    ])
+
+    async def _racing_launch(*args, **kwargs):
+        step_id = kwargs["step_id"]
+        # Simulate a concurrent recover_orphaned_steps() call corrupting the
+        # step (bypassing the FSM directly, just like recovery.py does).
+        update_step_status(step_id, "error", error="orchestrator_crash")
+        return _agent_result(
+            status="timeout", summary="",
+            parsed_result=None,
+        )
+
+    stack, _ = _enter_standard_patches(_racing_launch)
+    with stack:
+        result = await run_pipeline(pipeline_path, card)
+
+    assert result["status"] == "failed"
+    assert "timeout" in result["error"]
+
+    steps = get_steps(result["run_id"])
+    assert len(steps) == 1
+    assert steps[0]["status"] == "timeout"
+
+
+@pytest.mark.asyncio
 async def test_multi_step_linear_pipeline(db_path, card, tmp_path):
     pipeline_path = _write_pipeline_yaml(tmp_path, "multi-step", [
         {"id": "pm", "agent": "pm-agent"},
@@ -249,7 +284,7 @@ async def test_cancel_during_pipeline(db_path, card, tmp_path):
 
     async def _cancel_sensing_launch(
         agent_def, prompt, worktree_path, output_dir, timeout,
-        cancel_event=None, runner_name="", step_id="",
+        idle_timeout=None, cancel_event=None, runner_name="", step_id="",
     ):
         await asyncio.sleep(0.1)
         if cancel_event and cancel_event.is_set():

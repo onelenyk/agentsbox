@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timezone
 from typing import Optional, List
 from uuid import uuid4
@@ -72,10 +73,10 @@ def create_run(card_id: str) -> dict:
     conn = get_conn()
     conn.execute(
         """
-        INSERT INTO runs (id, card_id, status, loop_count, started_at)
-        VALUES (?, ?, 'running', 0, ?)
+        INSERT INTO runs (id, card_id, status, loop_count, started_at, pid)
+        VALUES (?, ?, 'running', 0, ?, ?)
         """,
-        (run_id, card_id, now),
+        (run_id, card_id, now, os.getpid()),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()

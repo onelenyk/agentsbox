@@ -1,25 +1,55 @@
 """Crash recovery — handles orchestrator restart scenarios."""
-from datetime import datetime, timezone
+import os
+from datetime import datetime, timedelta, timezone
 from .db import get_conn
 
 _TERMINAL_STEPS = {"completed", "failed", "timeout", "cancelled", "error"}
 
 
+def _process_alive(pid) -> bool:
+    """Best-effort check whether *pid* names a live OS process."""
+    if pid is None:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, just owned by someone else
+    return True
+
+
 def recover_orphaned_steps():
     """On startup: mark orphaned 'running' steps as 'error', then sync parent run/card status.
 
-    Only touches steps whose run was started more than 2 minutes ago to avoid
-    race conditions with active pipelines sharing the same SQLite database.
+    A step is only considered orphaned if the OS process that owns its run is
+    no longer alive (checked via the run's recorded ``pid``). Runs created
+    before the ``pid`` column existed (``pid IS NULL``) fall back to the old
+    heuristic: orphaned once started more than 2 minutes ago. This avoids
+    treating long-lived-but-active pipelines (owned by a different, still
+    running process sharing this DB) as crashed.
     """
     conn = get_conn()
     now = datetime.now(timezone.utc).isoformat()
 
     cursor = conn.execute("""
-        SELECT s.id FROM steps s
+        SELECT s.id, r.pid, r.started_at FROM steps s
+        JOIN runs r ON r.id = s.run_id
         WHERE s.status = 'running'
-        AND (s.started_at IS NULL OR datetime(s.started_at) < datetime('now', '-2 minutes'))
     """)
-    orphaned_steps = cursor.fetchall()
+    candidates = cursor.fetchall()
+
+    orphaned_steps = []
+    for row in candidates:
+        if row["pid"] is not None:
+            if _process_alive(row["pid"]):
+                continue  # owning process still running — not orphaned
+        elif row["started_at"]:
+            age = datetime.now(timezone.utc) - datetime.fromisoformat(row["started_at"])
+            if age < timedelta(minutes=2):
+                continue  # legacy row, still within grace period
+        orphaned_steps.append(row)
+
     for row in orphaned_steps:
         conn.execute(
             "UPDATE steps SET status = 'error', error = 'orchestrator_crash', completed_at = ? WHERE id = ?",

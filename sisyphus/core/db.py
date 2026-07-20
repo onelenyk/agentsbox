@@ -58,5 +58,9 @@ def init_db():
         conn.execute("ALTER TABLE cards ADD COLUMN name TEXT DEFAULT ''")
     except sqlite3.OperationalError:
         pass  # column already exists
+    try:
+        conn.execute("ALTER TABLE runs ADD COLUMN pid INTEGER")
+    except sqlite3.OperationalError:
+        pass  # column already exists
     conn.commit()
     conn.close()
