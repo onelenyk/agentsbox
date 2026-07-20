@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Sisyphus — Personal AI Agent Orchestration System.
 
-Entrypoint for the Sisyphus Docker container. Provides a Click CLI for
-pipeline execution, card management, and operational commands.
+Local entrypoint. Provides a Click CLI for pipeline execution, card
+management, and operational commands.
 """
 
 import asyncio
@@ -12,6 +12,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import click
+
+os.environ.setdefault(
+    "WORKSPACE_ROOT", str(Path(__file__).resolve().parent / "workspace")
+)
 
 from core.db import init_db, get_conn
 from core.recovery import recover_orphaned_steps
@@ -37,7 +41,7 @@ def cli():
             click.echo(f"Recovered {recovered} orphaned steps (orchestrator crash detected)")
         start_scheduler()
     except Exception as exc:
-        logger.debug("DB init skipped (not in Docker?): %s", exc)
+        logger.debug("DB init skipped: %s", exc)
 
 
 @cli.command()

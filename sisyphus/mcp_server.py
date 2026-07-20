@@ -15,7 +15,9 @@ import sys
 from typing import Any
 
 # Set WORKSPACE_ROOT before importing core modules
-os.environ.setdefault("WORKSPACE_ROOT", os.path.join(os.path.dirname(__file__), "workspace"))
+os.environ.setdefault(
+    "WORKSPACE_ROOT", os.path.join(os.path.dirname(os.path.abspath(__file__)), "workspace")
+)
 
 from core.db import init_db
 from core.recovery import recover_orphaned_steps

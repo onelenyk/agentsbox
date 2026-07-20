@@ -1,6 +1,11 @@
+import os
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+
+_REPO_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
+os.environ.setdefault("WORKSPACE_ROOT", str(_REPO_ROOT / "workspace"))
+
 from fastapi import FastAPI
 from web.routes import router
 from core.scheduler import start_scheduler

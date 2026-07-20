@@ -36,19 +36,11 @@ _cancel_events: dict[str, asyncio.Event] = {}
 # ── 1. resolve_pipeline_path ───────────────────────────────────────────
 
 def resolve_pipeline_path(name: str) -> Path:
-    """Resolve pipeline YAML path, portable across macOS and Docker.
+    """Resolve pipeline YAML path relative to the repo root.
 
-    Tries the local dev path first (relative to this module), then falls
-    back to the Docker container path.
+    Caller handles missing-file errors if it doesn't exist.
     """
-    local = Path(__file__).resolve().parent.parent / "pipelines" / f"{name}.yaml"
-    if local.exists():
-        return local
-    docker = Path(f"/app/pipelines/{name}.yaml")
-    if docker.exists():
-        return docker
-    # Return local path anyway — caller handles missing-file errors.
-    return local
+    return Path(__file__).resolve().parent.parent / "pipelines" / f"{name}.yaml"
 
 
 # ── 2. create_card_only ────────────────────────────────────────────────
