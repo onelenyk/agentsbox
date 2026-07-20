@@ -1,7 +1,7 @@
 import asyncio
 from contextlib import ExitStack
 from pathlib import Path
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
 
 import pytest
 import yaml
@@ -337,3 +337,195 @@ async def test_no_waves_broken_deps_pipeline(db_path, card, tmp_path):
 
     updated_card = get_card(card["id"])
     assert updated_card["status"] == "failed"
+
+
+# ── Worktree tests ─────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_shared_worktree_creates_one_worktree(db_path, card, tmp_path):
+    shared_pipeline = {
+        "name": "shared-wt",
+        "description": "test shared worktree",
+        "shared_worktree": True,
+        "branch": "main",
+        "steps": [
+            {"id": "s1", "agent": "engineer-agent"},
+            {"id": "s2", "agent": "engineer-agent"},
+        ],
+    }
+    pipeline_path = tmp_path / "shared.yaml"
+    pipeline_path.write_text(yaml.dump(shared_pipeline))
+
+    mock_create_wt = MagicMock(return_value="/tmp/fake_shared_wt")
+    mock_remove_wt = MagicMock()
+    mock_init_clone = MagicMock()
+
+    mock_launch = AsyncMock()
+    mock_launch.side_effect = [
+        _agent_result(summary="Step 1 done"),
+        _agent_result(summary="Step 2 done"),
+    ]
+
+    with patch("core.pipeline.init_bare_clone", new=mock_init_clone), \
+         patch("core.pipeline.create_worktree", new=mock_create_wt), \
+         patch("core.pipeline.remove_worktree", new=mock_remove_wt), \
+         patch("core.pipeline.load_agent", side_effect=_mock_load_agent), \
+         patch("core.pipeline._execute_setup_commands", new_callable=AsyncMock), \
+         patch("core.pipeline.validate_pipeline", return_value=[]), \
+         patch("core.templates.render_prompt", return_value="mock prompt"), \
+         patch("core.pipeline.save_resource", return_value="/fake/path"), \
+         patch("core.launcher.launch_agent", new=mock_launch):
+        result = await run_pipeline(
+            str(pipeline_path), card,
+            gitlab_repo_url="https://github.com/test/repo.git",
+        )
+
+    assert result["status"] == "completed"
+
+    mock_create_wt.assert_called_once()
+    assert mock_create_wt.call_args[0][2] == "_shared"
+
+    mock_remove_wt.assert_called_once()
+    assert mock_remove_wt.call_args[0][2] == "_shared"
+
+
+@pytest.mark.asyncio
+async def test_per_step_worktree_default_mode(db_path, card, tmp_path):
+    pipeline_path = _write_pipeline_yaml(tmp_path, "per-step-wt", [
+        {"id": "s1", "agent": "engineer-agent"},
+        {"id": "s2", "agent": "engineer-agent"},
+    ])
+
+    mock_create_wt = MagicMock()
+    mock_remove_wt = MagicMock()
+    mock_init_clone = MagicMock()
+
+    mock_launch = AsyncMock()
+    mock_launch.side_effect = [
+        _agent_result(summary="Step 1 done"),
+        _agent_result(summary="Step 2 done"),
+    ]
+
+    fake_repos_dir = tmp_path / "repos"
+    wt_dir = fake_repos_dir / "worktrees"
+    wt_dir.mkdir(parents=True, exist_ok=True)
+
+    def _side_effect_create_wt(bare_path, run_id, step_id, branch="main"):
+        (wt_dir / f"{run_id}_{step_id}").mkdir(parents=True, exist_ok=True)
+        return str(wt_dir / f"{run_id}_{step_id}")
+
+    mock_create_wt.side_effect = _side_effect_create_wt
+
+    with patch("core.pipeline.init_bare_clone", new=mock_init_clone), \
+         patch("core.pipeline.create_worktree", new=mock_create_wt), \
+         patch("core.pipeline.remove_worktree", new=mock_remove_wt), \
+         patch("core.pipeline.load_agent", side_effect=_mock_load_agent), \
+         patch("core.pipeline._execute_setup_commands", new_callable=AsyncMock), \
+         patch("core.pipeline.validate_pipeline", return_value=[]), \
+         patch("core.templates.render_prompt", return_value="mock prompt"), \
+         patch("core.pipeline.save_resource", return_value="/fake/path"), \
+         patch("core.launcher.launch_agent", new=mock_launch), \
+         patch("core.worktree.REPOS_DIR", new=fake_repos_dir):
+        result = await run_pipeline(
+            pipeline_path, card,
+            gitlab_repo_url="https://github.com/test/repo.git",
+        )
+
+    assert result["status"] == "completed"
+    assert mock_create_wt.call_count == 2
+    assert mock_remove_wt.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_worktree_cleanup_on_failure(db_path, card, tmp_path):
+    pipeline_path = _write_pipeline_yaml(tmp_path, "fail-cleanup", [
+        {"id": "s1", "agent": "engineer-agent"},
+        {"id": "s2", "agent": "engineer-agent"},
+    ])
+
+    mock_create_wt = MagicMock()
+    mock_remove_wt = MagicMock()
+    mock_init_clone = MagicMock()
+
+    mock_launch = AsyncMock()
+    mock_launch.side_effect = [
+        _agent_result(summary="Step 1 done"),
+        _agent_result(status="failed", summary="Step 2 failed"),
+    ]
+
+    fake_repos_dir = tmp_path / "repos"
+    wt_dir = fake_repos_dir / "worktrees"
+    wt_dir.mkdir(parents=True, exist_ok=True)
+
+    def _side_effect_create_wt(bare_path, run_id, step_id, branch="main"):
+        (wt_dir / f"{run_id}_{step_id}").mkdir(parents=True, exist_ok=True)
+        return str(wt_dir / f"{run_id}_{step_id}")
+
+    mock_create_wt.side_effect = _side_effect_create_wt
+
+    with patch("core.pipeline.init_bare_clone", new=mock_init_clone), \
+         patch("core.pipeline.create_worktree", new=mock_create_wt), \
+         patch("core.pipeline.remove_worktree", new=mock_remove_wt), \
+         patch("core.pipeline.load_agent", side_effect=_mock_load_agent), \
+         patch("core.pipeline._execute_setup_commands", new_callable=AsyncMock), \
+         patch("core.pipeline.validate_pipeline", return_value=[]), \
+         patch("core.templates.render_prompt", return_value="mock prompt"), \
+         patch("core.pipeline.save_resource", return_value="/fake/path"), \
+         patch("core.launcher.launch_agent", new=mock_launch), \
+         patch("core.worktree.REPOS_DIR", new=fake_repos_dir):
+        result = await run_pipeline(
+            pipeline_path, card,
+            gitlab_repo_url="https://github.com/test/repo.git",
+        )
+
+    assert result["status"] == "failed"
+
+    assert mock_create_wt.call_count == 2
+    assert mock_remove_wt.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_shared_worktree_cleanup_on_failure(db_path, card, tmp_path):
+    shared_pipeline = {
+        "name": "shared-fail",
+        "description": "test shared worktree failure cleanup",
+        "shared_worktree": True,
+        "branch": "main",
+        "steps": [
+            {"id": "s1", "agent": "engineer-agent"},
+        ],
+    }
+    pipeline_path = tmp_path / "shared_fail.yaml"
+    pipeline_path.write_text(yaml.dump(shared_pipeline))
+
+    mock_create_wt = MagicMock(return_value="/tmp/fake_shared_wt")
+    mock_remove_wt = MagicMock()
+    mock_init_clone = MagicMock()
+
+    mock_launch = AsyncMock()
+    mock_launch.side_effect = [
+        _agent_result(status="failed", summary="Boom"),
+    ]
+
+    with patch("core.pipeline.init_bare_clone", new=mock_init_clone), \
+         patch("core.pipeline.create_worktree", new=mock_create_wt), \
+         patch("core.pipeline.remove_worktree", new=mock_remove_wt), \
+         patch("core.pipeline.load_agent", side_effect=_mock_load_agent), \
+         patch("core.pipeline._execute_setup_commands", new_callable=AsyncMock), \
+         patch("core.pipeline.validate_pipeline", return_value=[]), \
+         patch("core.templates.render_prompt", return_value="mock prompt"), \
+         patch("core.pipeline.save_resource", return_value="/fake/path"), \
+         patch("core.launcher.launch_agent", new=mock_launch):
+        result = await run_pipeline(
+            str(pipeline_path), card,
+            gitlab_repo_url="https://github.com/test/repo.git",
+        )
+
+    assert result["status"] == "failed"
+
+    mock_create_wt.assert_called_once()
+    assert mock_create_wt.call_args[0][2] == "_shared"
+
+    mock_remove_wt.assert_called_once()
+    assert mock_remove_wt.call_args[0][2] == "_shared"

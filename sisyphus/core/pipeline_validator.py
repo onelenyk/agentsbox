@@ -23,6 +23,13 @@ def validate_pipeline_string(yaml_string: str, source: str = "inline") -> list[s
 
     if "name" not in data:
         errors.append(f"{source}: missing required field 'name'")
+    shared = data.get("shared_worktree", False)
+    if not isinstance(shared, bool):
+        errors.append(f"{source}: 'shared_worktree' must be a boolean")
+
+    pipeline_branch = data.get("branch")
+    if pipeline_branch is not None and not isinstance(pipeline_branch, str):
+        errors.append(f"{source}: 'branch' must be a string")
     if "steps" not in data:
         errors.append(f"{source}: missing required field 'steps'")
         return errors
@@ -71,6 +78,18 @@ def validate_pipeline_string(yaml_string: str, source: str = "inline") -> list[s
                 errors.append(
                     f"{source}: step '{sid}' depends_on '{dep}' "
                     f"which is not a valid step id"
+                )
+
+    # If shared_worktree is true, ensure no step has a different branch
+    if shared:
+        for i, step in enumerate(steps):
+            step_branch = step.get("branch")
+            if step_branch and step_branch != (pipeline_branch or "main"):
+                sid = step.get("id", f"index {i}")
+                errors.append(
+                    f"{source}: step '{sid}' has branch '{step_branch}' "
+                    f"but shared_worktree requires all steps to use "
+                    f"the same branch ('{pipeline_branch or 'main'}')"
                 )
 
     if step_ids:
