@@ -183,6 +183,7 @@ async def run_pipeline(
                         bare_path=bare_path,
                         repo_name=repo_name,
                         timeout=_agent_timeout(s),
+                        idle_timeout=_agent_idle_timeout(s),
                         cancel_event=cancel_event,
                         shared_wt_path=shared_wt_path,
                     )
@@ -229,15 +230,19 @@ async def run_pipeline(
                             sid, result.status, actual_status,
                         )
                         if actual_status in ("failed", "error", "timeout"):
-                            # Step was corrupted by concurrent recovery — but agent
-                            # produced valid output. Reset: error → running → completed.
+                            # Step was corrupted by a concurrent recovery race — un-stick
+                            # the FSM and re-apply the agent's actual result, whatever it
+                            # was. Never fabricate "completed" here: that would hide a
+                            # real failure/timeout from the step record while the
+                            # run/card status below still reflects the true outcome.
                             transition_step(step["id"], "running")
                             transition_step(
-                                step["id"], "completed",
-                                json.dumps(result.parsed_result or {}),
-                                error="",
+                                step["id"], result.status, result_json, result.error,
                             )
-                            logger.info("Step '%s' status corrected from '%s' to 'completed'", sid, actual_status)
+                            logger.info(
+                                "Step '%s' status corrected from '%s' to '%s'",
+                                sid, actual_status, result.status,
+                            )
 
                     if result.status in ("failed", "timeout", "error"):
                         error_msg = (
@@ -373,9 +378,10 @@ async def _run_step(
     resources: list,
     bare_path: Optional[str],
     repo_name: Optional[str],
-    timeout: int,
+    timeout: Optional[int],
     cancel_event: asyncio.Event,
     shared_wt_path: Optional[str] = None,
+    idle_timeout: Optional[int] = None,
 ):
     """Execute a single pipeline step.
 
@@ -407,7 +413,9 @@ async def _run_step(
     )
 
     return await launch_agent(
-        agent_def, prompt, worktree_path, output_dir, timeout, cancel_event,
+        agent_def, prompt, worktree_path, output_dir, timeout,
+        idle_timeout=idle_timeout,
+        cancel_event=cancel_event,
         runner_name=agent_def.get("runner"),
         step_id=step_record["id"],
     )
@@ -434,6 +442,7 @@ async def _rerun_engineer(
 
     agent_def = load_agent(eng_step_def.get("agent", "android-engineer"))
     timeout = _agent_timeout(eng_step_def)
+    idle_timeout = _agent_idle_timeout(eng_step_def)
     step_order = _get_step_order(engineer_sid, steps)
 
     # Include reviewer feedback resources (step_order = -1) in the snapshot.
@@ -453,6 +462,7 @@ async def _rerun_engineer(
         bare_path=bare_path,
         repo_name=repo_name,
         timeout=timeout,
+        idle_timeout=idle_timeout,
         cancel_event=cancel_event,
         shared_wt_path=shared_wt_path,
     )
@@ -621,7 +631,28 @@ def _get_step_order(sid: str, steps: list) -> int:
     return 0
 
 
-def _agent_timeout(step_def: dict) -> int:
-    """Extract timeout (seconds) from a step definition's agent config."""
+def _agent_timeout(step_def: dict) -> Optional[int]:
+    """Extract timeout from a step definition.
+    
+    Priority: step timeout > agent config > default 300.
+    Set ``timeout: 0`` in YAML to disable timeout entirely.
+    """
+    step_timeout = step_def.get("timeout")
+    if step_timeout is not None:
+        return step_timeout if step_timeout > 0 else None
     agent_def = load_agent(step_def.get("agent", "android-engineer"))
     return agent_def.get("opencode_config", {}).get("timeout", 300)
+
+
+def _agent_idle_timeout(step_def: dict) -> Optional[int]:
+    """Extract idle_timeout (seconds of no output before killing) from a step definition.
+
+    Priority: step idle_timeout > agent config > None (disabled by default).
+    Set ``idle_timeout: 0`` in YAML to disable it explicitly.
+    """
+    step_idle_timeout = step_def.get("idle_timeout")
+    if step_idle_timeout is not None:
+        return step_idle_timeout if step_idle_timeout > 0 else None
+    agent_def = load_agent(step_def.get("agent", "android-engineer"))
+    idle_timeout = agent_def.get("opencode_config", {}).get("idle_timeout")
+    return idle_timeout if idle_timeout else None

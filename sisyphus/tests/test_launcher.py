@@ -329,6 +329,67 @@ class TestMockAgentTimeout:
         assert result.status == "timeout"
 
 
+class TestIdleTimeout:
+
+    @pytest.mark.asyncio
+    async def test_idle_timeout_fires_on_silent_hang(self, db_path, run):
+        """No output at all for longer than idle_timeout → killed, even under total timeout."""
+        worktree = pathlib.Path(os.environ["WORKSPACE_ROOT"]) / "worktree"
+        worktree.mkdir(parents=True, exist_ok=True)
+        _setup_run_shim(worktree)
+
+        output_dir, step = _make_output_dir(run, "idle-hang")
+
+        init_runners_table()
+        add_runner(
+            "mock-idle-hang",
+            "python3",
+            extra_args=[
+                str(MOCK_DIR / "mock_agent_timeout.py"),
+                "--output-dir", output_dir,
+                "--sleep", "5",
+            ],
+        )
+
+        agent_def = {"name": "Test Idle Hang", "runner": "mock-idle-hang"}
+        result = await launch_agent(
+            agent_def, "anything", str(worktree), output_dir,
+            timeout=30, idle_timeout=1, step_id=step["id"],
+        )
+
+        assert result.status == "timeout"
+        assert "idle timeout" in result.error
+
+    @pytest.mark.asyncio
+    async def test_idle_timeout_does_not_fire_with_active_output(self, db_path, run):
+        """Periodic output resets the idle clock, so a slow-but-alive agent isn't killed."""
+        worktree = pathlib.Path(os.environ["WORKSPACE_ROOT"]) / "worktree"
+        worktree.mkdir(parents=True, exist_ok=True)
+        _setup_run_shim(worktree)
+
+        output_dir, step = _make_output_dir(run, "idle-active")
+
+        init_runners_table()
+        add_runner(
+            "mock-idle-active",
+            "python3",
+            extra_args=[
+                str(MOCK_DIR / "mock_agent_active.py"),
+                "--output-dir", output_dir,
+                "--ticks", "5",
+                "--interval", "0.3",
+            ],
+        )
+
+        agent_def = {"name": "Test Idle Active", "runner": "mock-idle-active"}
+        result = await launch_agent(
+            agent_def, "anything", str(worktree), output_dir,
+            timeout=30, idle_timeout=1, step_id=step["id"],
+        )
+
+        assert result.status == "completed"
+
+
 class TestCancelEvent:
 
     @pytest.mark.asyncio
