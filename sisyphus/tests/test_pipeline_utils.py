@@ -8,6 +8,8 @@ No DB or conftest fixtures needed — these are pure (or mockable) functions.
 """
 from unittest.mock import patch
 
+import yaml
+
 from core.pipeline import (
     _topological_sort,
     _find_engineer_step,
@@ -15,6 +17,7 @@ from core.pipeline import (
     _get_step_order,
     _agent_timeout,
 )
+from core.pipeline_validator import validate_pipeline_string
 
 
 class TestTopologicalSort:
@@ -271,3 +274,86 @@ class TestAgentTimeout:
                 "opencode_config": {"timeout": 0},
             }
             assert _agent_timeout(step_def) == 0
+
+
+class TestSharedWorktreeValidation:
+    """validate_pipeline_string — shared_worktree and branch validation."""
+
+    def test_shared_worktree_default_false(self):
+        """A pipeline without shared_worktree should validate cleanly."""
+        yaml_str = yaml.dump({
+            "name": "test", "steps": [{"id": "s1", "agent": "agent-a"}]
+        })
+        with patch("core.pipeline_validator.load_agent",
+                   return_value={"name": "agent-a"}):
+            errors = validate_pipeline_string(yaml_str, "test.yaml")
+            assert errors == []
+
+    def test_shared_worktree_accepts_bool_true(self):
+        """shared_worktree: true should validate cleanly."""
+        yaml_str = yaml.dump({
+            "name": "test", "shared_worktree": True,
+            "steps": [{"id": "s1", "agent": "agent-a"}],
+        })
+        with patch("core.pipeline_validator.load_agent",
+                   return_value={"name": "agent-a"}):
+            errors = validate_pipeline_string(yaml_str, "test.yaml")
+            assert errors == []
+
+    def test_shared_worktree_rejects_non_bool(self):
+        """shared_worktree: 'yes' (string) should produce a boolean error."""
+        yaml_str = yaml.dump({
+            "name": "test", "shared_worktree": "yes",
+            "steps": [{"id": "s1", "agent": "agent-a"}],
+        })
+        with patch("core.pipeline_validator.load_agent",
+                   return_value={"name": "agent-a"}):
+            errors = validate_pipeline_string(yaml_str, "test.yaml")
+            assert any("shared_worktree" in e and "boolean" in e for e in errors)
+
+    def test_branch_accepts_string(self):
+        """branch: develop should validate cleanly."""
+        yaml_str = yaml.dump({
+            "name": "test", "branch": "develop",
+            "steps": [{"id": "s1", "agent": "agent-a"}],
+        })
+        with patch("core.pipeline_validator.load_agent",
+                   return_value={"name": "agent-a"}):
+            errors = validate_pipeline_string(yaml_str, "test.yaml")
+            assert errors == []
+
+    def test_branch_rejects_non_string(self):
+        """branch: 123 (number) should produce a string error."""
+        yaml_str = yaml.dump({
+            "name": "test", "branch": 123,
+            "steps": [{"id": "s1", "agent": "agent-a"}],
+        })
+        with patch("core.pipeline_validator.load_agent",
+                   return_value={"name": "agent-a"}):
+            errors = validate_pipeline_string(yaml_str, "test.yaml")
+            assert any("branch" in e and "string" in e for e in errors)
+
+    def test_shared_worktree_rejects_step_branch_mismatch(self):
+        """shared_worktree true + step with different branch → error."""
+        yaml_str = yaml.dump({
+            "name": "test", "shared_worktree": True, "branch": "main",
+            "steps": [{"id": "s1", "agent": "agent-a", "branch": "develop"}],
+        })
+        with patch("core.pipeline_validator.load_agent",
+                   return_value={"name": "agent-a"}):
+            errors = validate_pipeline_string(yaml_str, "test.yaml")
+            assert any(
+                "shared_worktree requires" in e or "same branch" in e
+                for e in errors
+            )
+
+    def test_shared_worktree_allows_same_branch_on_step(self):
+        """shared_worktree true + step with same branch → clean."""
+        yaml_str = yaml.dump({
+            "name": "test", "shared_worktree": True, "branch": "main",
+            "steps": [{"id": "s1", "agent": "agent-a", "branch": "main"}],
+        })
+        with patch("core.pipeline_validator.load_agent",
+                   return_value={"name": "agent-a"}):
+            errors = validate_pipeline_string(yaml_str, "test.yaml")
+            assert errors == []

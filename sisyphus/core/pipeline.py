@@ -108,165 +108,141 @@ async def run_pipeline(
         bare_path = f"{workspace_root}/repos/{run_id}_{repo_name}"
         init_bare_clone(gitlab_repo_url, bare_path)
 
+    shared_worktree = pipeline.get("shared_worktree", False)
+    pipeline_branch = pipeline.get("branch", None)
+    shared_wt_path = None
+
+    if shared_worktree and bare_path:
+        branch = pipeline_branch or "main"
+        shared_wt_path = create_worktree(bare_path, run_id, "_shared", branch)
+
     loop_tracker: dict = {}
 
-    for wave_num, wave_steps in enumerate(waves):
-        if cancel_event and cancel_event.is_set():
-            update_card_status(card["id"], "failed")
-            update_run_status(run_id, "failed", "cancelled")
-            return {"run_id": run_id, "status": "failed", "error": "cancelled"}
-
-        logger.info(
-            "Wave %d/%d  steps=%s",
-            wave_num + 1,
-            len(waves),
-            [s["id"] for s in wave_steps],
-        )
-
-        step_orders = {s["id"]: _get_step_order(s["id"], steps) for s in wave_steps}
-
-        min_order = min(step_orders.values())
-        resources = (
-            get_available_resources(run_id, min_order) if min_order >= 0 else []
-        )
-
-        review_retry_count = 0
-        setup_done = False
-
-        while True:
+    try:
+        for wave_num, wave_steps in enumerate(waves):
             if cancel_event and cancel_event.is_set():
                 update_card_status(card["id"], "failed")
                 update_run_status(run_id, "failed", "cancelled")
                 return {"run_id": run_id, "status": "failed", "error": "cancelled"}
 
-            step_records = {}
-            for s in wave_steps:
-                sid = s["id"]
-                agent_def = load_agent(s.get("agent", "android-engineer"))
-                step = create_step(run_id, agent_def["name"], step_orders[sid])
-                transition_step(step["id"], "running")
-                step_records[sid] = step
+            logger.info(
+                "Wave %d/%d  steps=%s",
+                wave_num + 1,
+                len(waves),
+                [s["id"] for s in wave_steps],
+            )
 
-            # Run setup commands once, after steps exist in DB
-            if not setup_done:
+            step_orders = {s["id"]: _get_step_order(s["id"], steps) for s in wave_steps}
+
+            min_order = min(step_orders.values())
+            resources = (
+                get_available_resources(run_id, min_order) if min_order >= 0 else []
+            )
+
+            review_retry_count = 0
+            setup_done = False
+
+            while True:
+                if cancel_event and cancel_event.is_set():
+                    update_card_status(card["id"], "failed")
+                    update_run_status(run_id, "failed", "cancelled")
+                    return {"run_id": run_id, "status": "failed", "error": "cancelled"}
+
+                step_records = {}
                 for s in wave_steps:
-                    step = step_records[s["id"]]
-                    await _execute_setup_commands(
-                        s, step, run_id, step_orders[s["id"]], resources
+                    sid = s["id"]
+                    agent_def = load_agent(s.get("agent", "android-engineer"))
+                    step = create_step(run_id, agent_def["name"], step_orders[sid])
+                    transition_step(step["id"], "running")
+                    step_records[sid] = step
+
+                # Run setup commands once, after steps exist in DB
+                if not setup_done:
+                    for s in wave_steps:
+                        step = step_records[s["id"]]
+                        await _execute_setup_commands(
+                            s, step, run_id, step_orders[s["id"]], resources
+                        )
+                    setup_done = True
+
+                if review_retry_count > 0:
+                    resources = (
+                        get_available_resources(run_id, min_order)
+                        if min_order >= 0
+                        else []
                     )
-                setup_done = True
 
-            if review_retry_count > 0:
-                resources = (
-                    get_available_resources(run_id, min_order)
-                    if min_order >= 0
-                    else []
-                )
-
-            tasks = [
-                _run_step(
-                    agent_def=load_agent(s.get("agent", "android-engineer")),
-                    step_def=s,
-                    step_record=step_records[s["id"]],
-                    run_id=run_id,
-                    card=card,
-                    resources=resources,
-                    bare_path=bare_path,
-                    repo_name=repo_name,
-                    timeout=_agent_timeout(s),
-                    cancel_event=cancel_event,
-                )
-                for s in wave_steps
-            ]
-
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            has_changes_requested = False
-            changes_reviewers: list = []
-
-            for i, result in enumerate(results):
-                s = wave_steps[i]
-                sid = s["id"]
-                step = step_records[sid]
-
-                if isinstance(result, Exception):
-                    transition_step(
-                        step["id"], "failed",
-                        error=f"Agent crashed: {result}",
+                tasks = [
+                    _run_step(
+                        agent_def=load_agent(s.get("agent", "android-engineer")),
+                        step_def=s,
+                        step_record=step_records[s["id"]],
+                        run_id=run_id,
+                        card=card,
+                        resources=resources,
+                        bare_path=bare_path,
+                        repo_name=repo_name,
+                        timeout=_agent_timeout(s),
+                        cancel_event=cancel_event,
+                        shared_wt_path=shared_wt_path,
                     )
-                    error_msg = f"Step '{sid}' crashed: {result}"
-                    update_card_status(card["id"], "failed")
-                    update_run_status(run_id, "failed", error_msg)
-                    return {
-                        "run_id": run_id,
-                        "status": "failed",
-                        "error": error_msg,
-                    }
+                    for s in wave_steps
+                ]
 
-                result_json = (
-                    json.dumps(result.parsed_result)
-                    if result.parsed_result
-                    else None
-                )
-                ok = transition_step(
-                    step["id"], result.status, result_json, result.error,
-                )
-                if not ok:
-                    refreshed = get_step(step["id"])
-                    actual_status = refreshed["status"] if refreshed else "unknown"
-                    logger.warning(
-                        "Step '%s' transition to '%s' failed (currently '%s')",
-                        sid, result.status, actual_status,
-                    )
-                    if actual_status in ("failed", "error", "timeout"):
-                        # Step was corrupted by concurrent recovery — but agent
-                        # produced valid output. Reset: error → running → completed.
-                        transition_step(step["id"], "running")
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                has_changes_requested = False
+                changes_reviewers: list = []
+
+                for i, result in enumerate(results):
+                    s = wave_steps[i]
+                    sid = s["id"]
+                    step = step_records[sid]
+
+                    if isinstance(result, Exception):
                         transition_step(
-                            step["id"], "completed",
-                            json.dumps(result.parsed_result or {}),
-                            error="",
-                        )
-                        logger.info("Step '%s' status corrected from '%s' to 'completed'", sid, actual_status)
-
-                if result.status in ("failed", "timeout", "error"):
-                    error_msg = (
-                        f"Step '{sid}' {result.status}: "
-                        f"{result.error or 'no error details'}"
-                    )
-                    update_card_status(card["id"], "failed")
-                    update_run_status(run_id, "failed", error_msg)
-                    return {
-                        "run_id": run_id,
-                        "status": "failed",
-                        "error": error_msg,
-                    }
-
-                if result.verdict == "changes_requested":
-                    has_changes_requested = True
-                    changes_reviewers.append((i, sid))
-
-            if has_changes_requested:
-                review_retry_count += 1
-                unique_engineers: set = set()
-
-                for idx, reviewer_sid in changes_reviewers:
-                    loop_tracker[reviewer_sid] = (
-                        loop_tracker.get(reviewer_sid, 0) + 1
-                    )
-
-                    if loop_tracker[reviewer_sid] > MAX_REVIEW_LOOPS:
-                        step = step_records[reviewer_sid]
-                        # bypass FSM — forced failure
-                        update_step_status(
                             step["id"], "failed",
-                            error="max_review_loops_exceeded",
+                            error=f"Agent crashed: {result}",
                         )
+                        error_msg = f"Step '{sid}' crashed: {result}"
+                        update_card_status(card["id"], "failed")
+                        update_run_status(run_id, "failed", error_msg)
+                        return {
+                            "run_id": run_id,
+                            "status": "failed",
+                            "error": error_msg,
+                        }
+
+                    result_json = (
+                        json.dumps(result.parsed_result)
+                        if result.parsed_result
+                        else None
+                    )
+                    ok = transition_step(
+                        step["id"], result.status, result_json, result.error,
+                    )
+                    if not ok:
+                        refreshed = get_step(step["id"])
+                        actual_status = refreshed["status"] if refreshed else "unknown"
+                        logger.warning(
+                            "Step '%s' transition to '%s' failed (currently '%s')",
+                            sid, result.status, actual_status,
+                        )
+                        if actual_status in ("failed", "error", "timeout"):
+                            # Step was corrupted by concurrent recovery — but agent
+                            # produced valid output. Reset: error → running → completed.
+                            transition_step(step["id"], "running")
+                            transition_step(
+                                step["id"], "completed",
+                                json.dumps(result.parsed_result or {}),
+                                error="",
+                            )
+                            logger.info("Step '%s' status corrected from '%s' to 'completed'", sid, actual_status)
+
+                    if result.status in ("failed", "timeout", "error"):
                         error_msg = (
-                            f"max_review_loops_exceeded: step "
-                            f"'{reviewer_sid}' requested changes "
-                            f"{MAX_REVIEW_LOOPS + 1} times "
-                            f"(max {MAX_REVIEW_LOOPS})"
+                            f"Step '{sid}' {result.status}: "
+                            f"{result.error or 'no error details'}"
                         )
                         update_card_status(card["id"], "failed")
                         update_run_status(run_id, "failed", error_msg)
@@ -276,71 +252,116 @@ async def run_pipeline(
                             "error": error_msg,
                         }
 
-                    engineer_sid = _find_engineer_step(reviewer_sid, steps)
-                    if not engineer_sid:
-                        logger.warning(
-                            "Reviewer '%s' has no engineer dependency "
-                            "— skipping retry",
-                            reviewer_sid,
+                    if result.verdict == "changes_requested":
+                        has_changes_requested = True
+                        changes_reviewers.append((i, sid))
+
+                if has_changes_requested:
+                    review_retry_count += 1
+                    unique_engineers: set = set()
+
+                    for idx, reviewer_sid in changes_reviewers:
+                        loop_tracker[reviewer_sid] = (
+                            loop_tracker.get(reviewer_sid, 0) + 1
                         )
-                        continue
-                    unique_engineers.add(engineer_sid)
 
-                    reviewer_result = results[idx]
-                    feedback_data = {
-                        "reviewer": reviewer_sid,
-                        "verdict": "changes_requested",
-                        "summary": reviewer_result.summary,
-                        "loop": loop_tracker[reviewer_sid],
-                        "parsed_result": reviewer_result.parsed_result,
-                    }
-                    save_resource(
-                        run_id,
-                        engineer_sid,
-                        "reviewer_feedback.json",
-                        json.dumps(feedback_data, indent=2),
-                        step_order=-1,  # visible to every re-run
-                        resource_type="reviewer_feedback",
-                    )
+                        if loop_tracker[reviewer_sid] > MAX_REVIEW_LOOPS:
+                            step = step_records[reviewer_sid]
+                            # bypass FSM — forced failure
+                            update_step_status(
+                                step["id"], "failed",
+                                error="max_review_loops_exceeded",
+                            )
+                            error_msg = (
+                                f"max_review_loops_exceeded: step "
+                                f"'{reviewer_sid}' requested changes "
+                                f"{MAX_REVIEW_LOOPS + 1} times "
+                                f"(max {MAX_REVIEW_LOOPS})"
+                            )
+                            update_card_status(card["id"], "failed")
+                            update_run_status(run_id, "failed", error_msg)
+                            return {
+                                "run_id": run_id,
+                                "status": "failed",
+                                "error": error_msg,
+                            }
 
-                for engineer_sid in sorted(unique_engineers):
-                    logger.info(
-                        "Re-running engineer '%s' (reviewer loop %d/%d)",
-                        engineer_sid,
-                        loop_tracker.get(
-                            changes_reviewers[0][1], 0
-                        ),
-                        MAX_REVIEW_LOOPS,
-                    )
-                    err = await _rerun_engineer(
-                        engineer_sid=engineer_sid,
-                        steps=steps,
-                        run_id=run_id,
-                        card=card,
-                        resources=resources,
-                        bare_path=bare_path,
-                        repo_name=repo_name,
-                        cancel_event=cancel_event,
-                    )
-                    if err:
-                        update_card_status(card["id"], "failed")
-                        update_run_status(run_id, "failed", err)
-                        return {"run_id": run_id, "status": "failed", "error": err}
+                        engineer_sid = _find_engineer_step(reviewer_sid, steps)
+                        if not engineer_sid:
+                            logger.warning(
+                                "Reviewer '%s' has no engineer dependency "
+                                "— skipping retry",
+                                reviewer_sid,
+                            )
+                            continue
+                        unique_engineers.add(engineer_sid)
 
-                continue
+                        reviewer_result = results[idx]
+                        feedback_data = {
+                            "reviewer": reviewer_sid,
+                            "verdict": "changes_requested",
+                            "summary": reviewer_result.summary,
+                            "loop": loop_tracker[reviewer_sid],
+                            "parsed_result": reviewer_result.parsed_result,
+                        }
+                        save_resource(
+                            run_id,
+                            engineer_sid,
+                            "reviewer_feedback.json",
+                            json.dumps(feedback_data, indent=2),
+                            step_order=-1,  # visible to every re-run
+                            resource_type="reviewer_feedback",
+                        )
 
-            break
+                    for engineer_sid in sorted(unique_engineers):
+                        logger.info(
+                            "Re-running engineer '%s' (reviewer loop %d/%d)",
+                            engineer_sid,
+                            loop_tracker.get(
+                                changes_reviewers[0][1], 0
+                            ),
+                            MAX_REVIEW_LOOPS,
+                        )
+                        err = await _rerun_engineer(
+                            engineer_sid=engineer_sid,
+                            steps=steps,
+                            run_id=run_id,
+                            card=card,
+                            resources=resources,
+                            bare_path=bare_path,
+                            repo_name=repo_name,
+                            cancel_event=cancel_event,
+                            shared_wt_path=shared_wt_path,
+                        )
+                        if err:
+                            update_card_status(card["id"], "failed")
+                            update_run_status(run_id, "failed", err)
+                            return {"run_id": run_id, "status": "failed", "error": err}
 
+                    continue
+
+                break
+
+        update_card_status(card["id"], "completed")
+        update_run_status(run_id, "completed")
+        return {"run_id": run_id, "status": "completed"}
+    finally:
         if bare_path:
-            for s in wave_steps:
+            if shared_wt_path:
                 try:
-                    remove_worktree(bare_path, run_id, s["id"])
+                    remove_worktree(bare_path, run_id, "_shared")
                 except Exception:
                     pass
-
-    update_card_status(card["id"], "completed")
-    update_run_status(run_id, "completed")
-    return {"run_id": run_id, "status": "completed"}
+            else:
+                from core.worktree import REPOS_DIR
+                wt_dir = REPOS_DIR / "worktrees"
+                if wt_dir.exists():
+                    for wt in sorted(wt_dir.glob(f"{run_id}_*"), reverse=True):
+                        step_part = wt.name.replace(f"{run_id}_", "", 1)
+                        try:
+                            remove_worktree(bare_path, run_id, step_part)
+                        except Exception:
+                            pass
 
 
 async def _run_step(
@@ -354,6 +375,7 @@ async def _run_step(
     repo_name: Optional[str],
     timeout: int,
     cancel_event: asyncio.Event,
+    shared_wt_path: Optional[str] = None,
 ):
     """Execute a single pipeline step.
 
@@ -369,8 +391,11 @@ async def _run_step(
     worktree_path = "/tmp"  # fallback when no repo
 
     if bare_path and repo_name:
-        branch = step_def.get("branch", "main")
-        worktree_path = create_worktree(bare_path, run_id, sid, branch)
+        if shared_wt_path:
+            worktree_path = shared_wt_path
+        else:
+            branch = step_def.get("branch", "main")
+            worktree_path = create_worktree(bare_path, run_id, sid, branch)
         access = agent_def.get("access", "read")
         set_access(worktree_path, access)
 
@@ -397,6 +422,7 @@ async def _rerun_engineer(
     bare_path: Optional[str],
     repo_name: Optional[str],
     cancel_event: asyncio.Event,
+    shared_wt_path: Optional[str] = None,
 ) -> Optional[str]:
     """Re-run a single engineer step (called during reviewer retry loop).
 
@@ -428,6 +454,7 @@ async def _rerun_engineer(
         repo_name=repo_name,
         timeout=timeout,
         cancel_event=cancel_event,
+        shared_wt_path=shared_wt_path,
     )
 
     if isinstance(result, Exception):
