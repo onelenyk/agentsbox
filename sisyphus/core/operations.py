@@ -19,6 +19,7 @@ from core.fsm import transition_step
 from core.repos import get_repo
 from core.resources import list_resources
 from core.state import (
+    claim_card,
     create_card,
     get_card,
     get_steps,
@@ -80,6 +81,8 @@ def create_and_run(
     from core.pipeline import run_pipeline
 
     card = create_card_only(pipeline_name, repo_name, description, jira_url, name=name)
+    if not claim_card(card["id"]):
+        return {"status": "failed", "run_id": "", "error": "card_already_claimed"}
     path = str(resolve_pipeline_path(pipeline_name))
     return asyncio.run(run_pipeline(path, card, gitlab_repo_url=repo_url))
 
@@ -96,7 +99,7 @@ async def create_and_run_async(
 ) -> str:
     """Create card + fire pipeline in background. Returns *card_id* immediately."""
     card = create_card_only(pipeline_name, repo_name, description, jira_url, name=name)
-    update_card_status(card["id"], "created")
+    claim_card(card["id"])
     asyncio.create_task(
         _run_bg_async(pipeline_name, card, gitlab_repo_url=repo_url),
     )
@@ -117,14 +120,16 @@ async def run_card(
     if not card:
         raise ValueError(f"Card {card_id} not found")
 
+    if not claim_card(card_id):
+        logger.info("run_card: card %s already claimed/running — skipping", card_id)
+        return
+
     # Auto-resolve repo from repo_name
     repo_name = card.get("repo_name", "")
     if not repo_url and repo_name:
         repo = get_repo(repo_name)
         if repo:
             repo_url = repo["source"]
-
-    update_card_status(card_id, "running")
     await _run_bg_async(card["pipeline_name"], card, gitlab_repo_url=repo_url)
 
 
@@ -151,6 +156,10 @@ async def resume_card(card_id: str) -> None:
     if not run:
         raise ValueError(f"No runs found for card {card_id}")
 
+    if not claim_card(card_id, from_statuses=("failed",)):
+        logger.info("resume_card: card %s not failed or already claimed — skipping", card_id)
+        return
+
     steps = get_steps(run["id"])
     failed_pending = [
         s for s in steps
@@ -163,8 +172,6 @@ async def resume_card(card_id: str) -> None:
         # don't appear as orphaned "running" steps.
         if transition_step(s["id"], "running"):
             transition_step(s["id"], "cancelled", error="superseded_by_resume")
-
-    update_card_status(card_id, "running")
 
     # Fire background execution via the shared helper so card/run
     # statuses stay in sync and cancel events are wired correctly.

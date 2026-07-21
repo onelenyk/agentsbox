@@ -174,6 +174,29 @@ def update_card_status(card_id: str, status: str):
     conn.commit()
     conn.close()
 
+
+def claim_card(card_id: str, from_statuses=("backlog", "created")) -> bool:
+    """Atomically move *card_id* into 'running', only if its current status
+    is one of *from_statuses*.
+
+    Returns True iff this call performed the transition (won the race);
+    False if another caller already claimed it, or it wasn't in a claimable
+    state. Relies on SQLite serializing writers at the file level, so the
+    conditional UPDATE's rowcount is a safe atomic claim check.
+    """
+    conn = get_conn()
+    now = _now()
+    placeholders = ",".join("?" for _ in from_statuses)
+    cur = conn.execute(
+        f"UPDATE cards SET status = 'running', updated_at = ? "
+        f"WHERE id = ? AND status IN ({placeholders})",
+        (now, card_id, *from_statuses),
+    )
+    conn.commit()
+    won = cur.rowcount > 0
+    conn.close()
+    return won
+
 def update_run_status(run_id: str, status: str, error: str = None):
     conn = get_conn()
     now = _now()
