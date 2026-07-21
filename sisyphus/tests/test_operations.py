@@ -2,7 +2,7 @@
 import asyncio
 from unittest.mock import patch
 
-from core.state import get_card
+from core.state import get_card, update_card_status
 from core.operations import (
     resolve_pipeline_path,
     create_card_only,
@@ -92,6 +92,14 @@ class TestRunCard:
         except ValueError as e:
             assert "not found" in str(e)
 
+    def test_run_card_skips_if_already_claimed(self, db_path, card):
+        update_card_status(card["id"], "running")
+        with patch("core.pipeline.run_pipeline") as mock_run:
+            asyncio.run(run_card(card["id"]))
+            mock_run.assert_not_called()
+        updated = get_card(card["id"])
+        assert updated["status"] == "running"
+
 
 class TestResumeCard:
     def test_resume_card_runs_without_error(self, db_path):
@@ -100,11 +108,24 @@ class TestResumeCard:
         card = create_card_only("investigate", "android", "test")
         run = create_run(card["id"])
         create_step(run["id"], "Android Engineer", 1)
+        update_card_status(card["id"], "failed")
 
         with patch("core.pipeline.run_pipeline") as mock_run:
             mock_run.return_value = {"status": "completed", "run_id": run["id"]}
             asyncio.run(resume_card(card["id"]))
             mock_run.assert_called_once()
+
+    def test_resume_card_skips_if_not_failed(self, db_path):
+        from core.state import create_run, create_step
+
+        card = create_card_only("investigate", "android", "test")
+        run = create_run(card["id"])
+        create_step(run["id"], "Android Engineer", 1)
+        # card is still 'backlog' — never marked failed
+
+        with patch("core.pipeline.run_pipeline") as mock_run:
+            asyncio.run(resume_card(card["id"]))
+            mock_run.assert_not_called()
 
     def test_resume_card_unknown_raises(self, db_path):
         try:

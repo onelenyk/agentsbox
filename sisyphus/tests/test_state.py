@@ -2,10 +2,14 @@
 register_resource, get_resources_for_run."""
 
 from core.state import (
+    claim_card,
+    create_card,
     create_run,
     create_step,
+    get_card,
     get_run,
     get_step,
+    update_card_status,
     update_run_status,
     register_resource,
     get_resources_for_run,
@@ -138,3 +142,50 @@ class TestGetResourcesForRun:
         )
         assert len(result_excluded) == 1
         assert result_excluded[0]["filename"] == "mid.txt"
+
+
+class TestClaimCard:
+    def test_claims_from_backlog(self, db_path):
+        card = create_card("investigate", "test", "test card")
+        assert card["status"] == "backlog"
+        won = claim_card(card["id"])
+        assert won is True
+        assert get_card(card["id"])["status"] == "running"
+
+    def test_claims_from_created(self, db_path):
+        card = create_card("investigate", "test", "test card")
+        update_card_status(card["id"], "created")
+        won = claim_card(card["id"])
+        assert won is True
+        assert get_card(card["id"])["status"] == "running"
+
+    def test_second_claim_loses(self, db_path):
+        """Regression test: two concurrent callers racing to claim the same
+        card must not both win — only the first UPDATE's WHERE clause
+        matches, the second sees status already 'running' and no-ops."""
+        card = create_card("investigate", "test", "test card")
+        first = claim_card(card["id"])
+        second = claim_card(card["id"])
+        assert first is True
+        assert second is False
+        assert get_card(card["id"])["status"] == "running"
+
+    def test_rejects_running_by_default(self, db_path):
+        card = create_card("investigate", "test", "test card")
+        update_card_status(card["id"], "running")
+        won = claim_card(card["id"])
+        assert won is False
+
+    def test_rejects_completed_and_failed_by_default(self, db_path):
+        for status in ("completed", "failed"):
+            card = create_card("investigate", "test", "test card")
+            update_card_status(card["id"], status)
+            assert claim_card(card["id"]) is False
+            assert get_card(card["id"])["status"] == status
+
+    def test_custom_from_statuses(self, db_path):
+        card = create_card("investigate", "test", "test card")
+        update_card_status(card["id"], "failed")
+        assert claim_card(card["id"], from_statuses=("backlog", "created")) is False
+        assert claim_card(card["id"], from_statuses=("failed",)) is True
+        assert get_card(card["id"])["status"] == "running"
