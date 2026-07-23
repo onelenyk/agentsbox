@@ -238,6 +238,38 @@ async def test_no_comments_falls_back_to_summary_activity(db_path, card, tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_no_comments_falls_back_on_timed_out_step(db_path, card, tmp_path):
+    """Regression: a step that times out with zero comments must STILL get a
+    fallback activity (from result.error), so a failed step's timeline is never
+    empty. Guards against the class of bug seen when a drifted server ran an
+    older _run_step that lacked the fallback and produced 0 activities."""
+    from core.state import get_activities_for_card
+
+    pipeline_path = _write_pipeline_yaml(tmp_path, "timeout-fallback", [
+        {"id": "engineer", "agent": "engineer-agent"},
+    ])
+
+    mock_launch = AsyncMock()
+    mock_launch.side_effect = [
+        AgentResult(
+            status="timeout", summary="",
+            error="Agent exceeded 300s idle timeout — no output",
+        ),
+    ]
+
+    stack, _ = _enter_standard_patches(mock_launch)
+    with stack:
+        result = await run_pipeline(pipeline_path, card)
+
+    assert result["status"] == "failed"
+
+    activities = get_activities_for_card(card["id"])
+    assert len(activities) == 1
+    assert "idle timeout" in activities[0]["text"]
+    assert activities[0]["author_type"] == "agent"
+
+
+@pytest.mark.asyncio
 async def test_multi_step_linear_pipeline(db_path, card, tmp_path):
     pipeline_path = _write_pipeline_yaml(tmp_path, "multi-step", [
         {"id": "pm", "agent": "pm-agent"},
