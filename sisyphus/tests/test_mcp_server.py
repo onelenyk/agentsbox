@@ -14,33 +14,9 @@ import sys
 import os
 from unittest.mock import MagicMock, patch
 
-# ---------------------------------------------------------------------------
-# Mock side-effect-heavy modules BEFORE importing mcp_server.
-# mcp_server calls init_db(), recover_orphaned_steps(), start_scheduler()
-# at module level.  We mock scheduler and recovery to avoid background
-# threads and noisy recovery output.  DB init is harmless — conftest's
-# pytest_configure already sets SISYPHUS_DB → a test database.
-# If core.scheduler / core.recovery are already imported by other tests,
-# the real modules are already in sys.modules and our mock won't replace
-# them — but start_scheduler is then a no-op (idempotent guard).
-# ---------------------------------------------------------------------------
-_cleanup_needed = []
-for _mod_name in ("core.scheduler", "core.recovery"):
-    if _mod_name not in sys.modules:
-        _m = MagicMock()
-        if _mod_name == "core.recovery":
-            _m.recover_orphaned_steps = MagicMock(return_value=0)
-        if _mod_name == "core.scheduler":
-            _m.start_scheduler = MagicMock(return_value=None)
-            _m.BackgroundScheduler = MagicMock()
-            _m.IntervalTrigger = MagicMock()
-        sys.modules[_mod_name] = _m
-        _cleanup_needed.append(_mod_name)
-
+# mcp_server is now a thin HTTP client: it imports no core modules and has no
+# import-time side effects (no DB init, no scheduler), so importing it is cheap.
 from mcp_server import handle_request, TOOL_DEFINITIONS, HANDLERS
-
-for _mod_name in _cleanup_needed:
-    del sys.modules[_mod_name]
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -399,65 +375,105 @@ class TestHandlers:
 # ===========================================================================
 
 
-class TestHandlerSisyphusListCards:
-    """Test sisyphus_list_cards() directly."""
+class TestToolForwarding:
+    """Every card/repo/runner tool forwards to the daemon's JSON API and passes
+    the daemon's response straight through — the MCP process holds no state."""
 
-    @patch("core.operations.list_cards_filtered", return_value=[])
-    def test_returns_cards_and_count_keys(self, _mock):
-        from mcp_server import HANDLERS
-        result = HANDLERS["sisyphus_list_cards"]()
-        assert "cards" in result
-        assert "count" in result
-        assert result["cards"] == []
-        assert result["count"] == 0
+    def _call(self, tool, **kwargs):
+        sentinel = {"ok": "passthrough"}
+        with patch("mcp_server._daemon", return_value=sentinel) as mock:
+            result = HANDLERS[tool](**kwargs)
+        assert result is sentinel  # response returned unchanged
+        return mock.call_args
 
-    @patch("core.operations.list_cards_filtered", return_value=[{"id": "card-1"}])
-    def test_returns_nonzero_count(self, _mock):
-        from mcp_server import HANDLERS
-        result = HANDLERS["sisyphus_list_cards"]()
-        assert result["count"] == 1
+    # cards
+    def test_create_card_posts_with_run_false(self):
+        args = self._call("sisyphus_create_card", repo="r", description="d")
+        assert args.args[0] == "POST"
+        assert args.args[1] == "/api/v1/cards"
+        assert args.args[2]["repo"] == "r"
+        assert args.args[2]["run"] is False
 
-    @patch("core.operations.list_cards_filtered", return_value=[])
-    def test_passes_filters_correctly(self, mock_filter):
-        from mcp_server import HANDLERS
-        HANDLERS["sisyphus_list_cards"](repo="myrepo", status="running", pipeline="investigate")
-        mock_filter.assert_called_once_with(
-            pipeline="investigate", status="running", repo="myrepo",
+    def test_run_card_posts_with_run_true(self):
+        args = self._call("sisyphus_run_card", repo="r")
+        assert args.args[1] == "/api/v1/cards"
+        assert args.args[2]["run"] is True
+
+    def test_list_cards_gets_with_filter_params(self):
+        args = self._call("sisyphus_list_cards", repo="x", status="running")
+        assert args.args[:2] == ("GET", "/api/v1/cards")
+        assert args.kwargs["params"] == {"repo": "x", "status": "running", "pipeline": ""}
+
+    def test_get_card_gets_by_id(self):
+        assert self._call("sisyphus_get_card", card_id="card-1").args == ("GET", "/api/v1/cards/card-1")
+
+    def test_cancel_card_posts(self):
+        assert self._call("sisyphus_cancel_card", card_id="c").args == ("POST", "/api/v1/cards/c/cancel")
+
+    def test_resume_card_posts(self):
+        assert self._call("sisyphus_resume_card", card_id="c").args == ("POST", "/api/v1/cards/c/resume")
+
+    # repos
+    def test_list_repos(self):
+        assert self._call("sisyphus_list_repos").args == ("GET", "/api/v1/repos")
+
+    def test_add_repo(self):
+        args = self._call("sisyphus_add_repo", name="n", source="s")
+        assert args.args[:2] == ("POST", "/api/v1/repos")
+        assert args.args[2]["name"] == "n" and args.args[2]["source"] == "s"
+
+    def test_delete_repo(self):
+        assert self._call("sisyphus_delete_repo", name="n").args == ("DELETE", "/api/v1/repos/n")
+
+    def test_update_repo(self):
+        assert self._call("sisyphus_update_repo", name="n").args == ("POST", "/api/v1/repos/n/update")
+
+    # runners
+    def test_list_runners(self):
+        assert self._call("sisyphus_list_runners").args == ("GET", "/api/v1/runners")
+
+    def test_add_runner(self):
+        args = self._call("sisyphus_add_runner", name="n", binary="b")
+        assert args.args[:2] == ("POST", "/api/v1/runners")
+        assert args.args[2]["binary"] == "b"
+
+    def test_update_runner(self):
+        args = self._call("sisyphus_update_runner", name="n", binary="b")
+        assert args.args[:2] == ("PATCH", "/api/v1/runners/n")
+
+    def test_delete_runner(self):
+        assert self._call("sisyphus_delete_runner", name="n").args == ("DELETE", "/api/v1/runners/n")
+
+    def test_runner_health(self):
+        assert self._call("sisyphus_runner_health", name="n").args == ("POST", "/api/v1/runners/n/health")
+
+    def test_runner_set_default(self):
+        assert self._call("sisyphus_runner_set_default", name="n").args == ("POST", "/api/v1/runners/n/set-default")
+
+
+class TestDaemonHelper:
+    """The _daemon HTTP client degrades gracefully."""
+
+    def test_unreachable_daemon_returns_friendly_error(self):
+        import urllib.error
+        from mcp_server import _daemon
+        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("Connection refused")):
+            result = _daemon("GET", "/api/v1/cards")
+        assert "error" in result
+        assert "not reachable" in result["error"]
+        assert "uvicorn" in result["error"]
+
+    def test_http_error_detail_surfaced(self):
+        import io
+        import urllib.error
+        from mcp_server import _daemon
+        err = urllib.error.HTTPError(
+            "u", 404, "Not Found", {}, io.BytesIO(b'{"detail":"Card x not found"}'),
         )
-
-
-class TestHandlerSisyphusListRepos:
-    """Test sisyphus_list_repos() directly."""
-
-    @patch("core.repos.list_repos", return_value=[])
-    def test_returns_repos_key(self, _mock):
-        from mcp_server import HANDLERS
-        result = HANDLERS["sisyphus_list_repos"]()
-        assert "repos" in result
-        assert result["repos"] == []
-
-    @patch("core.repos.list_repos", return_value=[{"name": "r1"}, {"name": "r2"}])
-    def test_returns_repos_list(self, _mock):
-        from mcp_server import HANDLERS
-        result = HANDLERS["sisyphus_list_repos"]()
-        assert len(result["repos"]) == 2
-
-
-class TestHandlerSisyphusListRunners:
-    """Test sisyphus_list_runners() directly."""
-
-    @patch("core.runners.list_runners", return_value=[])
-    def test_returns_runners_key(self, _mock):
-        from mcp_server import HANDLERS
-        result = HANDLERS["sisyphus_list_runners"]()
-        assert "runners" in result
-        assert result["runners"] == []
-
-    @patch("core.runners.list_runners", return_value=[{"name": "default"}])
-    def test_returns_runners_list(self, _mock):
-        from mcp_server import HANDLERS
-        result = HANDLERS["sisyphus_list_runners"]()
-        assert len(result["runners"]) == 1
+        with patch("urllib.request.urlopen", side_effect=err):
+            result = _daemon("GET", "/api/v1/cards/x")
+        assert "error" in result
+        assert "not found" in result["error"].lower()
 
 
 class TestHandlerSisyphusServerStatus:
@@ -488,32 +504,6 @@ class TestHandlerSisyphusServerStatus:
             from mcp_server import HANDLERS
             result = HANDLERS["sisyphus_server_status"]()
             assert result["port"] == 7677
-
-
-class TestHandlerSisyphusCreateCard:
-    """Test sisyphus_create_card() — uses db_path fixture."""
-
-    def test_returns_card_id_and_status_backlog(self, db_path):
-        from mcp_server import HANDLERS
-        result = HANDLERS["sisyphus_create_card"](repo="test-repo", description="test description")
-        assert "card_id" in result
-        assert result["card_id"].startswith("card-")
-        assert result["status"] == "backlog"
-        assert result["pipeline"] == "investigate"
-
-    def test_custom_pipeline(self, db_path):
-        from mcp_server import HANDLERS
-        result = HANDLERS["sisyphus_create_card"](
-            repo="r", description="d", pipeline="custom-pipeline",
-        )
-        assert result["pipeline"] == "custom-pipeline"
-
-    def test_jira_url_preserved(self, db_path):
-        from mcp_server import HANDLERS
-        result = HANDLERS["sisyphus_create_card"](
-            repo="r", description="d", jira_url="https://jira.example.com/PROJ-1",
-        )
-        assert result["card_id"] is not None
 
 
 class TestHandlerSisyphusServerStart:
@@ -558,173 +548,6 @@ class TestHandlerSisyphusServerStop:
             assert result["running"] is False
             assert result["stopped"] is True
             mock_kill.assert_called_once_with(11111, 15)  # SIGTERM = 15
-
-
-class TestHandlerSisyphusRunCard:
-    """Test sisyphus_run_card() — mock core.operations."""
-
-    @patch("core.operations.create_and_run",
-           return_value={"status": "completed", "run_id": "run-abc", "error": ""})
-    def test_returns_status_and_run_id(self, _mock):
-        from mcp_server import HANDLERS
-        result = HANDLERS["sisyphus_run_card"](repo="r", description="d")
-        assert result["status"] == "completed"
-        assert result["run_id"] == "run-abc"
-        assert result["error"] == ""
-
-
-class TestHandlerSisyphusCancelCard:
-    """Test sisyphus_cancel_card() — mock core.operations."""
-
-    @patch("core.operations.cancel_card")
-    def test_returns_success(self, mock_cancel):
-        from mcp_server import HANDLERS
-        import asyncio
-        async def _fake(cid):
-            pass
-        mock_cancel.side_effect = _fake
-        result = HANDLERS["sisyphus_cancel_card"](card_id="card-xyz")
-        assert result["success"] is True
-        assert result["card_id"] == "card-xyz"
-
-
-class TestHandlerSisyphusResumeCard:
-    """Test sisyphus_resume_card() — mock core.operations."""
-
-    @patch("core.operations.resume_card")
-    def test_returns_success(self, mock_resume):
-        from mcp_server import HANDLERS
-        import asyncio
-        async def _fake(cid):
-            pass
-        mock_resume.side_effect = _fake
-        result = HANDLERS["sisyphus_resume_card"](card_id="card-xyz")
-        assert result["success"] is True
-        assert result["card_id"] == "card-xyz"
-
-
-class TestHandlerSisyphusGetCard:
-    """Test sisyphus_get_card() — mock core.operations."""
-
-    @patch("core.operations.get_card_detail",
-           return_value={"card": {"id": "card-1"}, "runs": [], "steps": [], "resources": []})
-    def test_returns_card_detail(self, _mock):
-        from mcp_server import HANDLERS
-        result = HANDLERS["sisyphus_get_card"](card_id="card-1")
-        assert "card" in result
-        assert result["card"]["id"] == "card-1"
-
-
-class TestHandlerSisyphusAddRepo:
-    """Test sisyphus_add_repo() — mock core.repos."""
-
-    @patch("core.repos.add_repo", return_value="/bare/test-repo")
-    def test_returns_repo_info(self, _mock):
-        from mcp_server import HANDLERS
-        result = HANDLERS["sisyphus_add_repo"](name="test", source="https://github.com/u/r.git")
-        assert result["name"] == "test"
-        assert result["source"] == "https://github.com/u/r.git"
-        assert result["bare_path"] == "/bare/test-repo"
-
-
-class TestHandlerSisyphusDeleteRepo:
-    """Test sisyphus_delete_repo() — mock core.repos."""
-
-    @patch("core.repos.delete_repo")
-    def test_returns_success(self, mock_delete):
-        from mcp_server import HANDLERS
-        result = HANDLERS["sisyphus_delete_repo"](name="to-delete")
-        assert result["success"] is True
-        assert result["name"] == "to-delete"
-        mock_delete.assert_called_once_with("to-delete")
-
-
-class TestHandlerSisyphusUpdateRepo:
-    """Test sisyphus_update_repo() — mock core.repos."""
-
-    @patch("core.repos.update_repo", return_value=True)
-    def test_returns_success(self, mock_update):
-        from mcp_server import HANDLERS
-        result = HANDLERS["sisyphus_update_repo"](name="to-update")
-        assert result["success"] is True
-        assert result["name"] == "to-update"
-
-
-class TestHandlerSisyphusAddRunner:
-    """Test sisyphus_add_runner() — mock core.runners."""
-
-    @patch("core.runners.add_runner",
-           return_value={"id": 1, "name": "default", "binary": "opencode", "type": "opencode"})
-    def test_returns_runner_info(self, _mock):
-        from mcp_server import HANDLERS
-        result = HANDLERS["sisyphus_add_runner"](name="default", binary="opencode")
-        assert result["id"] == 1
-        assert result["name"] == "default"
-        assert result["binary"] == "opencode"
-
-
-class TestHandlerSisyphusUpdateRunner:
-    """Test sisyphus_update_runner() — mock core.runners."""
-
-    @patch("core.runners.update_runner")
-    @patch("core.runners.get_runner_by_name",
-           return_value={"id": 1, "name": "test-runner"})
-    def test_returns_success(self, _mock_get, mock_update):
-        from mcp_server import HANDLERS
-        result = HANDLERS["sisyphus_update_runner"](name="test-runner", binary="/new/path")
-        assert result["success"] is True
-        assert result["name"] == "test-runner"
-        mock_update.assert_called_once_with(1, binary="/new/path")
-
-    @patch("core.runners.get_runner_by_name", return_value=None)
-    def test_returns_error_when_not_found(self, _mock_get):
-        from mcp_server import HANDLERS
-        result = HANDLERS["sisyphus_update_runner"](name="nonexistent")
-        assert "error" in result
-        assert "not found" in result["error"]
-
-
-class TestHandlerSisyphusDeleteRunner:
-    """Test sisyphus_delete_runner() — mock core.runners."""
-
-    @patch("core.runners.delete_runner")
-    @patch("core.runners.get_runner_by_name",
-           return_value={"id": 2, "name": "to-delete"})
-    def test_returns_success(self, _mock_get, mock_delete):
-        from mcp_server import HANDLERS
-        result = HANDLERS["sisyphus_delete_runner"](name="to-delete")
-        assert result["success"] is True
-        assert result["name"] == "to-delete"
-
-
-class TestHandlerSisyphusRunnerHealth:
-    """Test sisyphus_runner_health() — mock core.runners."""
-
-    @patch("core.runners.health_check")
-    @patch("core.runners.get_runner_by_name",
-           return_value={"id": 1, "name": "default"})
-    def test_returns_health_result(self, _mock_get, mock_health):
-        import asyncio
-        async def _fake(runner_id):
-            return {"binary_ok": True, "api_key": True}
-        mock_health.side_effect = _fake
-        from mcp_server import HANDLERS
-        result = HANDLERS["sisyphus_runner_health"](name="default")
-        assert result["binary_ok"] is True
-        assert result["api_key"] is True
-
-
-class TestHandlerSisyphusRunnerSetDefault:
-    """Test sisyphus_runner_set_default() — mock core.runners."""
-
-    @patch("core.runners.set_default_runner")
-    @patch("core.runners.get_runner_by_name",
-           return_value={"id": 1, "name": "default"})
-    def test_returns_success(self, _mock_get, mock_set):
-        from mcp_server import HANDLERS
-        result = HANDLERS["sisyphus_runner_set_default"](name="default")
-        assert result["success"] is True
-        assert result["name"] == "default"
 
 
 # ===========================================================================

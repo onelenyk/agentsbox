@@ -25,40 +25,45 @@ Register at least one repo and runner before running a pipeline — there's no C
 python3 sisyphus.py runners add --name opencode --binary opencode --default
 ```
 
-## Quick Start
+## Architecture: one daemon, thin clients
 
-Three ways to run Sisyphus, all direct Python processes:
-
-```bash
-# CLI — create a card and run a pipeline
-python3 sisyphus.py run --repo sisyphus --pipeline investigate --desc "Investigate X" --detach
-
-# Check status / logs
-python3 sisyphus.py status
-python3 sisyphus.py status <card_id> --verbose
-python3 sisyphus.py logs <card_id> --follow
-
-# Cancel / resume / list / cleanup
-python3 sisyphus.py cancel <card_id>
-python3 sisyphus.py list --status running
-python3 sisyphus.py cleanup --keep-days 7 --dry-run
-
-# Runners and scheduler
-python3 sisyphus.py runners list
-python3 sisyphus.py scheduler status
-```
+The **web/API server is the daemon** — the single always-on process. It owns the
+only scheduler and executes all pipeline runs in its own event loop, so a run
+survives its trigger: start one from the AI chat and it keeps going in the
+daemon even if the chat closes. It serves both the browser (kanban UI) and a
+JSON API at `/api/v1`.
 
 ```bash
-# Web UI + API (manual dashboard) — kanban board over the same cards/runs
+# Start the daemon (Web UI + JSON API + scheduler + executor)
 python3 -m uvicorn web.app:app --host 0.0.0.0 --port 7677
 ```
 
+The **MCP server is a thin client** of the daemon — it holds no state and forwards
+every tool call over HTTP. Register it in your MCP client (e.g. an AI chat) to
+drive the same system the Web UI drives:
+
 ```bash
-# MCP server (agent control) — stdio JSON-RPC, zero external deps
+# points at the daemon via SISYPHUS_DAEMON_URL (default http://127.0.0.1:7677)
 python3 mcp_server.py
 ```
 
-Register `mcp_server.py` as an MCP stdio server in your MCP client config to give an agent the same card/repo/runner/pipeline control as the CLI and web UI. It can also start/stop/check the web server itself via the `sisyphus_server_start` / `sisyphus_server_stop` / `sisyphus_server_status` tools.
+If the daemon isn't running, MCP tools return a friendly "daemon not reachable"
+message; the `sisyphus_server_start` tool can bring it up.
+
+The **CLI** is for local one-shots (it runs a pipeline in-process and exits — no
+background scheduler):
+
+```bash
+python3 sisyphus.py run --repo sisyphus --pipeline investigate --desc "Investigate X"
+python3 sisyphus.py status [<card_id> --verbose]
+python3 sisyphus.py logs <card_id> --follow
+python3 sisyphus.py list --status running
+python3 sisyphus.py cancel <card_id>
+python3 sisyphus.py runners list
+```
+
+All three surfaces share the same `core/` logic — the daemon just exposes it
+over HTTP for the clients.
 
 ## Configuration
 

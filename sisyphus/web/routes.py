@@ -18,7 +18,9 @@ def _tmpl():
 
 @router.on_event("startup")
 async def startup():
+    from core.runners import init_runners_table
     init_db()
+    init_runners_table()  # daemon is self-sufficient: seed the runners table
     recover_orphaned_steps()
     start_scheduler()
 
