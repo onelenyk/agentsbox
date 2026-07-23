@@ -17,4 +17,10 @@ start_scheduler()
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("web.app:app", host="0.0.0.0", port=7677, reload=True)
+    # Reload is OFF by default: across a long session with many edits, uvicorn's
+    # auto-reload drifts from disk (partial reloads leave the worker running a
+    # mix of old/new code), which silently produces behavior that no longer
+    # matches the source. Opt in with SISYPHUS_RELOAD=1 for a quick edit loop;
+    # otherwise restart the process to pick up changes.
+    reload = os.environ.get("SISYPHUS_RELOAD") == "1"
+    uvicorn.run("web.app:app", host="0.0.0.0", port=7677, reload=reload)

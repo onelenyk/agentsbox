@@ -141,7 +141,7 @@ async def launch_agent(
     prompt: str,
     worktree_path: str,
     output_dir: str,
-    timeout: Optional[int] = 300,
+    timeout: Optional[int] = None,
     idle_timeout: Optional[int] = None,
     cancel_event: Optional[asyncio.Event] = None,
     runner_name: Optional[str] = None,
