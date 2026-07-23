@@ -6,7 +6,7 @@ opencode_config:
   tools: [read, grep, glob, bash]
   max_tokens: 16000
   timeout: 300
-  idle_timeout: 60
+  idle_timeout: 300
 output_fields:
   status: required
   summary: required
