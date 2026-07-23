@@ -9,16 +9,18 @@ import asyncio
 import json
 import logging
 import os
+from contextlib import suppress
 from pathlib import Path
 from typing import Optional
 from collections import defaultdict, deque
 
 import yaml
 
-from core.state import create_run, create_step, get_step, update_step_status, update_card_status, update_run_status
+from core.state import add_activity, create_run, create_step, get_step, update_step_status, update_card_status, update_run_status
 from core.launcher import AgentResult
+from core.events import EventIngestor
 from core.fsm import transition_step
-from core.resources import get_available_resources, init_run_dir, save_resource
+from core.resources import get_available_resources, init_run_dir, register_output_files, save_resource
 from core.worktree import (
     create_worktree,
     init_bare_clone,
@@ -311,7 +313,7 @@ async def run_pipeline(
                         }
                         save_resource(
                             run_id,
-                            engineer_sid,
+                            step_records[reviewer_sid]["id"],
                             "reviewer_feedback.json",
                             json.dumps(feedback_data, indent=2),
                             step_order=-1,  # visible to every re-run
@@ -393,7 +395,9 @@ async def _run_step(
 
     sid = step_def["id"]
     workspace_root = os.environ.get("WORKSPACE_ROOT", "/workspace")
-    output_dir = f"{workspace_root}/runs/{run_id}/resources/{sid}"
+    # Output dir is keyed by the DB step id — the same id resources are
+    # registered under, so launcher/agent/registration all agree on one dir.
+    output_dir = f"{workspace_root}/runs/{run_id}/resources/{step_record['id']}"
     worktree_path = "/tmp"  # fallback when no repo
 
     if bare_path and repo_name:
@@ -408,17 +412,43 @@ async def _run_step(
     prompt = render_prompt(
         agent_def,
         card,
-        {"id": sid, "run_id": run_id, "worktree_path": worktree_path},
+        {"id": sid, "db_id": step_record["id"], "run_id": run_id, "worktree_path": worktree_path},
         resources,
     )
 
-    return await launch_agent(
-        agent_def, prompt, worktree_path, output_dir, timeout,
-        idle_timeout=idle_timeout,
-        cancel_event=cancel_event,
-        runner_name=agent_def.get("runner"),
-        step_id=step_record["id"],
+    ingestor = EventIngestor(
+        Path(output_dir) / "events.jsonl",
+        card["id"], run_id, step_record["id"], agent_def.get("name", sid),
     )
+    ingest_task = asyncio.create_task(ingestor.run())
+    try:
+        result = await launch_agent(
+            agent_def, prompt, worktree_path, output_dir, timeout,
+            idle_timeout=idle_timeout,
+            cancel_event=cancel_event,
+            runner_name=agent_def.get("runner"),
+            step_id=step_record["id"],
+        )
+    finally:
+        ingest_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await ingest_task
+        ingestor.ingest_once()  # final sweep for lines written near exit
+
+    register_output_files(
+        run_id, step_record["id"], output_dir, step_record["step_order"],
+    )
+
+    if ingestor.comment_count == 0 and (result.summary or result.error):
+        # Agent never used the comment tool — keep the timeline non-empty
+        # with the result summary (or the error for failed steps).
+        add_activity(
+            card["id"], result.summary or result.error,
+            author=agent_def.get("name", sid), author_type="agent",
+            run_id=run_id, step_id=step_record["id"],
+        )
+
+    return result
 
 
 async def _rerun_engineer(

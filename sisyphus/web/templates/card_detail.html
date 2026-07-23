@@ -1,4 +1,4 @@
-<div class="detail-panel">
+<div class="detail-panel" hx-get="/api/cards/{{ card.id }}/detail" hx-trigger="cardUpdated from:body{% if card.status == 'running' %}, every 3s{% endif %}" hx-swap="outerHTML">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
         <h2 style="margin:0">{{ card.name or card.description[:80] }}</h2>
         <span class="status status-{{ card.status }}">{{ card.status }}</span>
@@ -54,6 +54,30 @@ graph LR
 {% endfor %}
     </div>
     {% endif %}
+
+    <h3 style="margin-top:16px">Activity</h3>
+    {% for a in activities %}
+    <div style="padding:8px 0;border-bottom:1px solid #21262d">
+        <div style="display:flex;gap:8px;align-items:baseline">
+            <span style="font-size:12px;font-weight:600;padding:1px 8px;border-radius:10px;background:{% if a.author_type == 'human' %}#1f3a5f;color:#58a6ff{% else %}#1b3a2d;color:#3fb950{% endif %}">{{ a.author or a.author_type }}</span>
+            <span style="color:#8b949e;font-size:11px">{{ a.created_at[:19] }}</span>
+        </div>
+        <div style="margin-top:4px;font-size:13px;white-space:pre-wrap">{{ a.text }}</div>
+        {% if a.resources %}
+        <div style="margin-top:4px">
+            {% for fn in a.resources %}
+            <a href="#" style="font-size:12px;margin-right:10px" hx-get="/api/resources/{{ a.run_id }}/{{ fn }}?step_id={{ a.step_id }}" hx-target="#resource-content">📎 {{ fn }}</a>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    {% else %}
+    <div style="color:#8b949e;font-size:13px;padding:8px 0">No activity yet.</div>
+    {% endfor %}
+    <form hx-post="/api/cards/{{ card.id }}/comments" hx-swap="none" style="margin-top:10px">
+        <textarea name="text" required rows="2" placeholder="Add a comment…" style="width:100%;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:8px;font-size:13px;resize:vertical"></textarea>
+        <button type="submit" class="btn btn-primary" style="margin-top:6px">Comment</button>
+    </form>
 
     {% if resources %}
     <h3 style="margin-top:16px">Resources</h3>

@@ -43,12 +43,16 @@ class TestOpenCodeReal:
 
     @pytest.mark.asyncio
     async def test_opencode_runs_and_produces_output(self, runner, work_env):
+        """Doubles as a toolbelt integration test: the agent must call finish."""
         result = await launch_agent(
             agent_def={"name": "Smoke", "role": "test", "access": "read"},
-            prompt="Reply with exactly: completed.",
+            prompt=(
+                "Run exactly this bash command and nothing else:\n"
+                '"$SISYPHUS_AGENT_TOOL" finish --status completed --summary "smoke ok"'
+            ),
             worktree_path="/tmp",
             output_dir=work_env["output_dir"],
-            timeout=30,
+            timeout=60,
             runner_name=runner["name"],
             step_id=work_env["step_id"],
         )
@@ -59,18 +63,11 @@ class TestOpenCodeReal:
         BaseResult(**result.parsed_result)
 
     @pytest.mark.asyncio
-    async def test_sisyphus_prompt_format_works(self, runner, work_env):
-        prompt = (
-            "You are a test agent.\n"
-            "## Your Task\n"
-            "Confirm test infrastructure works. Reply briefly.\n"
-            "## Output\n"
-            "Provide status=completed and a short summary."
-        )
-
+    async def test_no_finish_call_fails_step(self, runner, work_env):
+        """Fail-fast: an agent that never reports a result fails the step."""
         result = await launch_agent(
             agent_def={"name": "PM", "role": "PM", "access": "read"},
-            prompt=prompt,
+            prompt="Reply briefly with the word ok. Do not run any commands.",
             worktree_path="/tmp",
             output_dir=work_env["output_dir"],
             timeout=60,
@@ -78,7 +75,8 @@ class TestOpenCodeReal:
             step_id=work_env["step_id"],
         )
 
-        assert result.status in ("completed", "failed"), f"Unexpected: {result.status}"
+        assert result.status == "failed", f"Expected failed, got {result.status}"
+        assert "agent_no_result" in (result.error or "")
 
     @pytest.mark.asyncio
     async def test_timeout_kills_opencode(self, runner, work_env):

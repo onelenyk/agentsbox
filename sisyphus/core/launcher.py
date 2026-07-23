@@ -179,6 +179,9 @@ async def launch_agent(
     env["SISYPHUS_OUTPUT_DIR"] = str(output_dir)
     env["SISYPHUS_WORKTREE"] = str(worktree_path)
     env["SISYPHUS_DB_READONLY"] = "1"
+    env["SISYPHUS_AGENT_TOOL"] = str(
+        Path(__file__).resolve().parent.parent / "tools" / "agent_cli.py"
+    )
     if runner.get("model"):
         env["SISYPHUS_MODEL"] = runner["model"]
 
@@ -251,55 +254,35 @@ async def launch_agent(
     if status == "timeout":
         return AgentResult(status="timeout", duration_ms=duration, error=err)
 
-    try:
-        from core.resources import save_analysis_md
-        save_analysis_md(run_id, step, stdout_str)
-    except Exception:
-        pass
-
     result_json_path = output_path / "result.json"
 
-    # If agent wrote result.json, use it
-    if result_json_path.exists():
-        try:
-            raw_json = result_json_path.read_text(encoding="utf-8")
-            parsed = json.loads(raw_json)
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            return AgentResult(
-                status="failed", duration_ms=duration,
-                error=f"schema_validation_failed: invalid JSON: {e}",
-                raw_stdout=stdout_str, raw_stderr=stderr_str,
-            )
-        try:
-            result = BaseResult(**parsed)
-        except ValidationError as e:
-            return AgentResult(
-                status="failed", duration_ms=duration,
-                error=f"schema_validation_failed: {e}",
-                raw_stdout=stdout_str, raw_stderr=stderr_str,
-            )
-    else:
-        # Auto-generate result.json from exit code
-        auto_status = "completed" if proc.returncode == 0 else "failed"
-        auto_summary = (stdout_str[:200] + "...") if len(stdout_str) > 200 else stdout_str
-        auto_summary = auto_summary.replace("\n", " ").strip() or "No output"
-        
-        parsed = {"status": auto_status, "summary": auto_summary}
-        error_msg = stderr_str[:200] if proc.returncode != 0 and stderr_str else None
-        
-        from core.resources import save_result_json
-        save_result_json(run_id, step, parsed)
-        
-        if proc.returncode != 0:
-            return AgentResult(
-                status="failed", duration_ms=duration,
-                summary=auto_summary, error=error_msg or f"Agent exited with code {proc.returncode}",
-                parsed_result=parsed, raw_stdout=stdout_str, raw_stderr=stderr_str,
-            )
-        
+    # The agent MUST produce result.json (via the finish tool) — no result
+    # means a failed step. Statuses are never invented from the exit code.
+    if not result_json_path.exists():
         return AgentResult(
-            status="completed", duration_ms=duration,
-            summary=auto_summary, parsed_result=parsed,
+            status="failed", duration_ms=duration,
+            error=(
+                f"agent_no_result: agent exited with code {proc.returncode} "
+                f'without writing result.json — it must call "$SISYPHUS_AGENT_TOOL" finish'
+            ),
+            raw_stdout=stdout_str, raw_stderr=stderr_str,
+        )
+
+    try:
+        raw_json = result_json_path.read_text(encoding="utf-8")
+        parsed = json.loads(raw_json)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        return AgentResult(
+            status="failed", duration_ms=duration,
+            error=f"schema_validation_failed: invalid JSON: {e}",
+            raw_stdout=stdout_str, raw_stderr=stderr_str,
+        )
+    try:
+        result = BaseResult(**parsed)
+    except ValidationError as e:
+        return AgentResult(
+            status="failed", duration_ms=duration,
+            error=f"schema_validation_failed: {e}",
             raw_stdout=stdout_str, raw_stderr=stderr_str,
         )
 

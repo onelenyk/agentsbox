@@ -2,11 +2,14 @@
 register_resource, get_resources_for_run."""
 
 from core.state import (
+    add_activity,
     claim_card,
     create_card,
     create_run,
     create_step,
+    get_activities_for_card,
     get_card,
+    get_resource_filenames_for_step,
     get_run,
     get_step,
     update_card_status,
@@ -189,3 +192,55 @@ class TestClaimCard:
         assert claim_card(card["id"], from_statuses=("backlog", "created")) is False
         assert claim_card(card["id"], from_statuses=("failed",)) is True
         assert get_card(card["id"])["status"] == "running"
+
+
+class TestActivities:
+    def test_add_and_get_ordered(self, db_path, card):
+        add_activity(card["id"], "first", author="Engineer",
+                     created_at="2026-07-22T10:00:00+00:00")
+        add_activity(card["id"], "second", author="user", author_type="human",
+                     created_at="2026-07-22T10:00:05+00:00")
+
+        activities = get_activities_for_card(card["id"])
+        assert [a["text"] for a in activities] == ["first", "second"]
+        assert activities[0]["author_type"] == "agent"
+        assert activities[1]["author_type"] == "human"
+
+    def test_resources_json_round_trip(self, db_path, card):
+        added = add_activity(card["id"], "with files", resources=["a.md", "b.json"])
+        assert added["resources"] == ["a.md", "b.json"]
+        fetched = get_activities_for_card(card["id"])[0]
+        assert fetched["resources"] == ["a.md", "b.json"]
+
+    def test_nullable_run_and_step(self, db_path, card):
+        added = add_activity(card["id"], "human note", author_type="human")
+        assert added["run_id"] is None
+        assert added["step_id"] is None
+
+    def test_invalid_author_type_rejected(self, db_path, card):
+        import sqlite3
+        try:
+            add_activity(card["id"], "bad", author_type="robot")
+            assert False, "Expected IntegrityError"
+        except sqlite3.IntegrityError:
+            pass
+
+    def test_created_at_defaults_to_now(self, db_path, card):
+        added = add_activity(card["id"], "no ts given")
+        assert added["created_at"]  # non-empty ISO string
+
+
+class TestGetResourceFilenamesForStep:
+    def test_returns_registered_filenames(self, db_path, run):
+        step = create_step(run["id"], "Engineer", 1)
+        register_resource(run["id"], step["id"], "a.md")
+        register_resource(run["id"], step["id"], "b.json")
+        other = create_step(run["id"], "Other", 2)
+        register_resource(run["id"], other["id"], "c.md")
+
+        names = get_resource_filenames_for_step(run["id"], step["id"])
+        assert names == {"a.md", "b.json"}
+
+    def test_empty_when_none(self, db_path, run):
+        step = create_step(run["id"], "Engineer", 1)
+        assert get_resource_filenames_for_step(run["id"], step["id"]) == set()

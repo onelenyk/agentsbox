@@ -107,14 +107,14 @@ class TestAgentPromptContracts:
         declared = agent.get("output_fields", {})
 
         if declared.get("verdict") == "required":
-            assert '"verdict": "approved"' in output, (
+            assert "--verdict approved" in output, (
                 f"{agent_name}: verdict is required but missing from prompt"
             )
             assert "VALID VERDICT VALUES" in output, (
                 f"{agent_name}: verdict is required but VALID VERDICT VALUES missing"
             )
         else:
-            assert '"verdict"' not in output, (
+            assert "--verdict" not in output, (
                 f"{agent_name}: verdict should NOT appear but was found in prompt"
             )
             assert "VALID VERDICT VALUES" not in output, (
@@ -130,12 +130,12 @@ class TestAgentPromptContracts:
         declared = agent.get("output_fields", {})
 
         if declared.get("risk"):
-            assert '"risk": "low"' in output, (
+            assert "--risk low" in output, (
                 f"{agent_name}: risk is declared ({declared['risk']}) "
-                f"but missing from prompt JSON example"
+                f"but missing from the finish example"
             )
         else:
-            assert '"risk"' not in output, (
+            assert "--risk" not in output, (
                 f"{agent_name}: risk is NOT declared but appears in prompt"
             )
 
@@ -143,13 +143,16 @@ class TestAgentPromptContracts:
 
     @pytest.mark.parametrize("agent_name", AGENT_NAMES)
     def test_hardcoded_fields_always_present(self, agent_name, card, step):
-        """status, summary, and error are hardcoded in every agent prompt."""
+        """The toolbelt contract is hardcoded in every agent prompt."""
         agent = load_agent(agent_name)
         output = render_prompt(agent, card, step)
 
-        assert '"status": "completed"' in output
-        assert '"summary":' in output
-        assert '"error": null' in output
+        assert "--status completed" in output
+        assert "--summary" in output
+        assert "--error" in output
+        assert "finish" in output
+        assert "SISYPHUS_AGENT_TOOL" in output
+        assert " comment " in output
 
     # ---- Cross-agent consistency --------------------------------------------
 

@@ -72,6 +72,47 @@ def get_available_resources(
     )
 
 
+_RESOURCE_TYPE_BY_FILENAME = {
+    "result.json": "result",
+    "analysis.md": "analysis",
+}
+
+
+def register_output_files(
+    run_id: str,
+    step_id: str,
+    output_dir: str,
+    step_order: int = 0,
+    exclude: tuple = ("events.jsonl",),
+) -> List[dict]:
+    """Register every file the agent left in its output dir as a resource.
+
+    Top-level regular files only; hidden files, *exclude* entries, and
+    filenames already registered for this (run_id, step_id) are skipped —
+    the latter dedupes setup-tool outputs written into the same dir before
+    the agent ran.
+    """
+    from .state import get_resource_filenames_for_step, register_resource
+
+    dir_path = Path(output_dir)
+    if not dir_path.is_dir():
+        return []
+
+    already = get_resource_filenames_for_step(run_id, step_id)
+    registered = []
+    for entry in sorted(dir_path.iterdir()):
+        if not entry.is_file():
+            continue
+        name = entry.name
+        if name.startswith(".") or name in exclude or name in already:
+            continue
+        rtype = _RESOURCE_TYPE_BY_FILENAME.get(name, "agent_output")
+        registered.append(
+            register_resource(run_id, step_id, name, rtype=rtype, step_order=step_order)
+        )
+    return registered
+
+
 def save_agent_log(run_id: str, step_id: str, content: str) -> str:
     """Save agent stdout/stderr to logs directory."""
     log_dir = RUNS_DIR / run_id / "logs"

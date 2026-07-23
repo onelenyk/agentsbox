@@ -390,6 +390,46 @@ class TestIdleTimeout:
         assert result.status == "completed"
 
 
+class TestNoResultJson:
+
+    @pytest.mark.asyncio
+    async def test_exit_zero_without_result_json_fails(self, db_path, run):
+        """Fail-fast: statuses are never invented from the exit code."""
+        worktree = pathlib.Path(os.environ["WORKSPACE_ROOT"]) / "worktree"
+        worktree.mkdir(parents=True, exist_ok=True)
+        _setup_run_shim(worktree)
+
+        output_dir, step = _make_output_dir(run, "no-result")
+
+        init_runners_table()
+        add_runner(
+            "mock-no-result",
+            "python3",
+            extra_args=[
+                str(MOCK_DIR / "mock_agent_timeout.py"),
+                "--output-dir", output_dir,
+                "--sleep", "0",
+            ],
+        )
+
+        agent_def = {"name": "Test No Result", "runner": "mock-no-result"}
+        result = await launch_agent(
+            agent_def, "anything", str(worktree), output_dir,
+            timeout=30, step_id=step["id"],
+        )
+
+        assert result.status == "failed"
+        assert "agent_no_result" in result.error
+        # No fabricated result.json, and stdout is not saved as analysis.md
+        assert not (pathlib.Path(output_dir) / "result.json").exists()
+        assert not (pathlib.Path(output_dir) / "analysis.md").exists()
+        # But the log was still captured (under core.resources' RUNS_DIR,
+        # which is frozen at import time — not necessarily this test's env)
+        import core.resources
+        log = core.resources.RUNS_DIR / run["id"] / "logs" / f"{step['id']}.log"
+        assert log.exists()
+
+
 class TestCancelEvent:
 
     @pytest.mark.asyncio

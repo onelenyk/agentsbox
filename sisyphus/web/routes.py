@@ -290,7 +290,7 @@ async def card_detail(request: Request, card_id: str):
     steps = detail["steps"]
     resources = detail["resources"]
     repo_name = detail["repo_name"]
-    return _tmpl().TemplateResponse("card_detail.html", {"request": request, "card": card, "run": run, "steps": steps, "resources": resources, "repo_name": repo_name})
+    return _tmpl().TemplateResponse("card_detail.html", {"request": request, "card": card, "run": run, "steps": steps, "resources": resources, "activities": detail["activities"], "repo_name": repo_name})
 
 @router.get("/api/resources/{run_id}/{filename}", response_class=HTMLResponse)
 async def resource_view(request: Request, run_id: str, filename: str, step_id: str = ""):
@@ -340,6 +340,31 @@ async def resume(card_id: str):
     from core.operations import resume_card
     await resume_card(card_id)
     from fastapi.responses import Response
+    resp = Response(status_code=200)
+    resp.headers["HX-Trigger"] = "cardUpdated"
+    return resp
+
+@router.post("/api/cards/{card_id}/comments")
+async def add_comment(card_id: str, text: str = Form(...)):
+    from core.state import add_activity
+    from core.db import get_conn
+    from fastapi.responses import Response
+
+    text = text.strip()
+    if not text:
+        return Response(status_code=422)
+
+    conn = get_conn()
+    run = conn.execute(
+        "SELECT id FROM runs WHERE card_id = ? ORDER BY started_at DESC LIMIT 1",
+        (card_id,),
+    ).fetchone()
+    conn.close()
+
+    add_activity(
+        card_id, text, author="user", author_type="human",
+        run_id=run["id"] if run else None,
+    )
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "cardUpdated"
     return resp
