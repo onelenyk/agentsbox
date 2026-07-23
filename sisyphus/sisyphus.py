@@ -19,7 +19,6 @@ os.environ.setdefault(
 
 from core.db import init_db, get_conn
 from core.recovery import recover_orphaned_steps
-from core.scheduler import start_scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +38,9 @@ def cli():
         recovered = recover_orphaned_steps()
         if recovered > 0:
             click.echo(f"Recovered {recovered} orphaned steps (orchestrator crash detected)")
-        start_scheduler()
+        # The CLI does NOT run a background scheduler — the daemon (web/app.py)
+        # owns the single scheduler. CLI commands are one-shot; `run` executes
+        # its pipeline in-process and exits. This avoids a competing scheduler.
     except Exception as exc:
         logger.debug("DB init skipped: %s", exc)
 

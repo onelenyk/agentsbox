@@ -5,6 +5,11 @@ Zero external dependencies — pure stdlib.
 
 Implements the Model Context Protocol (MCP) over stdio JSON-RPC 2.0.
 Supports tools/list and tools/call only (no resources or prompts).
+
+This is a THIN CLIENT: it holds no state and touches no database. Every tool
+forwards to the Sisyphus daemon (the web/API server) over HTTP, so runs
+execute — and survive — in the daemon regardless of this process's lifetime.
+Point it at the daemon with SISYPHUS_DAEMON_URL (default http://127.0.0.1:7677).
 """
 
 from __future__ import annotations
@@ -12,26 +17,47 @@ from __future__ import annotations
 import json
 import os
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from typing import Any
 
-# Set WORKSPACE_ROOT before importing core modules
-os.environ.setdefault(
-    "WORKSPACE_ROOT", os.path.join(os.path.dirname(os.path.abspath(__file__)), "workspace")
-)
-
-from core.db import init_db
-from core.recovery import recover_orphaned_steps
-from core.scheduler import start_scheduler
-
-# Initialize on startup
-init_db()
-recovered = recover_orphaned_steps()
-if recovered:
-    print(f"[sisyphus-mcp] Recovered {recovered} orphaned steps", file=sys.stderr)
-start_scheduler()
+DAEMON_URL = os.environ.get("SISYPHUS_DAEMON_URL", "http://127.0.0.1:7677").rstrip("/")
 
 
-# ── Tool Functions ──────────────────────────────────────────────────────────
+def _daemon(method: str, path: str, payload: dict | None = None, params: dict | None = None) -> dict:
+    """Call the daemon's JSON API. Returns parsed JSON, or {"error": ...}."""
+    url = DAEMON_URL + path
+    if params:
+        query = urllib.parse.urlencode({k: v for k, v in params.items() if v not in (None, "")})
+        if query:
+            url += "?" + query
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(
+        url, data=data, method=method,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            body = resp.read().decode()
+            return json.loads(body) if body else {}
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode()
+        try:
+            detail = json.loads(body).get("detail", body)
+        except Exception:
+            detail = body
+        return {"error": f"{exc.code}: {detail}"}
+    except urllib.error.URLError as exc:
+        return {
+            "error": (
+                f"Sisyphus daemon not reachable at {DAEMON_URL} ({exc.reason}). "
+                f"Start it with: python3 -m uvicorn web.app:app --port 7677"
+            )
+        }
+
+
+# ── Tool Functions (thin forwards to the daemon) ─────────────────────────────
 
 # ── Cards (6) ───────────────────────────────────────────────────────────────
 
@@ -43,19 +69,10 @@ def sisyphus_create_card(
     name: str = "",
 ) -> dict[str, Any]:
     """Create a card in backlog (no pipeline execution)."""
-    from core.operations import create_card_only
-
-    card = create_card_only(
-        pipeline, repo, description or "No description", jira_url or None,
-        name=name,
-    )
-    return {
-        "card_id": card["id"],
-        "repo_name": card.get("repo_name", ""),
-        "status": card["status"],
-        "pipeline": card["pipeline_name"],
-        "name": card.get("name", ""),
-    }
+    return _daemon("POST", "/api/v1/cards", {
+        "repo": repo, "pipeline": pipeline, "description": description,
+        "jira_url": jira_url, "name": name, "run": False,
+    })
 
 
 def sisyphus_run_card(
@@ -65,19 +82,12 @@ def sisyphus_run_card(
     jira_url: str = "",
     name: str = "",
 ) -> dict[str, Any]:
-    """Create card and run pipeline synchronously (blocks until done)."""
-    import asyncio
-    from core.operations import create_and_run
-
-    result = create_and_run(
-        pipeline, repo, description or "No description", jira_url or None,
-        name=name,
-    )
-    return {
-        "status": result["status"],
-        "run_id": result.get("run_id", ""),
-        "error": result.get("error", ""),
-    }
+    """Create a card and start its pipeline in the daemon (returns immediately;
+    the run executes in the daemon — poll sisyphus_get_card for progress)."""
+    return _daemon("POST", "/api/v1/cards", {
+        "repo": repo, "pipeline": pipeline, "description": description,
+        "jira_url": jira_url, "name": name, "run": True,
+    })
 
 
 def sisyphus_list_cards(
@@ -86,48 +96,31 @@ def sisyphus_list_cards(
     pipeline: str = "",
 ) -> dict[str, Any]:
     """List cards with optional filters."""
-    from core.operations import list_cards_filtered
-
-    cards = list_cards_filtered(
-        pipeline=pipeline or None,
-        status=status or None,
-        repo=repo or None,
-    )
-    return {"cards": cards, "count": len(cards)}
+    return _daemon("GET", "/api/v1/cards", params={
+        "repo": repo, "status": status, "pipeline": pipeline,
+    })
 
 
 def sisyphus_get_card(card_id: str) -> dict[str, Any]:
-    """Get full detail for a card (card, run, steps, resources)."""
-    from core.operations import get_card_detail
-
-    return get_card_detail(card_id)
+    """Get full detail for a card (card, run, steps, resources, activities)."""
+    return _daemon("GET", f"/api/v1/cards/{card_id}")
 
 
 def sisyphus_cancel_card(card_id: str) -> dict[str, Any]:
     """Cancel a running card (marks steps cancelled, kills subprocesses)."""
-    import asyncio
-    from core.operations import cancel_card
-
-    asyncio.run(cancel_card(card_id))
-    return {"success": True, "card_id": card_id}
+    return _daemon("POST", f"/api/v1/cards/{card_id}/cancel")
 
 
 def sisyphus_resume_card(card_id: str) -> dict[str, Any]:
-    """Resume a failed card (cancels old steps, fires fresh pipeline)."""
-    import asyncio
-    from core.operations import resume_card
-
-    asyncio.run(resume_card(card_id))
-    return {"success": True, "card_id": card_id}
+    """Resume a failed card (cancels old steps, fires fresh pipeline in daemon)."""
+    return _daemon("POST", f"/api/v1/cards/{card_id}/resume")
 
 
 # ── Repos (4) ────────────────────────────────────────────────────────────────
 
 def sisyphus_list_repos() -> dict[str, Any]:
     """List all configured git repos."""
-    from core.repos import list_repos
-
-    return {"repos": list_repos()}
+    return _daemon("GET", "/api/v1/repos")
 
 
 def sisyphus_add_repo(
@@ -137,35 +130,26 @@ def sisyphus_add_repo(
     platform: str = "",
 ) -> dict[str, Any]:
     """Add a git repo (bare clone + config entry)."""
-    from core.repos import add_repo
-
-    path = add_repo(name, source, platform, branch)
-    return {"name": name, "source": source, "branch": branch, "bare_path": path}
+    return _daemon("POST", "/api/v1/repos", {
+        "name": name, "source": source, "branch": branch, "platform": platform,
+    })
 
 
 def sisyphus_delete_repo(name: str) -> dict[str, Any]:
     """Delete a repo (removes bare clone + config entry)."""
-    from core.repos import delete_repo
-
-    delete_repo(name)
-    return {"success": True, "name": name}
+    return _daemon("DELETE", f"/api/v1/repos/{name}")
 
 
 def sisyphus_update_repo(name: str) -> dict[str, Any]:
     """Fetch latest from origin for a bare repo."""
-    from core.repos import update_repo
-
-    ok = update_repo(name)
-    return {"success": ok, "name": name}
+    return _daemon("POST", f"/api/v1/repos/{name}/update")
 
 
 # ── Runners (6) ─────────────────────────────────────────────────────────────
 
 def sisyphus_list_runners() -> dict[str, Any]:
     """List all configured AI runners."""
-    from core.runners import list_runners
-
-    return {"runners": list_runners()}
+    return _daemon("GET", "/api/v1/runners")
 
 
 def sisyphus_add_runner(
@@ -178,15 +162,10 @@ def sisyphus_add_runner(
     is_default: bool = False,
 ) -> dict[str, Any]:
     """Add a new AI runner configuration."""
-    from core.runners import add_runner
-
-    r = add_runner(name, binary, type, model, api_key_env, base_url, [], is_default)
-    return {
-        "id": r["id"],
-        "name": r["name"],
-        "binary": r["binary"],
-        "type": r["type"],
-    }
+    return _daemon("POST", "/api/v1/runners", {
+        "name": name, "binary": binary, "type": type, "model": model,
+        "api_key_env": api_key_env, "base_url": base_url, "is_default": is_default,
+    })
 
 
 def sisyphus_update_runner(
@@ -197,57 +176,24 @@ def sisyphus_update_runner(
     base_url: str = "",
 ) -> dict[str, Any]:
     """Update an existing runner's configuration."""
-    from core.runners import get_runner_by_name, update_runner
-
-    r = get_runner_by_name(name)
-    if not r:
-        return {"error": f"Runner not found: {name}"}
-
-    fields: dict[str, Any] = {}
-    if binary:
-        fields["binary"] = binary
-    if model:
-        fields["model"] = model
-    if api_key_env:
-        fields["api_key_env"] = api_key_env
-    if base_url:
-        fields["base_url"] = base_url
-
-    update_runner(r["id"], **fields)
-    return {"success": True, "name": name}
+    return _daemon("PATCH", f"/api/v1/runners/{name}", {
+        "binary": binary, "model": model, "api_key_env": api_key_env, "base_url": base_url,
+    })
 
 
 def sisyphus_delete_runner(name: str) -> dict[str, Any]:
     """Delete a runner by name."""
-    from core.runners import get_runner_by_name, delete_runner
-
-    r = get_runner_by_name(name)
-    if not r:
-        return {"error": f"Runner not found: {name}"}
-    delete_runner(r["id"])
-    return {"success": True, "name": name}
+    return _daemon("DELETE", f"/api/v1/runners/{name}")
 
 
 def sisyphus_runner_health(name: str) -> dict[str, Any]:
     """Check runner health (binary availability, API key, base URL reachability)."""
-    import asyncio
-    from core.runners import get_runner_by_name, health_check
-
-    r = get_runner_by_name(name)
-    if not r:
-        return {"error": f"Runner not found: {name}"}
-    return asyncio.run(health_check(r["id"]))
+    return _daemon("POST", f"/api/v1/runners/{name}/health")
 
 
 def sisyphus_runner_set_default(name: str) -> dict[str, Any]:
     """Set a runner as the default for all agents."""
-    from core.runners import get_runner_by_name, set_default_runner
-
-    r = get_runner_by_name(name)
-    if not r:
-        return {"error": f"Runner not found: {name}"}
-    set_default_runner(r["id"])
-    return {"success": True, "name": name}
+    return _daemon("POST", f"/api/v1/runners/{name}/set-default")
 
 
 # ── Server (3) ───────────────────────────────────────────────────────────────
