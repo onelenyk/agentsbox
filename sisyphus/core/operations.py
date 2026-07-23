@@ -228,7 +228,7 @@ def get_card_detail(card_id: str) -> dict:
 
     Returns a dict with keys: ``card``, ``run`` (latest), ``steps``
     (with duration computed from started_at/completed_at),
-    ``resources``, and ``repo_name`` (resolved from ``repo_name`` field).
+    ``resources``, ``activities``, and ``repo_name``.
     """
     card = get_card(card_id)
     if not card:
@@ -264,11 +264,14 @@ def get_card_detail(card_id: str) -> dict:
     repo = get_repo(card.get("repo_name", "")) if card.get("repo_name") else None
     repo_name = repo["name"] if repo else None
 
+    from core.state import get_activities_for_card
+
     return {
         "card": card,
         "run": run_dict,
         "steps": steps,
         "resources": resources,
+        "activities": get_activities_for_card(card_id),
         "repo_name": repo_name,
     }
 

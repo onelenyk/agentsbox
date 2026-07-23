@@ -33,10 +33,10 @@ def render_prompt(
         template = _env.get_template("base.j2")
 
     workspace_root = os.environ.get("WORKSPACE_ROOT", "/workspace")
-    output_dir = (
-        f"{workspace_root}/runs/{step.get('run_id', 'unknown')}"
-        f"/resources/{step.get('id', 'unknown')}"
-    )
+    run_dir = f"{workspace_root}/runs/{step.get('run_id', 'unknown')}"
+    # db_id (the DB step uuid) keys the on-disk dir; the pipeline sid ("id")
+    # is only a fallback for callers that don't have a DB record (tests).
+    output_dir = f"{run_dir}/resources/{step.get('db_id') or step.get('id', 'unknown')}"
 
     task_description = card.get(
         "description", "Analyze the task and produce your output."
@@ -51,4 +51,5 @@ def render_prompt(
         resources=resources or [],
         task_description=task_description,
         output_dir=output_dir,
+        run_dir=run_dir,
     )

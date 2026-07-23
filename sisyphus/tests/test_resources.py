@@ -9,6 +9,7 @@ from core.resources import (
     init_run_dir,
     list_resources,
     read_resource,
+    register_output_files,
     save_agent_log,
     save_analysis_md,
     save_resource,
@@ -229,3 +230,69 @@ class TestGetAvailableResources:
         )
         # Resource from s1a (same step_order=1) is excluded by max_step_order=0
         assert len(available) == 0
+
+
+class TestRegisterOutputFiles:
+    def _step_dir(self, tmp_path, run, step):
+        d = tmp_path / "runs" / run["id"] / "resources" / step["id"]
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def test_registers_files_with_type_mapping(self, db_path, monkeypatch, tmp_path, run):
+        _patch_workspace(monkeypatch, tmp_path)
+        step = create_step(run["id"], "Engineer", 1)
+        d = self._step_dir(tmp_path, run, step)
+        (d / "result.json").write_text("{}")
+        (d / "analysis.md").write_text("# analysis")
+        (d / "notes.txt").write_text("notes")
+
+        registered = register_output_files(run["id"], step["id"], str(d), step_order=1)
+        assert len(registered) == 3
+
+        by_name = {r["filename"]: r for r in list_resources(run["id"])}
+        assert by_name["result.json"]["resource_type"] == "result"
+        assert by_name["analysis.md"]["resource_type"] == "analysis"
+        assert by_name["notes.txt"]["resource_type"] == "agent_output"
+        assert by_name["notes.txt"]["step_order"] == 1
+
+    def test_skips_events_jsonl_and_hidden(self, db_path, monkeypatch, tmp_path, run):
+        _patch_workspace(monkeypatch, tmp_path)
+        step = create_step(run["id"], "Engineer", 1)
+        d = self._step_dir(tmp_path, run, step)
+        (d / "events.jsonl").write_text("{}\n")
+        (d / ".hidden").write_text("x")
+        (d / "kept.md").write_text("x")
+
+        registered = register_output_files(run["id"], step["id"], str(d))
+        assert [r["filename"] for r in registered] == ["kept.md"]
+
+    def test_dedupes_already_registered(self, db_path, monkeypatch, tmp_path, run):
+        """Setup-tool outputs are registered before the agent runs — the
+        post-step sweep must not register them twice."""
+        _patch_workspace(monkeypatch, tmp_path)
+        step = create_step(run["id"], "Engineer", 1)
+        save_resource(run["id"], step["id"], "fetch_jira_output.json", "{}",
+                      resource_type="tool_output")
+        d = tmp_path / "runs" / run["id"] / "resources" / step["id"]
+        (d / "new.md").write_text("fresh")
+
+        registered = register_output_files(run["id"], step["id"], str(d))
+        assert [r["filename"] for r in registered] == ["new.md"]
+        all_names = [r["filename"] for r in list_resources(run["id"])]
+        assert all_names.count("fetch_jira_output.json") == 1
+
+    def test_missing_dir_is_noop(self, db_path, monkeypatch, tmp_path, run):
+        _patch_workspace(monkeypatch, tmp_path)
+        step = create_step(run["id"], "Engineer", 1)
+        assert register_output_files(run["id"], step["id"], str(tmp_path / "nope")) == []
+
+    def test_subdirectories_ignored(self, db_path, monkeypatch, tmp_path, run):
+        _patch_workspace(monkeypatch, tmp_path)
+        step = create_step(run["id"], "Engineer", 1)
+        d = self._step_dir(tmp_path, run, step)
+        (d / "subdir").mkdir()
+        (d / "subdir" / "nested.md").write_text("x")
+        (d / "top.md").write_text("x")
+
+        registered = register_output_files(run["id"], step["id"], str(d))
+        assert [r["filename"] for r in registered] == ["top.md"]

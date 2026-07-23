@@ -173,6 +173,71 @@ async def test_fsm_race_preserves_real_status(db_path, card, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_agent_comments_become_activities(db_path, card, tmp_path):
+    """A step whose agent posts comments (events.jsonl) + files gets those
+    comments on the card timeline and its files registered as resources —
+    and no summary-fallback activity is added."""
+    import json as _json
+    from pathlib import Path as _P
+    from core.state import get_activities_for_card, get_resources_for_run
+
+    pipeline_path = _write_pipeline_yaml(tmp_path, "commenting", [
+        {"id": "engineer", "agent": "engineer-agent"},
+    ])
+
+    async def _commenting_launch(agent_def, prompt, worktree_path, output_dir, *a, **kw):
+        out = _P(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "notes.md").write_text("findings")
+        with open(out / "events.jsonl", "a") as f:
+            f.write(_json.dumps({"ts": "2026-07-22T00:00:00+00:00", "type": "comment",
+                                 "text": "found the bug", "resources": ["notes.md"]}) + "\n")
+            f.write(_json.dumps({"ts": "2026-07-22T00:00:01+00:00", "type": "comment",
+                                 "text": "fixed it", "resources": []}) + "\n")
+        (out / "result.json").write_text(_json.dumps({"status": "completed", "summary": "done"}))
+        return _agent_result(summary="done")
+
+    stack, _ = _enter_standard_patches(_commenting_launch)
+    with stack:
+        result = await run_pipeline(pipeline_path, card)
+
+    assert result["status"] == "completed"
+
+    activities = get_activities_for_card(card["id"])
+    assert [a["text"] for a in activities] == ["found the bug", "fixed it"]
+    assert activities[0]["resources"] == ["notes.md"]
+    assert all(a["author_type"] == "agent" for a in activities)
+
+    filenames = {r["filename"] for r in get_resources_for_run(result["run_id"])}
+    assert "notes.md" in filenames
+    assert "result.json" in filenames
+    assert "events.jsonl" not in filenames
+
+
+@pytest.mark.asyncio
+async def test_no_comments_falls_back_to_summary_activity(db_path, card, tmp_path):
+    from core.state import get_activities_for_card
+
+    pipeline_path = _write_pipeline_yaml(tmp_path, "no-comments", [
+        {"id": "engineer", "agent": "engineer-agent"},
+    ])
+
+    mock_launch = AsyncMock()
+    mock_launch.side_effect = [_agent_result(summary="Engineer done")]
+
+    stack, _ = _enter_standard_patches(mock_launch)
+    with stack:
+        result = await run_pipeline(pipeline_path, card)
+
+    assert result["status"] == "completed"
+
+    activities = get_activities_for_card(card["id"])
+    assert len(activities) == 1
+    assert activities[0]["text"] == "Engineer done"
+    assert activities[0]["author_type"] == "agent"
+
+
+@pytest.mark.asyncio
 async def test_multi_step_linear_pipeline(db_path, card, tmp_path):
     pipeline_path = _write_pipeline_yaml(tmp_path, "multi-step", [
         {"id": "pm", "agent": "pm-agent"},

@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import datetime, timezone
 from typing import Optional, List
@@ -259,3 +260,68 @@ def get_resources_for_run(
     ).fetchall()
     conn.close()
     return [_dict_from_row(r) for r in rows]
+
+
+def get_resource_filenames_for_step(run_id: str, step_id: str) -> set:
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT filename FROM resources WHERE run_id = ? AND step_id = ?",
+        (run_id, step_id),
+    ).fetchall()
+    conn.close()
+    return {r["filename"] for r in rows}
+
+
+# ── Activity CRUD ─────────────────────────────────────────────────────
+
+
+def add_activity(
+    card_id: str,
+    text: str,
+    author: str = "",
+    author_type: str = "agent",
+    run_id: Optional[str] = None,
+    step_id: Optional[str] = None,
+    resources: Optional[List[str]] = None,
+    created_at: Optional[str] = None,
+) -> dict:
+    """Append one activity (comment) to a card's timeline.
+
+    ``created_at`` is a parameter so the events ingester can preserve the
+    agent's original event timestamp instead of the ingestion time.
+    """
+    conn = get_conn()
+    cur = conn.execute(
+        """
+        INSERT INTO activities (card_id, run_id, step_id, author, author_type, text, resources, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            card_id, run_id, step_id, author, author_type, text,
+            json.dumps(resources or []), created_at or _now(),
+        ),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM activities WHERE id = ?", (cur.lastrowid,)
+    ).fetchone()
+    conn.close()
+    activity = _dict_from_row(row)
+    activity["resources"] = json.loads(activity["resources"] or "[]")
+    return activity
+
+
+def get_activities_for_card(card_id: str) -> List[dict]:
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM activities WHERE card_id = ? ORDER BY created_at ASC, id ASC",
+        (card_id,),
+    ).fetchall()
+    conn.close()
+    activities = [_dict_from_row(r) for r in rows]
+    for a in activities:
+        try:
+            a["resources"] = json.loads(a["resources"] or "[]")
+        except (json.JSONDecodeError, TypeError):
+            a["resources"] = []
+    return activities

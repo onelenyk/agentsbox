@@ -168,7 +168,17 @@ class TestGetCardDetail:
         assert "run" in detail
         assert "steps" in detail
         assert "resources" in detail
+        assert "activities" in detail
         assert "repo_name" in detail
+
+    def test_get_card_detail_includes_activities(self, db_path):
+        from core.state import add_activity
+
+        card = create_card_only("investigate", "android", "test")
+        add_activity(card["id"], "hello timeline", author="user", author_type="human")
+        detail = get_card_detail(card["id"])
+        assert len(detail["activities"]) == 1
+        assert detail["activities"][0]["text"] == "hello timeline"
 
     def test_get_card_detail_card_matches(self, db_path):
         card = create_card_only("investigate", "android", "test")

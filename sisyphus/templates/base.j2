@@ -19,7 +19,7 @@ You may READ and MODIFY files in the repository.
 {% if resources %}
 The following resources from previous steps are available:
 {% for r in resources %}
-- resources/{{ r.step_id }}/{{ r.filename }} (from {{ r.resource_type }})
+- {{ run_dir }}/resources/{{ r.step_id }}/{{ r.filename }} (from {{ r.resource_type }})
 {% endfor %}
 Read each resource as needed to understand the context.
 {% else %}
@@ -33,29 +33,35 @@ Your isolated worktree: {{ step.worktree_path }}
 
 {% block extra_instructions %}{% endblock %}
 
-## Output — CRITICAL
-When you finish, save exactly TWO files in your SISYPHUS_OUTPUT_DIR ({{ output_dir }}):
+## Communication & Output — CRITICAL
+You have a CLI tool for talking back to the orchestrator. Its path is in the
+environment variable SISYPHUS_AGENT_TOOL. Use it via bash.
 
-1. **result.json** — machine-readable metadata, STRICT JSON format:
-```json
-{
-  "status": "completed",
-  "summary": "one sentence summary of what you found",
-{% if agent.output_fields and agent.output_fields.get("verdict") == "required" %}
-  "verdict": "approved",
-{% endif %}
-{% if agent.output_fields and agent.output_fields.get("risk") %}
-  "risk": "low",
-{% endif %}
-  "error": null
-}
+**Progress comments** — post a comment at each major milestone (finding the
+root cause, finishing a file, deciding an approach). Comments appear live on
+the task card:
+```bash
+"$SISYPHUS_AGENT_TOOL" comment "what you just did or found"
+"$SISYPHUS_AGENT_TOOL" comment "root cause analysis" --resource analysis.md
+```
+`--resource` attaches a file you already saved in your output dir (repeatable).
+
+**Supporting files** — write any supporting files (recommended: analysis.md
+with ## headings, tables for file lists, code blocks) into your output dir:
+{{ output_dir }}
+Every file you leave there is attached to the card automatically.
+
+**Mandatory last action** — report your result. A step that exits without
+calling `finish` FAILS with "agent_no_result". Do NOT hand-write result.json.
+```bash
+"$SISYPHUS_AGENT_TOOL" finish --status completed --summary "one sentence summary of what you found"{% if agent.output_fields and agent.output_fields.get("verdict") == "required" %} --verdict approved{% endif %}{% if agent.output_fields and agent.output_fields.get("risk") %} --risk low{% endif %}
 ```
 VALID STATUS VALUES: "completed", "failed"
 {% if agent.output_fields and agent.output_fields.get("verdict") == "required" %}
 VALID VERDICT VALUES: "approved", "changes_requested"
 {% endif %}
 
-2. **analysis.md** — detailed analysis in markdown format.
-Use ## headings, tables for file lists, and code blocks for code snippets.
-
-CRITICAL: result.json MUST be valid JSON. If you cannot complete the task, set status to "failed" and explain in "error".
+If you cannot complete the task:
+```bash
+"$SISYPHUS_AGENT_TOOL" finish --status failed --summary "what went wrong" --error "why it failed"
+```

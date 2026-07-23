@@ -173,6 +173,61 @@ def test_resume_card(db_path, run):
     assert "cardUpdated" in response.headers.get("HX-Trigger", "")
 
 
+# ── Tests: POST /api/cards/{card_id}/comments ────────────────────────────
+
+
+def test_post_comment_creates_activity(db_path, card):
+    """Posting a comment stores a human activity row and triggers refresh."""
+    from core.state import get_activities_for_card
+
+    client = _make_client()
+    response = client.post(
+        f"/api/cards/{card['id']}/comments", data={"text": "looks good to me"},
+    )
+    assert response.status_code == 200
+    assert "cardUpdated" in response.headers.get("HX-Trigger", "")
+
+    activities = get_activities_for_card(card["id"])
+    assert len(activities) == 1
+    assert activities[0]["text"] == "looks good to me"
+    assert activities[0]["author_type"] == "human"
+    assert activities[0]["author"] == "user"
+
+
+def test_post_comment_links_latest_run(db_path, run):
+    from core.state import get_activities_for_card
+
+    client = _make_client()
+    response = client.post(
+        f"/api/cards/{run['card_id']}/comments", data={"text": "note on run"},
+    )
+    assert response.status_code == 200
+    assert get_activities_for_card(run["card_id"])[0]["run_id"] == run["id"]
+
+
+def test_post_empty_comment_rejected(db_path, card):
+    from core.state import get_activities_for_card
+
+    client = _make_client()
+    response = client.post(
+        f"/api/cards/{card['id']}/comments", data={"text": "   "},
+    )
+    assert response.status_code == 422
+    assert get_activities_for_card(card["id"]) == []
+
+
+def test_card_detail_shows_comment(db_path, card):
+    """The detail panel HTML renders posted activity text."""
+    from core.state import add_activity
+
+    add_activity(card["id"], "visible in panel", author="user", author_type="human")
+    client = _make_client()
+    response = client.get(f"/api/cards/{card['id']}/detail")
+    assert response.status_code == 200
+    assert "visible in panel" in response.text
+    assert "Activity" in response.text
+
+
 # ── Tests: GET /api/cards/board (kanban board) ───────────────────────────
 
 

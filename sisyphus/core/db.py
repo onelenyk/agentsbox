@@ -52,6 +52,18 @@ def init_db():
             step_id TEXT NOT NULL REFERENCES steps(id), filename TEXT NOT NULL,
             resource_type TEXT NOT NULL DEFAULT 'agent_output', step_order INTEGER DEFAULT 0, created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS activities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            card_id TEXT NOT NULL REFERENCES cards(id),
+            run_id TEXT REFERENCES runs(id),
+            step_id TEXT REFERENCES steps(id),
+            author TEXT NOT NULL DEFAULT '',
+            author_type TEXT NOT NULL DEFAULT 'agent' CHECK(author_type IN ('agent','human')),
+            text TEXT NOT NULL,
+            resources TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_activities_card ON activities(card_id, created_at);
     """)
     try:
         conn.execute("ALTER TABLE cards ADD COLUMN repo_name TEXT DEFAULT ''")
