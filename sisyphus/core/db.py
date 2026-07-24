@@ -77,5 +77,8 @@ def init_db():
         conn.execute("ALTER TABLE runs ADD COLUMN pid INTEGER")
     except sqlite3.OperationalError:
         pass  # column already exists
+    # New Task + Thread model (built alongside the old tables during the rebuild).
+    from .store import init_store
+    init_store(conn)
     conn.commit()
     conn.close()
