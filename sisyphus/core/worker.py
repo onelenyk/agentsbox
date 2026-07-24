@@ -123,3 +123,8 @@ async def spawn_worker(
                 f"(status={result.status}): {result.error or result.summary or 'no output'}"
             ),
         )
+        # Deferred import: core.orchestrator imports spawn_worker from this
+        # module at its top level, so importing it back here at module load
+        # time would be circular. By call time both modules are fully loaded.
+        from .orchestrator import emit
+        emit(task_id, "worker_finished")

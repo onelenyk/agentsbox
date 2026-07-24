@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from pathlib import Path
 from fastapi import APIRouter, Request, Form
 from fastapi.responses import HTMLResponse
@@ -12,6 +14,7 @@ from core.scheduler import start_scheduler, get_scheduler
 from agents import load_agent, list_agents
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 def _tmpl():
     return Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -23,6 +26,15 @@ async def startup():
     init_runners_table()  # daemon is self-sufficient: seed the runners table
     recover_orphaned_steps()
     start_scheduler()
+
+    # New Task + Thread system (built alongside the old pipeline/cards model).
+    import web.agent_mcp as agent_mcp
+    from core import orchestrator
+    agent_mcp.on_worker_finished = lambda task_id: orchestrator.emit(task_id, "worker_finished")
+    reconciled = orchestrator.reconcile_on_boot()
+    if reconciled:
+        logger.info("orchestrator: resumed %d task(s) orphaned by restart", reconciled)
+    asyncio.create_task(orchestrator.dispatch_forever())
 
 @router.get("/", response_class=HTMLResponse)
 async def root():
