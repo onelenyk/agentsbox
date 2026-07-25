@@ -258,3 +258,21 @@ async def runner_set_default(name: str):
     r = _require_runner(name)
     set_default_runner(r["id"])
     return {"success": True, "name": name}
+
+
+# ── Orchestrator control ────────────────────────────────────────────────
+
+
+@api.post("/orchestrator/emit")
+async def orchestrator_emit(task_id: str = "", event_type: str = "worker_finished"):
+    """Emit an event into the orchestrator's dispatch queue."""
+    from core.orchestrator import emit
+    from core.store import get_task
+
+    if not task_id.strip():
+        raise HTTPException(status_code=422, detail="task_id required")
+    task = get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    emit(task_id, event_type)
+    return {"ok": True, "task_id": task_id, "event": event_type}
