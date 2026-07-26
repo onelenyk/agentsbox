@@ -1,6 +1,10 @@
 # ADR 0001 — Board-driven orchestration for autonomous SDLC
 
-**Status:** Accepted (direction) — implementation incremental
+**Status:** Superseded by [ADR 0002](0002-task-thread-orchestration.md) — the
+extended card lifecycle, decision journal, and dual FSM described below were
+judged too complex in practice and replaced with a 2-entity, 0-state-machine
+model before this design was built. Kept for history; do not implement against
+this document.
 **Date:** 2026-07-23
 
 ## Goal

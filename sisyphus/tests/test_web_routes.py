@@ -2,32 +2,19 @@
 API endpoint tests for FastAPI web routes using TestClient.
 
 All tests use the ``db_path`` fixture from conftest for DB setup.
-Pipeline execution is mocked to avoid real subprocesses.
 """
 
 import os
 import sys
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import patch
 
 # Ensure sisyphus is importable (same as conftest)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-# Prevent start_scheduler from launching at import time.
-_saved_scheduler = sys.modules.get('core.scheduler')
-sys.modules['core.scheduler'] = MagicMock()
-sys.modules['core.scheduler'].start_scheduler = MagicMock(return_value=None)
+from fastapi.testclient import TestClient
+from web.app import app
 
-from fastapi.testclient import TestClient  # noqa: E402
-from web.app import app  # noqa: E402
-
-# Restore original module so other tests aren't affected
-if _saved_scheduler is not None:
-    sys.modules['core.scheduler'] = _saved_scheduler
-else:
-    del sys.modules['core.scheduler']
-
-from core.operations import create_card_only  # noqa: E402
-from core.runners import init_runners_table  # noqa: E402
+from core.runners import init_runners_table
 
 
 # ── Fixture: TestClient ──────────────────────────────────────────────────
@@ -36,207 +23,6 @@ from core.runners import init_runners_table  # noqa: E402
 def _make_client():
     """Create a fresh TestClient — called inside a test so DB_PATH is set."""
     return TestClient(app)
-
-
-# ── Tests: GET /api/cards (list) ─────────────────────────────────────────
-
-
-def test_list_cards_empty(db_path):
-    """Empty database returns empty list."""
-    client = _make_client()
-    response = client.get("/api/cards")
-    assert response.status_code == 200
-    assert response.json() == []
-
-
-def test_list_cards_with_card(db_path):
-    """After creating a card, the list contains it."""
-    create_card_only("investigate", "test-repo", "test description")
-    client = _make_client()
-    response = client.get("/api/cards")
-    assert response.status_code == 200
-    data = response.json()
-    assert len(data) == 1
-    assert data[0]["description"] == "test description"
-
-
-# ── Tests: POST /api/cards (create) ──────────────────────────────────────
-
-
-def test_create_card(db_path):
-    """Creating a card without run_now returns 200 and HX-Trigger cardCreated."""
-    client = _make_client()
-    response = client.post(
-        "/api/cards",
-        data={
-            "pipeline": "investigate",
-            "repo": "test-repo",
-            "description": "test card",
-        },
-    )
-    assert response.status_code == 200
-    assert "cardCreated" in response.headers.get("HX-Trigger", "")
-
-
-def test_create_card_run_now(db_path):
-    """Creating a card with run_now=1 returns 200 and card is created."""
-    client = _make_client()
-    with patch(
-        "core.pipeline.run_pipeline",
-        new_callable=AsyncMock,
-        return_value={"status": "completed"},
-    ):
-        response = client.post(
-            "/api/cards",
-            data={
-                "pipeline": "investigate",
-                "repo": "test-repo",
-                "description": "run now card",
-                "run_now": "1",
-            },
-        )
-    assert response.status_code == 200
-    assert "cardCreated" in response.headers.get("HX-Trigger", "")
-
-    # Verify card was created
-    r = client.get("/api/cards")
-    cards = r.json()
-    assert any(c["description"] == "run now card" for c in cards)
-
-
-# ── Tests: GET /api/cards/{card_id}/detail ───────────────────────────────
-
-
-def test_card_detail_existing(db_path):
-    """Existing card returns 200 with card data in HTML."""
-    card = create_card_only("investigate", "test-repo", "detail card")
-    client = _make_client()
-    response = client.get(f"/api/cards/{card['id']}/detail")
-    assert response.status_code == 200
-    assert "detail card" in response.text
-    assert "investigate" in response.text
-
-
-def test_card_detail_nonexistent(db_path):
-    """Nonexistent card returns 200 with 'Not found' in HTML."""
-    client = _make_client()
-    response = client.get("/api/cards/nonexistent-card-id/detail")
-    assert response.status_code == 200
-    assert "Not found" in response.text
-
-
-# ── Tests: POST /api/cards/{card_id}/run ─────────────────────────────────
-
-
-def test_run_card(db_path, card):
-    """Running an existing card returns 200 and HX-Trigger cardUpdated."""
-    client = _make_client()
-    with patch(
-        "core.pipeline.run_pipeline",
-        new_callable=AsyncMock,
-        return_value={"status": "completed"},
-    ):
-        response = client.post(f"/api/cards/{card['id']}/run")
-    assert response.status_code == 200
-    assert "cardUpdated" in response.headers.get("HX-Trigger", "")
-
-
-# ── Tests: POST /api/cards/{card_id}/cancel ──────────────────────────────
-
-
-def test_cancel_card(db_path, card):
-    """Cancelling an existing card returns 200 and HX-Trigger cardUpdated."""
-    client = _make_client()
-    with patch(
-        "core.operations._kill_opencode_for_card",
-        return_value=None,
-    ):
-        response = client.post(f"/api/cards/{card['id']}/cancel")
-    assert response.status_code == 200
-    assert "cardUpdated" in response.headers.get("HX-Trigger", "")
-
-
-# ── Tests: POST /api/cards/{card_id}/resume ──────────────────────────────
-
-
-def test_resume_card(db_path, run):
-    """Resuming a card with a run returns 200 and HX-Trigger cardUpdated."""
-    card_id = run["card_id"]
-    client = _make_client()
-    with patch(
-        "core.pipeline.run_pipeline",
-        new_callable=AsyncMock,
-        return_value={"status": "completed"},
-    ):
-        response = client.post(f"/api/cards/{card_id}/resume")
-    assert response.status_code == 200
-    assert "cardUpdated" in response.headers.get("HX-Trigger", "")
-
-
-# ── Tests: POST /api/cards/{card_id}/comments ────────────────────────────
-
-
-def test_post_comment_creates_activity(db_path, card):
-    """Posting a comment stores a human activity row and triggers refresh."""
-    from core.state import get_activities_for_card
-
-    client = _make_client()
-    response = client.post(
-        f"/api/cards/{card['id']}/comments", data={"text": "looks good to me"},
-    )
-    assert response.status_code == 200
-    assert "cardUpdated" in response.headers.get("HX-Trigger", "")
-
-    activities = get_activities_for_card(card["id"])
-    assert len(activities) == 1
-    assert activities[0]["text"] == "looks good to me"
-    assert activities[0]["author_type"] == "human"
-    assert activities[0]["author"] == "user"
-
-
-def test_post_comment_links_latest_run(db_path, run):
-    from core.state import get_activities_for_card
-
-    client = _make_client()
-    response = client.post(
-        f"/api/cards/{run['card_id']}/comments", data={"text": "note on run"},
-    )
-    assert response.status_code == 200
-    assert get_activities_for_card(run["card_id"])[0]["run_id"] == run["id"]
-
-
-def test_post_empty_comment_rejected(db_path, card):
-    from core.state import get_activities_for_card
-
-    client = _make_client()
-    response = client.post(
-        f"/api/cards/{card['id']}/comments", data={"text": "   "},
-    )
-    assert response.status_code == 422
-    assert get_activities_for_card(card["id"]) == []
-
-
-def test_card_detail_shows_comment(db_path, card):
-    """The detail panel HTML renders posted activity text."""
-    from core.state import add_activity
-
-    add_activity(card["id"], "visible in panel", author="user", author_type="human")
-    client = _make_client()
-    response = client.get(f"/api/cards/{card['id']}/detail")
-    assert response.status_code == 200
-    assert "visible in panel" in response.text
-    assert "Activity" in response.text
-
-
-# ── Tests: GET /api/cards/board (kanban board) ───────────────────────────
-
-
-def test_board(db_path):
-    """Board endpoint returns 200 with board HTML content."""
-    client = _make_client()
-    response = client.get("/api/cards/board")
-    assert response.status_code == 200
-    assert "backlog" in response.text.lower()
 
 
 # ── Tests: GET /api/repos/list ───────────────────────────────────────────
@@ -291,19 +77,115 @@ def test_runners_list(db_path):
 
 
 def test_root(db_path):
-    """Root URL returns 200 with redirect HTML."""
+    """Root URL returns 200 with redirect HTML to /tasks."""
     client = _make_client()
     response = client.get("/")
     assert response.status_code == 200
     assert "refresh" in response.text.lower()
+    assert "/tasks" in response.text
 
 
-# ── Tests: GET /dashboard ────────────────────────────────────────────────
+# ── Tests: Tasks (Task+Thread system) ────────────────────────────────────
 
 
-def test_dashboard(db_path):
-    """Dashboard returns 200 with HTML containing stats."""
+def _make_task(goal="do the thing", repo=""):
+    from core import store
+    return store.create_task(goal, repo)
+
+
+def test_tasks_page(db_path):
     client = _make_client()
-    response = client.get("/dashboard")
+    response = client.get("/tasks")
     assert response.status_code == 200
-    assert "Total Cards" in response.text
+
+
+def test_tasks_list_view(db_path):
+    _make_task(goal="visible in list")
+    client = _make_client()
+    response = client.get("/api/tasks/list")
+    assert response.status_code == 200
+    assert "visible in list" in response.text
+
+
+def test_tasks_create_via_form(db_path):
+    client = _make_client()
+    with patch("core.orchestrator.emit") as mock_emit:
+        response = client.post("/api/tasks", data={"goal": "form-created task", "repo": "sisyphus"})
+    assert response.status_code == 200
+    assert "taskCreated" in response.headers.get("HX-Trigger", "")
+    mock_emit.assert_called_once()
+
+    listed = client.get("/api/tasks/list")
+    assert "form-created task" in listed.text
+
+
+def test_tasks_create_via_form_without_repo_rejected(db_path):
+    """A repo-less worker never gets its agent-MCP config written and can
+    never succeed — reject at creation, same rule as the JSON API."""
+    client = _make_client()
+    with patch("core.orchestrator.emit") as mock_emit:
+        response = client.post("/api/tasks", data={"goal": "no repo task", "repo": ""})
+    assert response.status_code == 422
+    mock_emit.assert_not_called()
+
+
+def test_task_page_existing(db_path):
+    task = _make_task(goal="page task")
+    client = _make_client()
+    response = client.get(f"/tasks/{task['id']}")
+    assert response.status_code == 200
+    assert "page task" in response.text
+
+
+def test_task_page_nonexistent(db_path):
+    client = _make_client()
+    response = client.get("/tasks/nope")
+    assert response.status_code == 404
+
+
+def test_task_detail_view_shows_thread(db_path):
+    from core import store
+
+    task = _make_task(goal="thread task")
+    store.post_message(task["id"], "orchestrator", kind="note", text="visible in thread")
+    client = _make_client()
+    response = client.get(f"/api/tasks/{task['id']}/detail")
+    assert response.status_code == 200
+    assert "thread task" in response.text
+    assert "visible in thread" in response.text
+
+
+def test_task_detail_view_nonexistent(db_path):
+    client = _make_client()
+    response = client.get("/api/tasks/nope/detail")
+    assert response.status_code == 200
+    assert "not found" in response.text.lower()
+
+
+def test_task_reply_posts_message_and_triggers(db_path):
+    from core import store
+
+    task = _make_task()
+    client = _make_client()
+    with patch("core.orchestrator.emit") as mock_emit:
+        response = client.post(f"/api/tasks/{task['id']}/messages", data={"text": "my reply"})
+    assert response.status_code == 200
+    assert "taskUpdated" in response.headers.get("HX-Trigger", "")
+    mock_emit.assert_called_once_with(task["id"], "human_replied")
+
+    thread = store.get_thread(task["id"])
+    assert thread[-1]["text"] == "my reply"
+    assert thread[-1]["author"] == "human"
+
+
+def test_task_reply_empty_rejected(db_path):
+    task = _make_task()
+    client = _make_client()
+    response = client.post(f"/api/tasks/{task['id']}/messages", data={"text": "   "})
+    assert response.status_code == 422
+
+
+def test_task_reply_unknown_task_404(db_path):
+    client = _make_client()
+    response = client.post("/api/tasks/nope/messages", data={"text": "x"})
+    assert response.status_code == 404

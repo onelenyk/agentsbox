@@ -121,10 +121,6 @@
             border-radius: 4px;
             font-size: 11px;
         }
-        .card .pipeline-tag {
-            font-size: 11px;
-            color: #58a6ff;
-        }
         .card .card-stats {
             font-size: 11px;
             color: #6e7681;
@@ -132,25 +128,6 @@
             display: flex;
             gap: 10px;
             flex-wrap: wrap;
-        }
-        .card .card-stats .stat-error {
-            color: #f85149;
-            font-size: 10px;
-            word-break: break-all;
-        }
-        .card .card-resources {
-            margin-top: 4px;
-            display: flex;
-            gap: 4px;
-            flex-wrap: wrap;
-        }
-        .card .resource-badge {
-            background: #1b3a2d;
-            color: #3fb950;
-            font-size: 10px;
-            padding: 1px 5px;
-            border-radius: 3px;
-            font-family: monospace;
         }
         .card .repo-badge {
             background: #2d1f3d;
@@ -164,23 +141,6 @@
             font-size: 10px;
             color: #484f58;
         }
-        .card .jira-link {
-            font-size: 10px;
-            color: #58a6ff;
-            text-decoration: none;
-            margin-left: auto;
-        }
-        .card .jira-link:hover {
-            text-decoration: underline;
-        }
-        .card .card-actions {
-            margin-top: 8px;
-        }
-        .card .card-actions .btn {
-            width: 100%;
-            justify-content: center;
-        }
-
         /* Detail Panel */
         .detail-panel {
             background: #161b22;
@@ -211,34 +171,6 @@
         .detail-panel .info-row .value {
             color: #f0f6fc;
         }
-
-        /* Steps Table */
-        .steps-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 13px;
-        }
-        .steps-table th {
-            text-align: left;
-            padding: 8px 12px;
-            border-bottom: 2px solid #30363d;
-            color: #8b949e;
-            font-weight: 600;
-        }
-        .steps-table td {
-            padding: 8px 12px;
-            border-bottom: 1px solid #21262d;
-        }
-        .steps-table tr:hover td { background: #1c2128; }
-
-        /* Status badges */
-        .status { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
-        .status-created { background: #21262d; color: #8b949e; }
-        .status-running { background: #1f3a5f; color: #58a6ff; }
-        .status-completed { background: #1b3a2d; color: #3fb950; }
-        .status-failed { background: #3d1f1f; color: #f85149; }
-        .status-review { background: #3d2e1f; color: #d29922; }
-        .status-cancelled { background: #21262d; color: #8b949e; }
 
         /* Modal */
         .modal-overlay {
@@ -345,29 +277,6 @@
         .data-table tr:hover td { background: #1c2128; }
 
         /* Stats cards */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-            gap: 16px;
-            margin-bottom: 24px;
-        }
-        .stat-card {
-            background: #161b22;
-            border: 1px solid #30363d;
-            border-radius: 8px;
-            padding: 20px;
-        }
-        .stat-card .stat-value {
-            font-size: 32px;
-            font-weight: 700;
-            color: #f0f6fc;
-        }
-        .stat-card .stat-label {
-            font-size: 13px;
-            color: #8b949e;
-            margin-top: 4px;
-        }
-
         /* Header actions bar */
         .header-bar {
             display: flex;
@@ -381,11 +290,6 @@
         }
 
         /* Agent cards */
-        .agent-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 16px;
-        }
         .agent-card {
             background: #161b22;
             border: 1px solid #30363d;
@@ -441,29 +345,22 @@
         .kanban-col .card { margin:8px; }
         .card .title { font-size:13px; color:#c9d1d9; margin-bottom:8px; line-height:1.4; }
         .card .meta { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
-        .pipeline-tag { background:#1f3a5f; color:#58a6ff; padding:1px 6px; border-radius:4px; font-size:10px; font-weight:500; }
         .badge { background:#21262d; color:#8b949e; padding:1px 6px; border-radius:4px; font-size:10px; }
         .status-badge { padding:2px 8px; border-radius:4px; font-size:10px; font-weight:600; text-transform:uppercase; }
         .status-badge.completed { background:#1b3a2d; color:#3fb950; }
         .status-badge.running { background:#1f3a5f; color:#58a6ff; }
         .status-badge.failed { background:#3d1f1f; color:#f85149; }
         .status-badge.created, .status-badge.pending { background:#21262d; color:#8b949e; }
+        /* Task+Thread statuses (active/waiting/done/failed) */
+        .status-badge.active { background:#1f3a5f; color:#58a6ff; }
+        .status-badge.waiting { background:#3d2e1f; color:#d29922; }
+        .status-badge.done { background:#1b3a2d; color:#3fb950; }
         .info-row { display:flex; padding:6px 0; border-bottom:1px solid #21262d; font-size:13px; }
         .info-row .label { color:#8b949e; min-width:100px; }
         .info-row .value { color:#c9d1d9; }
-        .steps-table { width:100%; border-collapse:collapse; font-size:12px; margin-top:8px; }
-        .steps-table th { text-align:left; padding:6px 8px; color:#8b949e; border-bottom:1px solid #21262d; font-weight:500; }
-        .steps-table td { padding:6px 8px; border-bottom:1px solid #21262d; }
-        .resource-item { padding:6px 8px; border-bottom:1px solid #21262d; font-size:12px; display:flex; justify-content:space-between; }
-        .resource-item a { color:#58a6ff; text-decoration:none; }
-        .resource-item a:hover { text-decoration:underline; }
         .empty-state { text-align:center; padding:40px 20px; color:#8b949e; }
         .empty-state p { font-size:14px; margin-bottom:8px; }
-        .mermaid-container { background:#0d1117; border:1px solid #30363d; border-radius:8px; padding:16px; margin:12px 0; }
         nav a.active { color:#f0f6fc !important; background:#1f3a5f !important; }
-        .stat-card { background:#161b22; border:1px solid #30363d; border-radius:8px; padding:20px; text-align:center; }
-        .stat-card .stat-value { font-size:36px; font-weight:700; }
-        .stat-card .stat-label { font-size:12px; color:#8b949e; margin-top:4px; text-transform:uppercase; letter-spacing:0.5px; }
         .agent-card { background:#161b22; border:1px solid #30363d; border-radius:8px; padding:16px; }
         .agent-card .agent-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px; }
         .agent-card .agent-name { font-size:15px; font-weight:600; color:#f0f6fc; }
@@ -495,12 +392,8 @@
 <body>
     <nav>
         <span class="brand">⚡ Sisyphus</span>
-        <a href="/kanban" class="{{ 'active' if active_page == 'kanban' else '' }}">Kanban</a>
-        <a href="/dashboard" class="{{ 'active' if active_page == 'dashboard' else '' }}">Dashboard</a>
-        <a href="/agents" class="{{ 'active' if active_page == 'agents' else '' }}">Agents</a>
+        <a href="/tasks" class="{{ 'active' if active_page == 'tasks' else '' }}">Tasks</a>
         <a href="/runtime" class="{{ 'active' if active_page == 'runtime' else '' }}">Runtime</a>
-        <a href="/pipelines" class="{{ 'active' if active_page == 'pipelines' else '' }}">Pipelines</a>
-        <a href="/history" class="{{ 'active' if active_page == 'history' else '' }}">History</a>
         <a href="/repos" class="{{ 'active' if active_page == 'repos' else '' }}">Repos</a>
         <a href="/runners" class="{{ 'active' if active_page == 'runners' else '' }}">Runners</a>
     </nav>
@@ -524,23 +417,23 @@
 <div id="toast" class="toast" style="display:none"></div>
 <script>
 
-document.body.addEventListener("cardCreated", function() {
-    var t = document.getElementById("toast");
-    t.textContent = "✓ Card created";
-    t.className = "toast success-banner";
-    t.style.display = "block";
-    setTimeout(function() { t.style.display = "none"; }, 2000);
-});
-document.body.addEventListener("cardUpdated", function() {
-    var t = document.getElementById("toast");
-    t.textContent = "✓ Updated";
-    t.className = "toast success-banner";
-    t.style.display = "block";
-    setTimeout(function() { t.style.display = "none"; }, 2000);
-});
 document.body.addEventListener("reposUpdated", function() {
     var t = document.getElementById("toast");
     t.textContent = "✓ Done";
+    t.className = "toast success-banner";
+    t.style.display = "block";
+    setTimeout(function() { t.style.display = "none"; }, 2000);
+});
+document.body.addEventListener("taskCreated", function() {
+    var t = document.getElementById("toast");
+    t.textContent = "✓ Task created";
+    t.className = "toast success-banner";
+    t.style.display = "block";
+    setTimeout(function() { t.style.display = "none"; }, 2000);
+});
+document.body.addEventListener("taskUpdated", function() {
+    var t = document.getElementById("toast");
+    t.textContent = "✓ Updated";
     t.className = "toast success-banner";
     t.style.display = "block";
     setTimeout(function() { t.style.display = "none"; }, 2000);

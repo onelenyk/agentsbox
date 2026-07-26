@@ -22,15 +22,9 @@ from mcp_server import handle_request, TOOL_DEFINITIONS, HANDLERS
 # Helpers
 # ---------------------------------------------------------------------------
 
-EXPECTED_TOOL_COUNT = 19
+EXPECTED_TOOL_COUNT = 17
 
 ALL_TOOL_NAMES = [
-    "sisyphus_create_card",
-    "sisyphus_run_card",
-    "sisyphus_list_cards",
-    "sisyphus_get_card",
-    "sisyphus_cancel_card",
-    "sisyphus_resume_card",
     "sisyphus_list_repos",
     "sisyphus_add_repo",
     "sisyphus_delete_repo",
@@ -41,6 +35,10 @@ ALL_TOOL_NAMES = [
     "sisyphus_delete_runner",
     "sisyphus_runner_health",
     "sisyphus_runner_set_default",
+    "sisyphus_create_task",
+    "sisyphus_list_tasks",
+    "sisyphus_get_task",
+    "sisyphus_reply_task",
     "sisyphus_server_start",
     "sisyphus_server_stop",
     "sisyphus_server_status",
@@ -150,8 +148,8 @@ class TestHandleRequestToolsCall:
 
     def test_valid_tool_returns_result_with_content(self):
         """Call a tool whose handler we mock so no DB/IO happens."""
-        with patch.dict(HANDLERS, {"sisyphus_list_cards": MagicMock(return_value={"cards": [], "count": 0})}):
-            req = _make_request("tools/call", params={"name": "sisyphus_list_cards", "arguments": {}})
+        with patch.dict(HANDLERS, {"sisyphus_list_repos": MagicMock(return_value={"repos": [], "count": 0})}):
+            req = _make_request("tools/call", params={"name": "sisyphus_list_repos", "arguments": {}})
             resp = handle_request(req)
             assert resp["jsonrpc"] == "2.0"
             assert resp["id"] == 1
@@ -161,7 +159,7 @@ class TestHandleRequestToolsCall:
             assert len(result["content"]) == 1
             assert result["content"][0]["type"] == "text"
             parsed = json.loads(result["content"][0]["text"])
-            assert parsed == {"cards": [], "count": 0}
+            assert parsed == {"repos": [], "count": 0}
 
     def test_valid_tool_isError_false_on_success(self):
         with patch.dict(HANDLERS, {"sisyphus_list_repos": MagicMock(return_value={"repos": []})}):
@@ -185,9 +183,9 @@ class TestHandleRequestToolsCall:
     def test_passes_arguments_to_handler(self):
         """Verify that arguments are forwarded to the handler function."""
         mock_handler = MagicMock(return_value={"ok": True})
-        with patch.dict(HANDLERS, {"sisyphus_list_cards": mock_handler}):
+        with patch.dict(HANDLERS, {"sisyphus_list_repos": mock_handler}):
             req = _make_request("tools/call", params={
-                "name": "sisyphus_list_cards",
+                "name": "sisyphus_list_repos",
                 "arguments": {"repo": "myrepo", "status": "backlog"},
             })
             handle_request(req)
@@ -198,8 +196,8 @@ class TestHandleRequestToolsCall:
         def _bad_handler(**kwargs):
             raise TypeError("missing required argument: repo")
 
-        with patch.dict(HANDLERS, {"sisyphus_list_cards": _bad_handler}):
-            req = _make_request("tools/call", params={"name": "sisyphus_list_cards", "arguments": {}})
+        with patch.dict(HANDLERS, {"sisyphus_list_repos": _bad_handler}):
+            req = _make_request("tools/call", params={"name": "sisyphus_list_repos", "arguments": {}})
             resp = handle_request(req)
             assert resp["result"]["isError"] is True
             text = resp["result"]["content"][0]["text"]
@@ -210,8 +208,8 @@ class TestHandleRequestToolsCall:
         def _crashing_handler(**kwargs):
             raise RuntimeError("connection refused")
 
-        with patch.dict(HANDLERS, {"sisyphus_list_cards": _crashing_handler}):
-            req = _make_request("tools/call", params={"name": "sisyphus_list_cards", "arguments": {}})
+        with patch.dict(HANDLERS, {"sisyphus_list_repos": _crashing_handler}):
+            req = _make_request("tools/call", params={"name": "sisyphus_list_repos", "arguments": {}})
             resp = handle_request(req)
             assert resp["result"]["isError"] is True
             text = resp["result"]["content"][0]["text"]
@@ -293,29 +291,6 @@ class TestToolDefinitions:
             assert schema.get("type") == "object"
             assert "properties" in schema or schema.get("properties", {}) == {}
 
-    def test_create_card_requires_repo_and_description(self):
-        tool = _find_tool("sisyphus_create_card")
-        assert "required" in tool["inputSchema"]
-        assert "repo" in tool["inputSchema"]["required"]
-        assert "description" in tool["inputSchema"]["required"]
-
-    def test_run_card_requires_repo_and_description(self):
-        tool = _find_tool("sisyphus_run_card")
-        assert "repo" in tool["inputSchema"]["required"]
-        assert "description" in tool["inputSchema"]["required"]
-
-    def test_get_card_requires_card_id(self):
-        tool = _find_tool("sisyphus_get_card")
-        assert "card_id" in tool["inputSchema"]["required"]
-
-    def test_cancel_card_requires_card_id(self):
-        tool = _find_tool("sisyphus_cancel_card")
-        assert "card_id" in tool["inputSchema"]["required"]
-
-    def test_resume_card_requires_card_id(self):
-        tool = _find_tool("sisyphus_resume_card")
-        assert "card_id" in tool["inputSchema"]["required"]
-
     def test_add_repo_requires_name_and_source(self):
         tool = _find_tool("sisyphus_add_repo")
         assert "name" in tool["inputSchema"]["required"]
@@ -328,9 +303,9 @@ class TestToolDefinitions:
 
     def test_list_tools_have_empty_required(self):
         """List-only tools (no args needed) should have required=[]."""
-        for name in ("sisyphus_list_cards", "sisyphus_list_repos",
-                     "sisyphus_list_runners", "sisyphus_server_start",
-                     "sisyphus_server_stop", "sisyphus_server_status"):
+        for name in ("sisyphus_list_repos", "sisyphus_list_runners",
+                     "sisyphus_server_start", "sisyphus_server_stop",
+                     "sisyphus_server_status"):
             tool = _find_tool(name)
             assert tool["inputSchema"]["required"] == [], f"{name} should have empty required"
 
@@ -376,7 +351,7 @@ class TestHandlers:
 
 
 class TestToolForwarding:
-    """Every card/repo/runner tool forwards to the daemon's JSON API and passes
+    """Every repo/runner tool forwards to the daemon's JSON API and passes
     the daemon's response straight through — the MCP process holds no state."""
 
     def _call(self, tool, **kwargs):
@@ -385,33 +360,6 @@ class TestToolForwarding:
             result = HANDLERS[tool](**kwargs)
         assert result is sentinel  # response returned unchanged
         return mock.call_args
-
-    # cards
-    def test_create_card_posts_with_run_false(self):
-        args = self._call("sisyphus_create_card", repo="r", description="d")
-        assert args.args[0] == "POST"
-        assert args.args[1] == "/api/v1/cards"
-        assert args.args[2]["repo"] == "r"
-        assert args.args[2]["run"] is False
-
-    def test_run_card_posts_with_run_true(self):
-        args = self._call("sisyphus_run_card", repo="r")
-        assert args.args[1] == "/api/v1/cards"
-        assert args.args[2]["run"] is True
-
-    def test_list_cards_gets_with_filter_params(self):
-        args = self._call("sisyphus_list_cards", repo="x", status="running")
-        assert args.args[:2] == ("GET", "/api/v1/cards")
-        assert args.kwargs["params"] == {"repo": "x", "status": "running", "pipeline": ""}
-
-    def test_get_card_gets_by_id(self):
-        assert self._call("sisyphus_get_card", card_id="card-1").args == ("GET", "/api/v1/cards/card-1")
-
-    def test_cancel_card_posts(self):
-        assert self._call("sisyphus_cancel_card", card_id="c").args == ("POST", "/api/v1/cards/c/cancel")
-
-    def test_resume_card_posts(self):
-        assert self._call("sisyphus_resume_card", card_id="c").args == ("POST", "/api/v1/cards/c/resume")
 
     # repos
     def test_list_repos(self):
@@ -458,7 +406,7 @@ class TestDaemonHelper:
         import urllib.error
         from mcp_server import _daemon
         with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("Connection refused")):
-            result = _daemon("GET", "/api/v1/cards")
+            result = _daemon("GET", "/api/v1/repos")
         assert "error" in result
         assert "not reachable" in result["error"]
         assert "uvicorn" in result["error"]
@@ -468,10 +416,10 @@ class TestDaemonHelper:
         import urllib.error
         from mcp_server import _daemon
         err = urllib.error.HTTPError(
-            "u", 404, "Not Found", {}, io.BytesIO(b'{"detail":"Card x not found"}'),
+            "u", 404, "Not Found", {}, io.BytesIO(b'{"detail":"Repo x not found"}'),
         )
         with patch("urllib.request.urlopen", side_effect=err):
-            result = _daemon("GET", "/api/v1/cards/x")
+            result = _daemon("GET", "/api/v1/repos/x")
         assert "error" in result
         assert "not found" in result["error"].lower()
 

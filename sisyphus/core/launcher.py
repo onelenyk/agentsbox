@@ -8,26 +8,30 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from pydantic import ValidationError
-
-from .resources import save_agent_log
-from .schemas import BaseResult
-
 logger = logging.getLogger(__name__)
 
 OUTPUT_SIZE_CAP = 10 * 1024 * 1024
 GRACEFUL_KILL_TIMEOUT = 5
+
+WORKSPACE_ROOT = os.environ.get("WORKSPACE_ROOT", "/workspace")
+RUNS_DIR = Path(WORKSPACE_ROOT) / "runs"
+
+
+def save_agent_log(run_id: str, step_id: str, content: str) -> str:
+    """Save agent stdout/stderr to logs directory."""
+    log_dir = RUNS_DIR / run_id / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"{step_id}.log"
+    log_path.write_text(content, encoding="utf-8")
+    return str(log_path)
 
 
 @dataclass
 class AgentResult:
     status: str
     summary: str = ""
-    verdict: Optional[str] = None
-    risk: Optional[str] = None
     error: Optional[str] = None
     duration_ms: float = 0
-    parsed_result: Optional[dict] = None
     raw_stdout: str = ""
     raw_stderr: str = ""
 
@@ -146,16 +150,41 @@ async def launch_agent(
     cancel_event: Optional[asyncio.Event] = None,
     runner_name: Optional[str] = None,
     step_id: str = "",
+    pure: bool = False,
+    agent: Optional[str] = None,
 ) -> AgentResult:
-    """Spawn AI runner subprocess, capture output, validate result.
+    """Spawn AI runner subprocess, capture output.
 
     Handles total timeout and idle timeout (no output for N seconds) via
-    SIGTERM → 5s → SIGKILL, cancellation via Event, output capping at 10MB,
-    and schema validation against BaseResult.
+    SIGTERM → 5s → SIGKILL, cancellation via Event, output capping at 10MB.
+    Success/failure of the underlying task is NOT judged here — the caller
+    (core.worker) determines it from whether the agent-MCP session was closed
+    via a real `finish`/`approve`/`request_changes` tool call.
 
     Runner selection: if *runner_name* is given, looks up that runner.
     Otherwise falls back to agent_def's "runner" field, then default runner,
     then hardcoded "opencode" as last resort.
+
+    *pure*: pass --pure (disables the runner's external plugins). CAUTION:
+    confirmed live to also strip project-local MCP servers (opencode.json's
+    own "mcp" entries) along with the global plugin — do not combine with a
+    worker that depends on its own local MCP server (see core.worker, which
+    does NOT set this and instead overrides "plugin": [] in the generated
+    project config to disable just the global plugin).
+
+    *agent*: pass --agent <name> to pick a specific opencode agent/persona.
+    Needed by task/thread workers: a user's global config can register its
+    own custom primary agent (e.g. via a plugin) whose system prompt hardwires
+    routing ALL tool calls through a "skill"/"skill_mcp" indirection layer —
+    that persona is a separate "agent" config entry, not a plugin, so
+    disabling plugins does not stop it from being selected as the default.
+    Pass the name of an agent YOU defined in project config (core.worker does
+    this), not one of opencode's own built-in names — a built-in name's
+    primary/subagent classification lives in the global config too and can
+    change there outside of anything this code controls (confirmed live: a
+    "build" agent that worked one day was reclassified as a subagent the
+    next, silently falling back to the exact persona this param exists to
+    avoid).
     """
     from .runners import get_runner_by_name, get_default_runner
 
@@ -179,9 +208,6 @@ async def launch_agent(
     env["SISYPHUS_OUTPUT_DIR"] = str(output_dir)
     env["SISYPHUS_WORKTREE"] = str(worktree_path)
     env["SISYPHUS_DB_READONLY"] = "1"
-    env["SISYPHUS_AGENT_TOOL"] = str(
-        Path(__file__).resolve().parent.parent / "tools" / "agent_cli.py"
-    )
     if runner.get("model"):
         env["SISYPHUS_MODEL"] = runner["model"]
 
@@ -203,6 +229,10 @@ async def launch_agent(
         "--format", "json",
         "--auto",
     ]
+    if pure:
+        args.append("--pure")
+    if agent:
+        args.extend(["--agent", agent])
     if worktree_path and worktree_path != "/tmp":
         args.extend(["--dir", str(worktree_path)])
 
@@ -254,52 +284,10 @@ async def launch_agent(
     if status == "timeout":
         return AgentResult(status="timeout", duration_ms=duration, error=err)
 
-    result_json_path = output_path / "result.json"
-
-    # The agent MUST produce result.json (via the finish tool) — no result
-    # means a failed step. Statuses are never invented from the exit code.
-    if not result_json_path.exists():
-        return AgentResult(
-            status="failed", duration_ms=duration,
-            error=(
-                f"agent_no_result: agent exited with code {proc.returncode} "
-                f'without writing result.json — it must call "$SISYPHUS_AGENT_TOOL" finish'
-            ),
-            raw_stdout=stdout_str, raw_stderr=stderr_str,
-        )
-
-    try:
-        raw_json = result_json_path.read_text(encoding="utf-8")
-        parsed = json.loads(raw_json)
-    except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        return AgentResult(
-            status="failed", duration_ms=duration,
-            error=f"schema_validation_failed: invalid JSON: {e}",
-            raw_stdout=stdout_str, raw_stderr=stderr_str,
-        )
-    try:
-        result = BaseResult(**parsed)
-    except ValidationError as e:
-        return AgentResult(
-            status="failed", duration_ms=duration,
-            error=f"schema_validation_failed: {e}",
-            raw_stdout=stdout_str, raw_stderr=stderr_str,
-        )
-
-    if proc.returncode is not None and proc.returncode != 0:
-        logger.warning(
-            "Agent exited with code %s but result.json was valid — trusting result.json",
-            proc.returncode,
-        )
-
+    # Success/failure here is meaningless for MCP-based workers — the caller
+    # (core.worker) judges the outcome by whether the agent-MCP session was
+    # closed via a real tool call, not by process exit code.
     return AgentResult(
-        status=result.status,
-        summary=result.summary,
-        verdict=result.verdict,
-        risk=result.risk,
-        error=result.error,
-        duration_ms=duration,
-        parsed_result=result.model_dump(),
-        raw_stdout=stdout_str,
-        raw_stderr=stderr_str,
+        status="completed", duration_ms=duration,
+        raw_stdout=stdout_str, raw_stderr=stderr_str,
     )

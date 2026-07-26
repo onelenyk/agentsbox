@@ -167,6 +167,57 @@ class TestGuards:
         assert store.get_task(task["id"])["status"] == "failed"
         assert decision.action == "fail"
 
+    @pytest.mark.asyncio
+    async def test_repeated_worker_failures_asks_human_instead_of_respawning_forever(self, db_path):
+        """A broken runner/config (e.g. the plugin-hijack bug) makes every
+        spawned worker crash with agent_no_result. The LLM varies its
+        rationale each time it decides to retry, so this must be caught by
+        watching what actually happened (worker_finished failures), not by
+        the verbatim-repeat circuit breaker."""
+        task = store.create_task("fix something")
+        store.set_status(task["id"], "active")
+        counter = {"n": 0}
+
+        async def _keeps_retrying(task_, thread_text):
+            counter["n"] += 1
+            return Decision(action="spawn_worker", role="engineer", instruction="x",
+                            why=f"retry attempt {counter['n']}")  # different every time
+
+        async def fake_spawn(tid, role, instruction, repo_name=None, **kw):
+            store.post_message(
+                tid, "system", kind="worker_finished",
+                text=f"{role} ended without reporting a result (status=failed): agent_no_result: ...",
+            )
+
+        with patch("core.orchestrator.spawn_worker", side_effect=fake_spawn):
+            for _ in range(orchestrator.MAX_CONSECUTIVE_WORKER_FAILURES + 1):
+                decision, bg = await handle_event(task["id"], "worker_finished", decide_fn=_keeps_retrying)
+                if bg is not None:
+                    await bg
+                if store.get_task(task["id"])["status"] == "waiting":
+                    break
+
+        assert store.get_task(task["id"])["status"] == "waiting"
+        assert decision.action == "ask_human"
+        # never trips the (unrelated) pass budget to get there
+        assert counter["n"] <= orchestrator.MAX_CONSECUTIVE_WORKER_FAILURES + 1
+        questions = [m for m in store.get_thread(task["id"]) if m["kind"] == "question"]
+        assert "agent_no_result" in questions[-1]["text"] or "broken" in questions[-1]["text"]
+
+    @pytest.mark.asyncio
+    async def test_worker_failures_reset_by_a_success(self, db_path):
+        """A successful worker_finished in between failures resets the streak.
+        Both success and failure post kind="worker_finished" (see
+        web/agent_mcp.py::_end_worker) — only the text differs, so the guard
+        must key on content, not just the message kind."""
+        task = store.create_task("fix something")
+        store.post_message(task["id"], "system", kind="worker_finished",
+                           text="engineer ended without reporting a result: agent_no_result")
+        store.post_message(task["id"], "system", kind="worker_finished",
+                           text="reviewer ended without reporting a result: agent_no_result")
+        store.post_message(task["id"], "system", kind="worker_finished", text="explorer finished")
+        assert orchestrator._consecutive_worker_failures(task["id"]) == 0
+
 
 class TestRestartIsANoOp:
     @pytest.mark.asyncio

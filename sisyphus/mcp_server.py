@@ -59,63 +59,6 @@ def _daemon(method: str, path: str, payload: dict | None = None, params: dict | 
 
 # ── Tool Functions (thin forwards to the daemon) ─────────────────────────────
 
-# ── Cards (6) ───────────────────────────────────────────────────────────────
-
-def sisyphus_create_card(
-    repo: str,
-    pipeline: str = "investigate",
-    description: str = "",
-    jira_url: str = "",
-    name: str = "",
-) -> dict[str, Any]:
-    """Create a card in backlog (no pipeline execution)."""
-    return _daemon("POST", "/api/v1/cards", {
-        "repo": repo, "pipeline": pipeline, "description": description,
-        "jira_url": jira_url, "name": name, "run": False,
-    })
-
-
-def sisyphus_run_card(
-    repo: str,
-    pipeline: str = "investigate",
-    description: str = "",
-    jira_url: str = "",
-    name: str = "",
-) -> dict[str, Any]:
-    """Create a card and start its pipeline in the daemon (returns immediately;
-    the run executes in the daemon — poll sisyphus_get_card for progress)."""
-    return _daemon("POST", "/api/v1/cards", {
-        "repo": repo, "pipeline": pipeline, "description": description,
-        "jira_url": jira_url, "name": name, "run": True,
-    })
-
-
-def sisyphus_list_cards(
-    repo: str = "",
-    status: str = "",
-    pipeline: str = "",
-) -> dict[str, Any]:
-    """List cards with optional filters."""
-    return _daemon("GET", "/api/v1/cards", params={
-        "repo": repo, "status": status, "pipeline": pipeline,
-    })
-
-
-def sisyphus_get_card(card_id: str) -> dict[str, Any]:
-    """Get full detail for a card (card, run, steps, resources, activities)."""
-    return _daemon("GET", f"/api/v1/cards/{card_id}")
-
-
-def sisyphus_cancel_card(card_id: str) -> dict[str, Any]:
-    """Cancel a running card (marks steps cancelled, kills subprocesses)."""
-    return _daemon("POST", f"/api/v1/cards/{card_id}/cancel")
-
-
-def sisyphus_resume_card(card_id: str) -> dict[str, Any]:
-    """Resume a failed card (cancels old steps, fires fresh pipeline in daemon)."""
-    return _daemon("POST", f"/api/v1/cards/{card_id}/resume")
-
-
 # ── Repos (4) ────────────────────────────────────────────────────────────────
 
 def sisyphus_list_repos() -> dict[str, Any]:
@@ -196,6 +139,31 @@ def sisyphus_runner_set_default(name: str) -> dict[str, Any]:
     return _daemon("POST", f"/api/v1/runners/{name}/set-default")
 
 
+# ── Tasks (4) ────────────────────────────────────────────────────────────────
+
+def sisyphus_create_task(goal: str, repo: str) -> dict[str, Any]:
+    """Create a task (goal + repo) and start it processing immediately. repo is
+    required — a worker with no repo never gets its tool connection wired up
+    and can never succeed."""
+    return _daemon("POST", "/api/v1/tasks", {"goal": goal, "repo": repo})
+
+
+def sisyphus_list_tasks(status: str = "") -> dict[str, Any]:
+    """List tasks, optionally filtered by status (active, waiting, done, failed)."""
+    return _daemon("GET", "/api/v1/tasks", params={"status": status})
+
+
+def sisyphus_get_task(task_id: str) -> dict[str, Any]:
+    """Get a task's full detail: the task itself, its thread, and a rendered transcript."""
+    return _daemon("GET", f"/api/v1/tasks/{task_id}")
+
+
+def sisyphus_reply_task(task_id: str, text: str) -> dict[str, Any]:
+    """Post a human reply to a task's thread (e.g. answering a question) and
+    wake the orchestrator to continue."""
+    return _daemon("POST", f"/api/v1/tasks/{task_id}/messages", {"text": text})
+
+
 # ── Server (3) ───────────────────────────────────────────────────────────────
 
 def sisyphus_server_start(port: int = 7677) -> dict[str, Any]:
@@ -254,135 +222,6 @@ def sisyphus_server_status(port: int = 7677) -> dict[str, Any]:
 # ── Tool Registry ────────────────────────────────────────────────────────────
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
-    {
-        "name": "sisyphus_create_card",
-        "description": "Create a card in backlog (no pipeline execution)",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "repo": {
-                    "type": "string",
-                    "description": "Repository name",
-                },
-                "pipeline": {
-                    "type": "string",
-                    "description": "Pipeline name",
-                    "default": "investigate",
-                },
-                "description": {
-                    "type": "string",
-                    "description": "Task description",
-                },
-                "jira_url": {
-                    "type": "string",
-                    "description": "Optional Jira URL",
-                },
-                "name": {
-                    "type": "string",
-                    "description": "Short card name/title",
-                },
-            },
-            "required": ["repo", "description"],
-        },
-    },
-    {
-        "name": "sisyphus_run_card",
-        "description": "Create card and run pipeline synchronously (blocks until done)",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "repo": {
-                    "type": "string",
-                    "description": "Repository name",
-                },
-                "pipeline": {
-                    "type": "string",
-                    "description": "Pipeline name",
-                    "default": "investigate",
-                },
-                "description": {
-                    "type": "string",
-                    "description": "Task description",
-                },
-                "jira_url": {
-                    "type": "string",
-                    "description": "Optional Jira URL",
-                },
-                "name": {
-                    "type": "string",
-                    "description": "Short card name/title",
-                },
-            },
-            "required": ["repo", "description"],
-        },
-    },
-    {
-        "name": "sisyphus_list_cards",
-        "description": "List cards with optional filters by repo, status, or pipeline",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "repo": {
-                    "type": "string",
-                    "description": "Filter by repository name",
-                    "default": "",
-                },
-                "status": {
-                    "type": "string",
-                    "description": "Filter by status (backlog, running, completed, failed)",
-                    "default": "",
-                },
-                "pipeline": {
-                    "type": "string",
-                    "description": "Filter by pipeline name",
-                    "default": "",
-                },
-            },
-            "required": [],
-        },
-    },
-    {
-        "name": "sisyphus_get_card",
-        "description": "Get full detail for a card (card, run, steps, resources)",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "card_id": {
-                    "type": "string",
-                    "description": "Card ID (e.g. card-a1b2c3d4)",
-                },
-            },
-            "required": ["card_id"],
-        },
-    },
-    {
-        "name": "sisyphus_cancel_card",
-        "description": "Cancel a running card (marks steps cancelled, kills subprocesses)",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "card_id": {
-                    "type": "string",
-                    "description": "Card ID to cancel",
-                },
-            },
-            "required": ["card_id"],
-        },
-    },
-    {
-        "name": "sisyphus_resume_card",
-        "description": "Resume a failed card (cancels old steps, fires fresh pipeline execution)",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "card_id": {
-                    "type": "string",
-                    "description": "Card ID to resume",
-                },
-            },
-            "required": ["card_id"],
-        },
-    },
     {
         "name": "sisyphus_list_repos",
         "description": "List all configured git repositories",
@@ -577,6 +416,71 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "sisyphus_create_task",
+        "description": "Create a task (goal + repo) and start it processing immediately",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "goal": {
+                    "type": "string",
+                    "description": "What should get done",
+                },
+                "repo": {
+                    "type": "string",
+                    "description": "Repo name to work in — required, a repo-less worker can never succeed",
+                },
+            },
+            "required": ["goal", "repo"],
+        },
+    },
+    {
+        "name": "sisyphus_list_tasks",
+        "description": "List tasks, optionally filtered by status (active, waiting, done, failed)",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "description": "Filter by status: active, waiting, done, or failed",
+                    "default": "",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "sisyphus_get_task",
+        "description": "Get a task's full detail: the task itself, its thread, and a rendered transcript",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "Task ID (e.g. task-a1b2c3d4)",
+                },
+            },
+            "required": ["task_id"],
+        },
+    },
+    {
+        "name": "sisyphus_reply_task",
+        "description": "Post a human reply to a task's thread and wake the orchestrator to continue",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "Task ID to reply to",
+                },
+                "text": {
+                    "type": "string",
+                    "description": "Reply text (e.g. answering a pending question)",
+                },
+            },
+            "required": ["task_id", "text"],
+        },
+    },
+    {
         "name": "sisyphus_server_start",
         "description": "Start the Sisyphus web server (uvicorn) on specified port",
         "inputSchema": {
@@ -625,12 +529,6 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
 
 
 HANDLERS: dict[str, Any] = {
-    "sisyphus_create_card": sisyphus_create_card,
-    "sisyphus_run_card": sisyphus_run_card,
-    "sisyphus_list_cards": sisyphus_list_cards,
-    "sisyphus_get_card": sisyphus_get_card,
-    "sisyphus_cancel_card": sisyphus_cancel_card,
-    "sisyphus_resume_card": sisyphus_resume_card,
     "sisyphus_list_repos": sisyphus_list_repos,
     "sisyphus_add_repo": sisyphus_add_repo,
     "sisyphus_delete_repo": sisyphus_delete_repo,
@@ -641,6 +539,10 @@ HANDLERS: dict[str, Any] = {
     "sisyphus_delete_runner": sisyphus_delete_runner,
     "sisyphus_runner_health": sisyphus_runner_health,
     "sisyphus_runner_set_default": sisyphus_runner_set_default,
+    "sisyphus_create_task": sisyphus_create_task,
+    "sisyphus_list_tasks": sisyphus_list_tasks,
+    "sisyphus_get_task": sisyphus_get_task,
+    "sisyphus_reply_task": sisyphus_reply_task,
     "sisyphus_server_start": sisyphus_server_start,
     "sisyphus_server_stop": sisyphus_server_stop,
     "sisyphus_server_status": sisyphus_server_status,

@@ -83,13 +83,43 @@ class TestRepoBackedWorktree:
             await spawn_worker(task["id"], "engineer", "fix it", repo_name="myrepo")
 
         config = json.loads((fake_worktree / "opencode.json").read_text())
-        mcp = config["mcp"]["sisyphus"]
-        assert mcp["type"] == "remote"
-        assert mcp["url"].endswith("/mcp/agent")
-        assert mcp["headers"]["Authorization"].startswith("Bearer ")
+        # Named "sisyphus_agent", not "sisyphus" — confirmed live that this
+        # machine already has a global/per-project MCP entry literally named
+        # "sisyphus" (the repo's own control-plane mcp_server.py, set up for
+        # chat use), which silently wins any name collision and leaves our
+        # tools completely absent from the model's real tool list.
+        mcp = config["mcp"]["sisyphus_agent"]
+        # Local (stdio) MCP, not remote (HTTP) — opencode's remote transport
+        # proved unreliable; local mirrors mcp_server.py's proven pattern.
+        assert mcp["type"] == "local"
+        assert mcp["command"][-1].endswith("agent_mcp_stdio.py")
+        assert mcp["environment"]["SISYPHUS_SESSION_TOKEN"]
+        assert mcp["environment"]["SISYPHUS_DAEMON_URL"]
+        # "plugin": [] (not --pure) is what disables the user's global
+        # oh-my-openagent plugin — --pure was confirmed (via live opencode
+        # debug logs) to also strip project-local MCP servers, killing our
+        # own tools along with the plugin.
+        assert config["plugin"] == []
+        # Our own agent, defined entirely in project config with an explicit
+        # "primary" mode — not a borrowed built-in name. A built-in name's
+        # primary/subagent classification lives in the GLOBAL config and can
+        # be changed there outside anything we control (confirmed live: a
+        # "build" agent that worked one day was reclassified as a subagent
+        # the next, silently falling back to the persona this exists to
+        # avoid).
+        assert config["agent"] == {"sisyphus-worker": {"mode": "primary"}}
 
-        mock_access.assert_called_once_with(str(fake_worktree), "write")  # engineer -> write
+        # Worktrees are always writable regardless of role (opencode needs to
+        # write its own .opencode/ session state) — access control for what a
+        # role may DO lives in its tool allowlist, not filesystem permissions.
+        mock_access.assert_called_once_with(str(fake_worktree), "write")
         assert mock_launch.call_args.args[2] == str(fake_worktree)
+        # pure is no longer passed at all — --pure strips project-local MCP
+        # servers, which would take our own tools down with the plugin.
+        assert "pure" not in mock_launch.call_args.kwargs
+        # agent=our own agent name, matching the one defined in the config
+        # above — never a name borrowed from opencode's own built-ins.
+        assert mock_launch.call_args.kwargs["agent"] == "sisyphus-worker"
 
 
 class TestCrashFallback:

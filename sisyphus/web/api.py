@@ -2,139 +2,17 @@
 
 Thin wrappers over ``core/`` that return JSON, consumed by the MCP server (and
 any HTTP client). The browser's htmx routes live in ``web/routes.py``; this
-router is JSON-only. Runs are dispatched as background tasks on the daemon's
-event loop, so a run started by a client keeps executing here even if that
-client disconnects.
+router is JSON-only.
 """
-import asyncio
-from typing import Optional
-
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 api = APIRouter(prefix="/api/v1")
 
-# Keep references to in-flight background run tasks so they are not GC'd.
-_bg_tasks: set = set()
-
-
-def _spawn(coro) -> None:
-    task = asyncio.create_task(coro)
-    _bg_tasks.add(task)
-    task.add_done_callback(_bg_tasks.discard)
-
 
 @api.get("/health")
 async def health():
     return {"ok": True, "version": "2.0"}
-
-
-# ── Cards ──────────────────────────────────────────────────────────────
-
-
-class CreateCard(BaseModel):
-    repo: str
-    pipeline: str = "investigate"
-    description: str = ""
-    jira_url: str = ""
-    name: str = ""
-    run: bool = False
-
-
-class Comment(BaseModel):
-    text: str
-
-
-@api.post("/cards")
-async def create_card(body: CreateCard):
-    from core.operations import create_card_only, create_and_run_async
-
-    desc = body.description or "No description"
-    if body.run:
-        card_id = await create_and_run_async(
-            body.pipeline, body.repo, desc, body.jira_url or None, name=body.name,
-        )
-        return {"card_id": card_id, "status": "running"}
-    card = create_card_only(body.pipeline, body.repo, desc, body.jira_url or None, name=body.name)
-    return {
-        "card_id": card["id"],
-        "status": card["status"],
-        "pipeline": card["pipeline_name"],
-        "name": card.get("name", ""),
-        "repo_name": card.get("repo_name", ""),
-    }
-
-
-@api.get("/cards")
-async def list_cards(repo: str = "", status: str = "", pipeline: str = ""):
-    from core.operations import list_cards_filtered
-
-    cards = list_cards_filtered(
-        pipeline=pipeline or None, status=status or None, repo=repo or None,
-    )
-    return {"cards": cards, "count": len(cards)}
-
-
-@api.get("/cards/{card_id}")
-async def get_card(card_id: str):
-    from core.operations import get_card_detail
-
-    try:
-        return get_card_detail(card_id)
-    except ValueError:
-        raise HTTPException(status_code=404, detail=f"Card {card_id} not found")
-
-
-@api.post("/cards/{card_id}/run")
-async def run_card(card_id: str):
-    from core.operations import run_card as ops_run_card
-    from core.state import get_card as _get_card
-
-    if not _get_card(card_id):
-        raise HTTPException(status_code=404, detail=f"Card {card_id} not found")
-    _spawn(ops_run_card(card_id))  # non-blocking: executes in the daemon
-    return {"card_id": card_id, "status": "running"}
-
-
-@api.post("/cards/{card_id}/cancel")
-async def cancel_card(card_id: str):
-    from core.operations import cancel_card as ops_cancel
-
-    await ops_cancel(card_id)
-    return {"success": True, "card_id": card_id}
-
-
-@api.post("/cards/{card_id}/resume")
-async def resume_card(card_id: str):
-    from core.operations import resume_card as ops_resume
-
-    await ops_resume(card_id)  # fires its own background task, returns quickly
-    return {"success": True, "card_id": card_id}
-
-
-@api.post("/cards/{card_id}/comments")
-async def add_comment(card_id: str, body: Comment):
-    from core.db import get_conn
-    from core.state import add_activity, get_card as _get_card
-
-    if not _get_card(card_id):
-        raise HTTPException(status_code=404, detail=f"Card {card_id} not found")
-    text = body.text.strip()
-    if not text:
-        raise HTTPException(status_code=422, detail="text must not be empty")
-
-    conn = get_conn()
-    run = conn.execute(
-        "SELECT id FROM runs WHERE card_id = ? ORDER BY started_at DESC LIMIT 1",
-        (card_id,),
-    ).fetchone()
-    conn.close()
-
-    activity = add_activity(
-        card_id, text, author="user", author_type="human",
-        run_id=run["id"] if run else None,
-    )
-    return {"id": activity["id"], "card_id": card_id}
 
 
 # ── Repos ──────────────────────────────────────────────────────────────
@@ -258,6 +136,72 @@ async def runner_set_default(name: str):
     r = _require_runner(name)
     set_default_runner(r["id"])
     return {"success": True, "name": name}
+
+
+# ── Tasks ──────────────────────────────────────────────────────────────
+
+
+class CreateTask(BaseModel):
+    goal: str
+    repo: str = ""
+
+
+class TaskMessage(BaseModel):
+    text: str
+
+
+@api.post("/tasks")
+async def create_task(body: CreateTask):
+    from core import store
+    from core.orchestrator import emit
+
+    if not body.repo.strip():
+        # A worker with no repo falls back to a shared /tmp cwd and never gets
+        # its agent-MCP config written (core.worker.spawn_worker skips it for
+        # that path) — it can never succeed. Reject at creation instead of
+        # letting the task churn through retries to a dead end.
+        raise HTTPException(status_code=422, detail="repo is required")
+    task = store.create_task(body.goal, body.repo)
+    emit(task["id"], "created")
+    return {"task_id": task["id"], "status": task["status"]}
+
+
+@api.get("/tasks")
+async def list_tasks(status: str = ""):
+    from core import store
+
+    tasks = store.list_tasks(status or None)
+    return {"tasks": tasks, "count": len(tasks)}
+
+
+@api.get("/tasks/{task_id}")
+async def get_task(task_id: str):
+    from core import store
+
+    task = store.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    return {
+        "task": task,
+        "messages": store.get_thread(task_id),
+        "rendered": store.render_thread(task_id),
+    }
+
+
+@api.post("/tasks/{task_id}/messages")
+async def post_task_message(task_id: str, body: TaskMessage):
+    from core import store
+    from core.orchestrator import emit
+
+    if not store.get_task(task_id):
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="text must not be empty")
+
+    message = store.post_message(task_id, "human", kind="answer", text=text)
+    emit(task_id, "human_replied")
+    return {"id": message["id"], "task_id": task_id}
 
 
 # ── Orchestrator control ────────────────────────────────────────────────
