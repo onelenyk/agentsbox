@@ -1,0 +1,31 @@
+<div class="detail-panel">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h2 style="margin:0">{{ task.goal }}</h2>
+        <span class="status-badge {{ task.status }}">{{ task.status }}</span>
+    </div>
+    {% if task.repo %}
+    <div class="info-row"><span class="label">Repo</span><span class="value">{{ task.repo }}</span></div>
+    {% endif %}
+    <div class="info-row"><span class="label">Created</span><span class="value">{{ task.created_at[:19] }}</span></div>
+
+    <h3 style="margin-top:20px">Thread</h3>
+    {% for m in messages %}
+    <div style="padding:8px 0;border-bottom:1px solid #21262d">
+        <div style="display:flex;gap:8px;align-items:baseline">
+            <span style="font-size:12px;font-weight:600;padding:1px 8px;border-radius:10px;background:{% if m.author == 'human' %}#1f3a5f;color:#58a6ff{% elif m.author == 'orchestrator' %}#2d1f3d;color:#bc8cff{% else %}#1b3a2d;color:#3fb950{% endif %}">{{ m.author }}/{{ m.kind }}</span>
+            <span style="color:#8b949e;font-size:11px">{{ m.created_at[:19] }}</span>
+        </div>
+        <div style="margin-top:4px;font-size:13px;white-space:pre-wrap">{{ m.text }}</div>
+        {% if m.attachment %}
+        <div style="margin-top:4px;font-size:12px">📎 {{ m.attachment }}</div>
+        {% endif %}
+    </div>
+    {% else %}
+    <div style="color:#8b949e;font-size:13px;padding:8px 0">No messages yet.</div>
+    {% endfor %}
+
+    <form hx-post="/api/tasks/{{ task.id }}/messages" hx-swap="none" style="margin-top:10px" onsubmit="setTimeout(() => this.reset(), 0)">
+        <textarea name="text" required rows="2" placeholder="Reply…" style="width:100%;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:8px;font-size:13px;resize:vertical"></textarea>
+        <button type="submit" class="btn btn-primary" style="margin-top:6px">Reply</button>
+    </form>
+</div>

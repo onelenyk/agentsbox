@@ -148,6 +148,31 @@ def _pass_count(task_id: str) -> int:
     return sum(1 for m in store.get_thread(task_id) if m["author"] == "orchestrator")
 
 
+# Substrings core.worker.py's crash/timeout fallback message always contains
+# — see spawn_worker's "ended without reporting a result" post. A run isolated
+# from a broken model/runner still surfaces as "agent_no_result" via launcher.
+_WORKER_FAILURE_MARKERS = ("ended without reporting", "agent_no_result")
+MAX_CONSECUTIVE_WORKER_FAILURES = 3  # catch a broken runner/config in ~3 tries, not 25
+
+
+def _consecutive_worker_failures(task_id: str) -> int:
+    """How many of the most recent worker_finished messages, counting back
+    from the latest, were crash/timeout fallbacks rather than a real
+    finish/approve/request_changes result. A semantic counterpart to
+    _consecutive_repeat: the LLM varies its rationale each pass even while
+    re-spawning into the same broken runner, so a verbatim-text check alone
+    won't catch this — this reads what actually happened, not what the
+    orchestrator said about it."""
+    finished = [m["text"] for m in store.get_thread(task_id) if m["kind"] == "worker_finished"]
+    n = 0
+    for text in reversed(finished):
+        if any(marker in text for marker in _WORKER_FAILURE_MARKERS):
+            n += 1
+        else:
+            break
+    return n
+
+
 def _consecutive_repeat(task_id: str) -> int:
     """How many times in a row the orchestrator posted the EXACT same note.
 
@@ -186,6 +211,18 @@ async def handle_event(
                            text="[fail] pass budget exceeded — stopping to avoid runaway cost")
         store.set_status(task_id, "failed")
         return Decision(action="fail", reason="pass budget exceeded", why="budget"), None
+
+    if _consecutive_worker_failures(task_id) >= MAX_CONSECUTIVE_WORKER_FAILURES:
+        question = (
+            "The last few worker runs failed without reporting a result "
+            "(agent_no_result) — the runner or its config may be broken. "
+            "Please check before I try again."
+        )
+        store.post_message(task_id, "orchestrator", kind="note",
+                           text="[ask_human] workers keep failing to report a result")
+        store.post_message(task_id, "orchestrator", kind="question", text=question)
+        store.set_status(task_id, "waiting")
+        return Decision(action="ask_human", question=question, why="repeated worker failures"), None
 
     thread_text = store.render_thread(task_id)
     decide = decide_fn or _decide

@@ -5,23 +5,11 @@ JSON-RPC with the Bearer token. Verifies role-scoped tools, thread writes, and
 preconditions.
 """
 import json
-import sys
-from unittest.mock import MagicMock
 
-# Prevent start_scheduler at import time (mirror test_web_routes / test_api).
-_saved = sys.modules.get("core.scheduler")
-sys.modules["core.scheduler"] = MagicMock()
-sys.modules["core.scheduler"].start_scheduler = MagicMock(return_value=None)
+from fastapi.testclient import TestClient
+from web.app import app
 
-from fastapi.testclient import TestClient  # noqa: E402
-from web.app import app  # noqa: E402
-
-if _saved is not None:
-    sys.modules["core.scheduler"] = _saved
-else:
-    del sys.modules["core.scheduler"]
-
-from core import sessions, store  # noqa: E402
+from core import sessions, store
 
 
 def _client():

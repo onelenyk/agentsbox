@@ -19,20 +19,4 @@ gitlab:
 openrouter:
   base_url: {{ config.openrouter.base_url or 'https://openrouter.ai/api/v1' }}
 </div>
-
-<h2 style="font-size:14px;color:#8b949e;margin:16px 0 8px;text-transform:uppercase;letter-spacing:0.5px">Scheduler Jobs</h2>
-{% if jobs %}
-<table>
-  <tr><th>Job</th><th>Next Run</th><th>Trigger</th></tr>
-  {% for j in jobs %}
-  <tr>
-    <td>{{ j.name }}</td>
-    <td style="font-size:12px;color:#8b949e">{{ j.next_run_time }}</td>
-    <td style="font-size:12px;color:#8b949e">{{ j.trigger }}</td>
-  </tr>
-  {% endfor %}
-</table>
-{% else %}
-<p style="color:#8b949e">No scheduler jobs configured.</p>
-{% endif %}
 {% endblock %}

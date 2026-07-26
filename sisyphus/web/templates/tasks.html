@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Tasks — Sisyphus{% endblock %}
+{% block content %}
+<div class="header-bar">
+    <h1>Tasks</h1>
+    <button class="btn btn-primary" hx-get="/api/tasks/new-form" hx-target="#modal-container">+ New Task</button>
+</div>
+<div id="tasks-list" hx-get="/api/tasks/list" hx-trigger="load, taskCreated from:body" hx-swap="innerHTML">
+    <div class="empty-state"><p>Loading...</p></div>
+</div>
+{% endblock %}

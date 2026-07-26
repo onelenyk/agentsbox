@@ -137,45 +137,6 @@ def set_access(worktree_path: str, level: str):
     path.chmod(mode)
 
 
-def cleanup_orphans(bare_path: str) -> int:
-    """Remove worktrees not associated with active runs in SQLite.
-    Returns count of removed worktrees."""
-    wt_dir = REPOS_DIR / "worktrees"
-
-    if not wt_dir.exists():
-        return 0
-
-    removed = 0
-    for wt_entry in wt_dir.iterdir():
-        if not wt_entry.is_dir():
-            continue
-        entry_name = wt_entry.name
-        if "_" not in entry_name:
-            continue
-        run_id = entry_name.rsplit("_", 1)[0]
-
-        from core.db import get_conn
-        conn = get_conn()
-        cursor = conn.execute(
-            "SELECT COUNT(*) as cnt FROM steps WHERE run_id = ? "
-            "AND status IN ('pending', 'running')",
-            (run_id,)
-        )
-        row = cursor.fetchone()
-        conn.close()
-
-        if row and row["cnt"] == 0:
-            subprocess.run(
-                ["git", "-C", bare_path, "worktree", "remove",
-                 "--force", str(wt_entry)],
-                capture_output=True
-            )
-            shutil.rmtree(str(wt_entry), ignore_errors=True)
-            removed += 1
-
-    return removed
-
-
 def get_repo_name_from_url(repo_url: str) -> str:
     """Extract repo name from Git URL."""
     name = repo_url.rstrip("/").split("/")[-1]

@@ -1,0 +1,41 @@
+<div class="kanban-grid">
+    {% for status in ["active", "waiting", "done", "failed"] %}
+    <div class="kanban-col">
+        <h2>{{ status|capitalize }} <span class="count">{{ columns[status]|length }}</span></h2>
+        {% for t in columns[status] %}
+        <div class="card" onclick="window.location.href='/tasks/{{ t.id }}'">
+            <div class="title">{{ t.goal[:80] ~ '…' if t.goal|length > 80 else t.goal }}</div>
+            <div class="meta">
+                {% if t.repo %}
+                <span class="repo-badge">{{ t.repo }}</span>
+                {% endif %}
+                <span class="badge" style="font-family:monospace">{{ t.id }}</span>
+            </div>
+            <div class="card-stats">
+                <span class="stat-time-created" data-created="{{ t.created_at }}"></span>
+            </div>
+        </div>
+        {% else %}
+        <div class="empty-state"><p>No tasks</p></div>
+        {% endfor %}
+    </div>
+    {% endfor %}
+</div>
+<script>
+(function() {
+    function fmtRelative(iso) {
+        var diff = Date.now() - new Date(iso).getTime();
+        if (diff < 0) return '';
+        var s = Math.floor(diff / 1000);
+        if (s < 60) return s + 's ago';
+        if (s < 3600) return Math.floor(s / 60) + 'm ago';
+        if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+        return Math.floor(s / 86400) + 'd ago';
+    }
+    document.querySelectorAll('.stat-time-created').forEach(function(el) {
+        var created = el.dataset.created;
+        if (!created) return;
+        el.textContent = fmtRelative(created);
+    });
+})();
+</script>

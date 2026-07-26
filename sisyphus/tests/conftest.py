@@ -29,15 +29,3 @@ def db_path(tmp_path):
     core.db.init_db()
 
     yield str(db)
-
-
-@pytest.fixture
-def card(db_path):
-    from core.state import create_card
-    return create_card("investigate", "test", "test card")
-
-
-@pytest.fixture
-def run(db_path, card):
-    from core.state import create_run
-    return create_run(card["id"])
