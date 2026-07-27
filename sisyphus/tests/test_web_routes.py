@@ -172,6 +172,41 @@ def test_new_task_form_allows_no_repo(db_path):
     assert 'name="repo" required' not in response.text
 
 
+def test_parent_detail_lists_subtasks(db_path):
+    from core import store
+    parent = store.create_task("ticket PROJ-123")
+    ios = store.create_task("iOS impl", repo="ios-app", parent_id=parent["id"])
+    store.set_status(ios["id"], "done")
+    store.create_task("Android impl", repo="android-app", parent_id=parent["id"])
+
+    r = _make_client().get(f"/api/tasks/{parent['id']}/detail")
+    assert "Subtasks" in r.text
+    assert "iOS impl" in r.text and "android-app" in r.text
+    assert "1/2 done" in r.text
+
+
+def test_child_detail_shows_parent_breadcrumb(db_path):
+    from core import store
+    parent = store.create_task("ticket PROJ-123")
+    ios = store.create_task("iOS impl", repo="ios-app", parent_id=parent["id"])
+
+    r = _make_client().get(f"/api/tasks/{ios['id']}/detail")
+    assert "Part of" in r.text
+    assert f"/tasks/{parent['id']}" in r.text
+
+
+def test_board_hides_children_and_shows_parent_chip(db_path):
+    from core import store
+    with patch("core.orchestrator.emit"):
+        parent = store.create_task("ticket")
+        child = store.create_task("iOS", repo="ios-app", parent_id=parent["id"])
+
+    r = _make_client().get("/api/tasks/list")
+    assert parent["id"] in r.text        # parent shown
+    assert child["id"] not in r.text     # child hidden from top-level board
+    assert "0/1" in r.text               # parent's subtask progress chip
+
+
 def test_external_event_renders_distinctly(db_path):
     """A forge webhook's [external] message stands out in the thread."""
     from core import store
