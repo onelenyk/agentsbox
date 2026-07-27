@@ -61,6 +61,24 @@ def _attach(session, filename="", description="", **_):
     return {"ok": True}
 
 
+def _propose_subtasks(session, items=None, **_):
+    """A planner's structured fan-out proposal: one {repo, goal} per repo. Posts
+    a 'plan' message the orchestrator turns into child tasks (spawn_task)."""
+    items = items or []
+    if not items:
+        return {"error": "items required: a list of {repo, goal} objects"}
+    lines = []
+    for it in items:
+        goal = (it.get("goal") or "").strip()
+        if not goal:
+            return {"error": "each item needs a goal"}
+        repo = (it.get("repo") or "").strip()
+        lines.append(f"- [{repo or 'no repo'}] {goal}")
+    store.post_message(session["task_id"], session["role"], kind="plan",
+                       text="Proposed subtasks:\n" + "\n".join(lines))
+    return {"ok": True, "count": len(items)}
+
+
 def _finish(session, summary="", **_):
     if not summary.strip():
         return {"error": "summary required"}
@@ -133,6 +151,11 @@ TOOLS = {
                 {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}, _comment),
     "attach": ("Attach a file you saved in your working dir to the task.",
                {"type": "object", "properties": {"filename": {"type": "string"}, "description": {"type": "string"}}, "required": ["filename"]}, _attach),
+    "propose_subtasks": ("Propose a multi-repo fan-out: one {repo, goal} per repo.",
+                         {"type": "object", "properties": {"items": {"type": "array", "items": {
+                             "type": "object",
+                             "properties": {"repo": {"type": "string"}, "goal": {"type": "string"}},
+                             "required": ["goal"]}}}, "required": ["items"]}, _propose_subtasks),
     "finish": ("Report your final result. Mandatory last action.",
                {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}, _finish),
     "commit": ("Commit your changes in the working tree.",

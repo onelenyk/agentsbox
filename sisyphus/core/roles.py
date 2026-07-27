@@ -12,9 +12,12 @@ ROLES = {
     "explorer": {
         "persona": (
             "You investigate the codebase — read files, search patterns, trace "
-            "how things work. You do NOT modify code. Report findings, then finish."
+            "how things work. You do NOT modify code. Report findings, then finish. "
+            "If the task spans multiple repositories (e.g. an iOS app and an "
+            "Android app), call propose_subtasks with one {repo, goal} entry per "
+            "repo so the work can be fanned out — then finish."
         ),
-        "tools": _BASE + ["finish"],
+        "tools": _BASE + ["propose_subtasks", "finish"],
     },
     "engineer": {
         "persona": (
