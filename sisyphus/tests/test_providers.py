@@ -89,3 +89,63 @@ class TestPublishLocal:
         with patch("core.repos.get_repo", return_value={"source": source, "branch": "main"}):
             result = providers.publish_change(session, "empty", "")
         assert "error" in result
+
+
+class TestRepoSlug:
+    def test_https(self):
+        assert providers._repo_slug("https://github.com/acme/widgets.git") == "acme/widgets"
+
+    def test_ssh(self):
+        assert providers._repo_slug("git@github.com:acme/widgets.git") == "acme/widgets"
+
+    def test_nested_gitlab(self):
+        assert providers._repo_slug("https://gitlab.com/grp/sub/proj.git") == "grp/sub/proj"
+
+
+class TestForgeProviders:
+    def test_gitlab_pushes_and_opens_mr(self):
+        with patch("core.config.get_config", return_value={"token": "t", "base_url": "https://gl.example.com"}), \
+             patch("core.providers._push") as push, \
+             patch("core.providers._post_json", return_value={"web_url": "https://gl/mr/1"}) as post:
+            r = providers._publish_gitlab("/bare", "https://gl.example.com/grp/proj.git",
+                                          "sisyphus/task-1", "main", "Title", "Desc")
+        assert r["ok"] and r["platform"] == "gitlab" and r["url"] == "https://gl/mr/1"
+        push.assert_called_once()
+        # project path is URL-encoded (slash → %2F)
+        assert "grp%2Fproj/merge_requests" in post.call_args.args[0]
+        assert post.call_args.args[2]["source_branch"] == "sisyphus/task-1"
+
+    def test_github_pushes_and_opens_pr(self):
+        with patch("core.config.get_config", return_value={"token": "t"}), \
+             patch("core.providers._push") as push, \
+             patch("core.providers._post_json", return_value={"html_url": "https://gh/pr/1"}) as post:
+            r = providers._publish_github("/bare", "https://github.com/acme/widgets.git",
+                                          "sisyphus/task-1", "main", "Title", "Desc")
+        assert r["ok"] and r["platform"] == "github" and r["url"] == "https://gh/pr/1"
+        push.assert_called_once()
+        assert post.call_args.args[0].endswith("/repos/acme/widgets/pulls")
+        assert post.call_args.args[2] == {"head": "sisyphus/task-1", "base": "main", "title": "Title", "body": "Desc"}
+
+    def test_missing_token_errors(self):
+        with patch("core.config.get_config", return_value={"token": "${GITHUB_TOKEN}"}):
+            r = providers._publish_github("/bare", "https://github.com/a/b.git", "sisyphus/x", "main", "T", "D")
+        assert "error" in r and "token" in r["error"].lower()
+
+    def test_http_error_surfaced(self):
+        import io
+        import urllib.error
+        err = urllib.error.HTTPError("u", 422, "Unprocessable", {}, io.BytesIO(b'{"message":"exists"}'))
+        with patch("core.config.get_config", return_value={"token": "t"}), \
+             patch("core.providers._push"), \
+             patch("core.providers._post_json", return_value=err):
+            r = providers._publish_github("/bare", "https://github.com/a/b.git", "sisyphus/x", "main", "T", "D")
+        assert "error" in r and "422" in r["error"]
+
+    def test_publish_change_routes_by_platform(self, db_path):
+        task = store.create_task("x", repo="r")
+        session = {"task_id": task["id"], "role": "engineer", "worktree": ""}
+        with patch("core.repos.get_repo", return_value={"source": "https://github.com/a/b.git", "branch": "main"}), \
+             patch("core.providers._publish_github", return_value={"ok": True, "platform": "github"}) as gh:
+            r = providers.publish_change(session, "t", "d")
+        assert r["platform"] == "github"
+        gh.assert_called_once()
