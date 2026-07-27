@@ -1,5 +1,10 @@
 # Bucket B — Roadmap: from "looks autonomous" to "actually ships"
 
+> **Status: COMPLETE.** All 7 items shipped (git spine + local/GitLab/GitHub
+> providers, attachment persistence, repo-less tasks, structured result,
+> thread windowing, MR-lifecycle webhooks, API auth). 257 tests green. The
+> per-item sections below are kept as the design record.
+
 Bucket A (commit `dc861db`) hardened the orchestrator loop against silent
 stalls, duplicate workers, self-certified `done`, disk leaks, and un-deletable
 tasks. **Bucket B builds the real capabilities** the autonomous-SDLC vision
