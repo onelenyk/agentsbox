@@ -77,10 +77,15 @@ class TestRepoBackedWorktree:
 
         with patch("core.worker.get_repo", return_value={"source": "https://example.com/r.git", "branch": "main"}), \
              patch("core.worker.init_bare_clone"), \
-             patch("core.worker.create_worktree", return_value=str(fake_worktree)), \
+             patch("core.git_ops.ensure_task_branch", return_value="sisyphus/" + task["id"]), \
+             patch("core.worker.create_worktree", return_value=str(fake_worktree)) as mock_ct, \
              patch("core.worker.set_access") as mock_access, \
              patch("core.worker.launch_agent", mock_launch):
             await spawn_worker(task["id"], "engineer", "fix it", repo_name="myrepo")
+
+        # engineer checks out the task branch ATTACHED (detach=False) so its
+        # commits advance the branch; read-only roles would be detached.
+        assert mock_ct.call_args.kwargs.get("detach") is False
 
         config = json.loads((fake_worktree / "opencode.json").read_text())
         # Named "sisyphus_agent", not "sisyphus" — confirmed live that this

@@ -209,12 +209,21 @@ async def spawn_worker(
 
     bare_path, branch = _prepare_repo(task_id, repo_name or task.get("repo"))
     if bare_path:
-        worktree_path = create_worktree(bare_path, task_id, role, branch or "main")
+        # Every worker for a task works on the task's own branch
+        # (sisyphus/<task_id>), cut from the repo default. The engineer checks
+        # it out attached so its commits advance the branch; read-only roles
+        # (explorer/reviewer) check it out detached so they don't hold it and
+        # block the engineer — only one worktree may hold a branch at a time.
+        from .git_ops import ensure_task_branch
+        task_br = ensure_task_branch(bare_path, task_id, branch or "main")
+        worktree_path = create_worktree(
+            bare_path, task_id, role, task_br, detach=(role != "engineer"),
+        )
         # Always writable: opencode needs to write its own .opencode/ session
         # state in the cwd regardless of role. "Don't modify the repo" for a
-        # read-only role (explorer/reviewer) is enforced by that role's tool
-        # allowlist (no commit/open_mr) and persona prompt, not by filesystem
-        # permissions — a read-only worktree just breaks opencode outright.
+        # read-only role is enforced by that role's tool allowlist (no
+        # commit/open_mr) and persona prompt, not by filesystem permissions —
+        # a read-only worktree just breaks opencode outright.
         set_access(worktree_path, "write")
     else:
         worktree_path = "/tmp"

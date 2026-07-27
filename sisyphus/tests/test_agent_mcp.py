@@ -5,6 +5,7 @@ JSON-RPC with the Bearer token. Verifies role-scoped tools, thread writes, and
 preconditions.
 """
 import json
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from web.app import app
@@ -135,14 +136,43 @@ def test_finish_hook_fires(db_path):
 
 
 def test_open_mr_requires_prior_commit(db_path):
+    # commit / open_mr do real git + publishing; mock those layers so this test
+    # covers the MCP wiring (precondition + thread writes), not git mechanics.
     task_id, token = _session(db_path, "engineer")
     c = _client()
     early = _call(c, token, "open_mr", {"title": "Fix", "description": "..."})
-    assert early["result"]["isError"] is True
-    _call(c, token, "commit", {"message": "fix: retry"})
-    ok = _call(c, token, "open_mr", {"title": "Fix", "description": "..."})
+    assert early["result"]["isError"] is True  # no commit yet
+
+    with patch("core.git_ops.commit_all", return_value="a" * 40):
+        _call(c, token, "commit", {"message": "fix: retry"})
+    with patch("core.providers.publish_change", return_value={
+        "ok": True, "platform": "local", "branch": "sisyphus/x",
+        "stat": " feature.py | 2 +-", "patch_file": "change.patch",
+    }):
+        ok = _call(c, token, "open_mr", {"title": "Fix", "description": "..."})
     assert ok["result"]["isError"] is False
-    assert any(m["kind"] == "mr" for m in store.get_thread(task_id))
+    mr = [m for m in store.get_thread(task_id) if m["kind"] == "mr"]
+    assert mr and mr[0]["attachment"] == "change.patch"
+    assert "sisyphus/x" in mr[0]["text"]
+
+
+def test_commit_reports_sha_and_records_it(db_path):
+    task_id, token = _session(db_path, "engineer")
+    with patch("core.git_ops.commit_all", return_value="deadbeef" + "0" * 32):
+        out = _call(_client(), token, "commit", {"message": "add thing"})
+    assert out["result"]["isError"] is False
+    assert json.loads(out["result"]["content"][0]["text"])["sha"].startswith("deadbeef")
+    commits = [m for m in store.get_thread(task_id) if m["kind"] == "commit"]
+    assert commits and "deadbeef" in commits[0]["text"]
+
+
+def test_commit_with_no_changes_errors(db_path):
+    task_id, token = _session(db_path, "engineer")
+    with patch("core.git_ops.commit_all", return_value=None):
+        out = _call(_client(), token, "commit", {"message": "nothing"})
+    assert out["result"]["isError"] is True
+    assert "nothing to commit" in json.loads(out["result"]["content"][0]["text"])["error"]
+    assert not any(m["kind"] == "commit" for m in store.get_thread(task_id))
 
 
 def test_request_changes_requires_reason(db_path):
