@@ -1,5 +1,8 @@
 default_model: deepseek
 default_timeout: 300
+github:
+  base_url: ${GITHUB_BASE_URL}
+  token: ${GITHUB_TOKEN}
 gitlab:
   base_url: ${GITLAB_BASE_URL}
   token: ${GITLAB_TOKEN}
