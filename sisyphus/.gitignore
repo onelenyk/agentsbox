@@ -3,3 +3,9 @@ workspace/
 *.pyc
 __pycache__/
 sisyphus.db
+
+# ephemeral test DBs
+tests/.pytest_tmp/
+
+# oh-my-openagent tooling scratch
+.sisyphus/
