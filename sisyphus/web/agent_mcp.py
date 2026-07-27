@@ -68,20 +68,39 @@ def _finish(session, summary="", **_):
 def _commit(session, message="", **_):
     if not message.strip():
         return {"error": "commit message required"}
-    # Real git commit is wired with the MR feature; here we record the action so
-    # the open_mr precondition can see it.
-    store.post_message(session["task_id"], session["role"], kind="commit", text=message)
-    return {"ok": True}
+    from core import git_ops
+
+    try:
+        sha = git_ops.commit_all(session["worktree"], message)
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"commit failed: {exc}"}
+    if sha is None:
+        return {"error": "nothing to commit — no changes in the working tree"}
+    store.post_message(session["task_id"], session["role"], kind="commit",
+                       text=f"{message} ({sha[:8]})")
+    return {"ok": True, "sha": sha}
 
 
 def _open_mr(session, title="", description="", **_):
     if not any(m["kind"] == "commit" for m in store.get_thread(session["task_id"])):
         return {"error": "cannot open a merge request before a commit"}
-    store.post_message(
-        session["task_id"], session["role"], kind="mr",
-        text=f"{title}: {description}".strip(": "),
-    )
-    return {"ok": True}
+    from core.providers import publish_change
+
+    result = publish_change(session, title, description)
+    if "error" in result:
+        return result
+
+    # Compose the thread record. For a local repo the change IS the diff — show
+    # the branch + files-changed summary and point at the saved patch (viewable
+    # once attachment serving lands, roadmap #3). For a forge it'll be the URL.
+    if result.get("platform") == "local":
+        text = (f"{title}\n\nBranch: {result['branch']}\n\n{result['stat']}").strip()
+        store.post_message(session["task_id"], session["role"], kind="mr",
+                           text=text, attachment=result["patch_file"])
+    else:
+        text = f"{title}: {result.get('url', '')}".strip(": ")
+        store.post_message(session["task_id"], session["role"], kind="mr", text=text)
+    return {"ok": True, "branch": result.get("branch")}
 
 
 def _approve(session, summary="", **_):

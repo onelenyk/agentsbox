@@ -23,14 +23,20 @@ def init_bare_clone(repo_url: str, bare_path: str) -> str:
 
 
 def create_worktree(bare_path: str, run_id: str, step_id: str,
-                    branch: str = "main") -> str:
-    """Create a git worktree for a specific pipeline step.
+                    branch: str = "main", detach: bool = False) -> str:
+    """Create a git worktree for a specific worker.
 
     Worktrees are placed outside the bare clone at:
         {workspace}/repos/worktrees/{run_id}_{step_id}
 
     This avoids Git admin directory name truncation issues when
     worktrees are nested inside the bare clone.
+
+    *detach*: check out *branch* detached (a read-only role — explorer/reviewer)
+    so it doesn't hold the branch and block the engineer from committing to it.
+    The engineer checks out attached (detach=False), so its commits advance the
+    branch. Only one worktree may hold a branch attached at a time — a git rule
+    this split respects.
     """
     worktree_dir = (REPOS_DIR / "worktrees").resolve()
     worktree_path = worktree_dir / f"{run_id}_{step_id}"
@@ -40,14 +46,14 @@ def create_worktree(bare_path: str, run_id: str, step_id: str,
 
     worktree_dir.mkdir(parents=True, exist_ok=True)
 
-    result = subprocess.run(
-        ["git", "-C", bare_path, "worktree", "add", str(worktree_path),
-         branch],
-        capture_output=True, text=True
-    )
+    add = ["git", "-C", bare_path, "worktree", "add"]
+    if detach:
+        add.append("--detach")
+    add += [str(worktree_path), branch]
+    result = subprocess.run(add, capture_output=True, text=True)
 
     if result.returncode != 0:
-        if "already used by worktree" in result.stderr:
+        if "already used by worktree" in result.stderr and not detach:
             detached_result = subprocess.run(
                 ["git", "-C", bare_path, "worktree", "add",
                  "--detach", str(worktree_path), branch],
