@@ -234,6 +234,7 @@ async def task_page(request: Request, task_id: str):
     return _tmpl().TemplateResponse("task_detail.html", {
         "request": request, "active_page": "tasks",
         "task": task, "messages": store.get_thread(task_id),
+        "result": store.result_view(task_id),
     })
 
 @router.get("/api/tasks/{task_id}/detail", response_class=HTMLResponse)
@@ -245,6 +246,7 @@ async def task_detail_view(request: Request, task_id: str):
         return HTMLResponse('<div class="detail-panel"><p style="color:#f85149">Task not found</p></div>')
     return _tmpl().TemplateResponse("task_detail_content.html", {
         "request": request, "task": task, "messages": store.get_thread(task_id),
+        "result": store.result_view(task_id),
     })
 
 @router.post("/api/tasks/{task_id}/messages")
