@@ -211,13 +211,11 @@ async def tasks_create(goal: str = Form(...), repo: str = Form("")):
     from core.orchestrator import emit
     from fastapi.responses import Response
 
-    if not repo.strip():
-        # See web/api.py's create_task: a repo-less worker never gets its
-        # agent-MCP config written and can never succeed. htmx doesn't swap
-        # on non-2xx by default, so this surfaces via the global error toast
-        # (base.html's htmx:afterRequest handler) — same pattern as the
-        # empty-comment 422 below.
+    if not goal.strip():
+        # htmx doesn't swap on non-2xx; this surfaces via the global error
+        # toast (base.html's htmx:afterRequest handler).
         return Response(status_code=422)
+    # Repo optional — repo-less tasks run in a scratch dir (see web/api.py).
     task = store.create_task(goal, repo)
     emit(task["id"], "created")
     resp = Response(status_code=200)

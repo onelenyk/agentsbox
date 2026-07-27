@@ -27,6 +27,15 @@ def _run(args, cwd=None):
     return subprocess.run(args, cwd=cwd, capture_output=True, text=True)
 
 
+def is_git_repo(worktree: str) -> bool:
+    """True if *worktree* is inside a git working tree — false for a repo-less
+    task's scratch dir, where commit/open_mr have nothing to act on."""
+    if not worktree:
+        return False
+    r = _run(["git", "-C", worktree, "rev-parse", "--is-inside-work-tree"])
+    return r.returncode == 0 and r.stdout.strip() == "true"
+
+
 def ensure_task_branch(bare_path: str, task_id: str, base_branch: str) -> str:
     """Create ``sisyphus/<task_id>`` off *base_branch* in the bare repo if it
     doesn't exist yet. Returns the branch name."""

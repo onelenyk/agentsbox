@@ -68,6 +68,7 @@ def cleanup_task(task_id: str, deep: bool = False) -> None:
     patterns = [
         f"{ws}/repos/worktrees/{task_id}_*",   # per-role worktrees
         f"{ws}/repos/{task_id}_*",             # per-task bare clone
+        f"{ws}/scratch/{task_id}",             # repo-less scratch dir
         f"{ws}/runs/{task_id}",                # run logs
     ]
     if deep:
@@ -233,11 +234,16 @@ async def spawn_worker(
         # a read-only worktree just breaks opencode outright.
         set_access(worktree_path, "write")
     else:
-        worktree_path = "/tmp"
+        # A repo-less task (research / planning / Q&A — nothing to check out)
+        # still needs a private cwd where opencode can write its own session
+        # state and read our generated opencode.json. A per-task scratch dir,
+        # not a shared /tmp, so runs don't collide and cleanup can reclaim it.
+        ws = os.environ.get("WORKSPACE_ROOT", "/workspace")
+        worktree_path = f"{ws}/scratch/{task_id}"
+        os.makedirs(worktree_path, exist_ok=True)
 
     token = sessions.mint(task_id, role, worktree=worktree_path)
-    if worktree_path != "/tmp":
-        _write_opencode_config(worktree_path, token)
+    _write_opencode_config(worktree_path, token)
 
     store.post_message(
         task_id, author="system", kind="worker_started",

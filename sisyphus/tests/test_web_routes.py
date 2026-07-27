@@ -119,12 +119,19 @@ def test_tasks_create_via_form(db_path):
     assert "form-created task" in listed.text
 
 
-def test_tasks_create_via_form_without_repo_rejected(db_path):
-    """A repo-less worker never gets its agent-MCP config written and can
-    never succeed — reject at creation, same rule as the JSON API."""
+def test_tasks_create_via_form_without_repo_allowed(db_path):
+    """Repo-less tasks run in a scratch dir — allowed, same rule as the JSON API."""
     client = _make_client()
     with patch("core.orchestrator.emit") as mock_emit:
         response = client.post("/api/tasks", data={"goal": "no repo task", "repo": ""})
+    assert response.status_code == 200
+    mock_emit.assert_called_once()
+
+
+def test_tasks_create_via_form_without_goal_rejected(db_path):
+    client = _make_client()
+    with patch("core.orchestrator.emit") as mock_emit:
+        response = client.post("/api/tasks", data={"goal": "  ", "repo": "sisyphus"})
     assert response.status_code == 422
     mock_emit.assert_not_called()
 
