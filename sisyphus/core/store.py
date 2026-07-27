@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     goal       TEXT NOT NULL,
     repo       TEXT NOT NULL DEFAULT '',
     status     TEXT NOT NULL DEFAULT 'active',
+    parent_id  TEXT REFERENCES tasks(id),   -- NULL = top-level; set = child (a tree)
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -51,6 +52,16 @@ def init_store(conn) -> None:
     """Create the tasks/messages schema on an existing connection (called from
     ``core.db.init_db``)."""
     conn.executescript(_SCHEMA)
+    _migrate(conn)
+
+
+def _migrate(conn) -> None:
+    """Additive column migrations for DBs created before a field existed.
+    SQLite ADD COLUMN is a no-op-safe way to evolve the schema; each guarded by
+    a column-presence check so it's idempotent."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()}
+    if "parent_id" not in cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN parent_id TEXT REFERENCES tasks(id)")
 
 
 def _now() -> str:
@@ -64,13 +75,15 @@ def _dict(row) -> Optional[dict]:
 # ── Tasks ───────────────────────────────────────────────────────────────
 
 
-def create_task(goal: str, repo: str = "", status: str = "active") -> dict:
+def create_task(goal: str, repo: str = "", status: str = "active",
+                parent_id: Optional[str] = None) -> dict:
     task_id = f"task-{uuid4().hex[:8]}"
     now = _now()
     conn = get_conn()
     conn.execute(
-        "INSERT INTO tasks (id, goal, repo, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-        (task_id, goal, repo, status, now, now),
+        "INSERT INTO tasks (id, goal, repo, status, parent_id, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (task_id, goal, repo, status, parent_id, now, now),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
@@ -93,6 +106,16 @@ def list_tasks(status: Optional[str] = None) -> List[dict]:
         ).fetchall()
     else:
         rows = conn.execute("SELECT * FROM tasks ORDER BY created_at DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def list_children(parent_id: str) -> List[dict]:
+    """Child tasks of a fan-out parent, oldest first. Empty for a leaf task."""
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM tasks WHERE parent_id = ? ORDER BY created_at ASC", (parent_id,)
+    ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
