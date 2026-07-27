@@ -160,6 +160,24 @@ class TestDelete:
     def test_delete_unknown_returns_false(self, db_path):
         assert delete_task("task-nope") is False
 
+    def test_delete_parent_cascades_to_children(self, db_path):
+        parent = create_task("ticket")
+        ios = create_task("iOS", repo="ios-app", parent_id=parent["id"])
+        android = create_task("Android", repo="android-app", parent_id=parent["id"])
+        post_message(ios["id"], "engineer", kind="commit", text="did it")
+
+        assert delete_task(parent["id"]) is True
+        assert get_task(parent["id"]) is None
+        assert get_task(ios["id"]) is None          # child gone too
+        assert get_task(android["id"]) is None
+        assert get_thread(ios["id"]) == []          # child's thread gone
+
+    def test_delete_child_leaves_parent(self, db_path):
+        parent = create_task("ticket")
+        ios = create_task("iOS", repo="ios-app", parent_id=parent["id"])
+        assert delete_task(ios["id"]) is True
+        assert get_task(parent["id"]) is not None   # deleting a child spares the parent
+
 
 class TestResultView:
     def test_local_change_surfaces_commits_and_patch(self, db_path):
