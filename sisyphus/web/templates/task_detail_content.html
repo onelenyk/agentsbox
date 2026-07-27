@@ -1,4 +1,7 @@
 <div class="detail-panel">
+    {% if parent %}
+    <div style="font-size:12px;margin-bottom:10px;color:#8b949e">↑ Part of <a href="/tasks/{{ parent.id }}" style="color:#58a6ff">{{ parent.goal }}</a></div>
+    {% endif %}
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px">
         <h2 style="margin:0">{{ task.goal }}</h2>
         <div style="display:flex;align-items:center;gap:12px;flex-shrink:0">
@@ -35,6 +38,21 @@
             {% for c in result.commits %}<div>✓ {{ c }}</div>{% endfor %}
         </div>
         {% endif %}
+    </div>
+    {% endif %}
+
+    {% if children %}
+    <div style="margin-top:18px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <h3 style="margin:0">Subtasks</h3>
+            <span class="badge" style="background:#21262d;color:#8b949e">{{ children|selectattr('status','equalto','done')|list|length }}/{{ children|length }} done</span>
+        </div>
+        {% for c in children %}
+        <a href="/tasks/{{ c.id }}" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border:1px solid #21262d;border-radius:6px;margin-bottom:6px;text-decoration:none;color:#c9d1d9">
+            <span style="font-size:13px">{{ c.goal }} <span style="color:#8b949e">({{ c.repo or 'no repo' }})</span></span>
+            <span class="status-badge {{ c.status }}">{{ c.status }}</span>
+        </a>
+        {% endfor %}
     </div>
     {% endif %}
 

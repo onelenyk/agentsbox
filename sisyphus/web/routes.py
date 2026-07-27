@@ -197,7 +197,15 @@ async def tasks_page(request: Request):
 @router.get("/api/tasks/list", response_class=HTMLResponse)
 async def tasks_list_view(request: Request):
     from core import store
-    columns = {status: store.list_tasks(status=status) for status in store.VALID_STATUSES}
+    columns = {}
+    for status in store.VALID_STATUSES:
+        tasks = [t for t in store.list_tasks(status=status) if not t.get("parent_id")]
+        for t in tasks:   # annotate fan-out parents with child progress
+            kids = store.list_children(t["id"])
+            if kids:
+                t["child_total"] = len(kids)
+                t["child_done"] = sum(1 for c in kids if c["status"] == "done")
+        columns[status] = tasks
     return _tmpl().TemplateResponse("tasks_list.html", {"request": request, "columns": columns})
 
 @router.get("/api/tasks/new-form", response_class=HTMLResponse)
@@ -233,6 +241,8 @@ async def task_page(request: Request, task_id: str):
         "request": request, "active_page": "tasks",
         "task": task, "messages": store.get_thread(task_id),
         "result": store.result_view(task_id),
+        "children": store.list_children(task_id),
+        "parent": store.get_task(task["parent_id"]) if task.get("parent_id") else None,
     })
 
 @router.get("/api/tasks/{task_id}/detail", response_class=HTMLResponse)
@@ -245,6 +255,8 @@ async def task_detail_view(request: Request, task_id: str):
     return _tmpl().TemplateResponse("task_detail_content.html", {
         "request": request, "task": task, "messages": store.get_thread(task_id),
         "result": store.result_view(task_id),
+        "children": store.list_children(task_id),
+        "parent": store.get_task(task["parent_id"]) if task.get("parent_id") else None,
     })
 
 @router.post("/api/tasks/{task_id}/messages")
