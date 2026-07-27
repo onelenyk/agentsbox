@@ -8,12 +8,13 @@
             </div>
             <div class="form-group">
                 <label>Repository</label>
-                <select name="repo" required>
-                    <option value="" disabled selected>Select a repo…</option>
+                <select name="repo">
+                    <option value="" selected>None — research / planning / Q&A</option>
                     {% for r in repos %}
                     <option value="{{ r.name }}">{{ r.name }}</option>
                     {% endfor %}
                 </select>
+                <div style="font-size:11px;color:#8b949e;margin-top:4px">A repo-less task runs read-only in a scratch dir — no commits or merge requests.</div>
             </div>
             <div class="form-actions" style="display:flex;gap:8px">
                 <button type="button" class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>

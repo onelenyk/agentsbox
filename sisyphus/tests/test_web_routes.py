@@ -162,6 +162,29 @@ def test_task_detail_view_shows_thread(db_path):
     assert "visible in thread" in response.text
 
 
+def test_new_task_form_allows_no_repo(db_path):
+    """The New Task form offers a repo-less option (backend #3 support)."""
+    client = _make_client()
+    response = client.get("/api/tasks/new-form")
+    assert response.status_code == 200
+    # a non-required select with an explicit None option
+    assert "research / planning" in response.text.lower()
+    assert 'name="repo" required' not in response.text
+
+
+def test_external_event_renders_distinctly(db_path):
+    """A forge webhook's [external] message stands out in the thread."""
+    from core import store
+
+    task = _make_task(goal="ship it")
+    store.post_message(task["id"], "system", kind="external",
+                       text="[external] GitHub CI failed: build")
+    client = _make_client()
+    response = client.get(f"/api/tasks/{task['id']}/detail")
+    assert "[external] GitHub CI failed" in response.text
+    assert "🔔" in response.text  # distinct forge-event marker
+
+
 def test_task_detail_view_nonexistent(db_path):
     client = _make_client()
     response = client.get("/api/tasks/nope/detail")
