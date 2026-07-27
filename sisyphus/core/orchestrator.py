@@ -29,10 +29,15 @@ logger = logging.getLogger(__name__)
 
 # The whole orchestrator vocabulary. It never grows without also growing the
 # system prompt below — there is no other way to act on a task.
-Action = Literal["spawn_worker", "ask_human", "note", "done", "fail", "noop"]
+Action = Literal["spawn_worker", "spawn_task", "ask_human", "note", "done", "fail", "noop"]
 
 MAX_PASSES = 25              # per-task budget — a runaway task fails loudly
 MAX_CONSECUTIVE_REPEATS = 3  # thrash circuit breaker
+
+
+class Subtask(BaseModel):
+    goal: str
+    repo: str = ""   # empty = another repo-less child (nested planning)
 
 
 class Decision(BaseModel):
@@ -42,12 +47,13 @@ class Decision(BaseModel):
     instruction: Optional[str] = None
     question: Optional[str] = None
     reason: Optional[str] = None
+    subtasks: Optional[list[Subtask]] = None   # for spawn_task (fan-out)
 
 
 @dataclass
 class Event:
     task_id: str
-    type: str  # created | worker_finished | human_replied | continue | external
+    type: str  # created | worker_finished | human_replied | continue | external | child_finished
 
 
 _queue: Optional["asyncio.Queue[Event]"] = None
@@ -97,6 +103,7 @@ evaluation to a reviewer worker instead.
 
 Reply with EXACTLY one JSON object and nothing else, matching one of:
 {"action": "spawn_worker", "role": "explorer"|"engineer"|"reviewer", "instruction": "...", "why": "..."}
+{"action": "spawn_task", "subtasks": [{"repo": "ios-app", "goal": "..."}, {"repo": "android-app", "goal": "..."}], "why": "..."}
 {"action": "ask_human", "question": "...", "why": "..."}
 {"action": "note", "why": "..."}
 {"action": "done", "why": "..."}
@@ -106,6 +113,14 @@ Reply with EXACTLY one JSON object and nothing else, matching one of:
 "why" is always required: a short one-line reason for the choice.
 Only choose "done" after a reviewer has APPROVED on the thread — if none has,
 spawn a reviewer instead.
+
+Use "spawn_task" to fan a task out across multiple repos: when the work spans
+separate codebases (e.g. a ticket needing an iOS and an Android implementation),
+create one child task per repo. A worker's "plan" message lists the proposed
+{repo, goal} splits — turn it into subtasks. Each child then runs on its own.
+Once children exist, they report back as "[<status>] child ..." messages: a task
+whose children are all done is itself done (no separate reviewer needed); if any
+child failed, spawn_task a fix-child on that repo or ask the human.
 
 Messages prefixed with "[external]" are forge events about the change you shipped
 (CI results, reviews, a merge). React to them:
@@ -257,15 +272,41 @@ def _reviewer_approved(task_id: str) -> bool:
     )
 
 
+def _children_pending(task_id: str) -> bool:
+    """True if this task fanned out and at least one child is still running.
+    The parent waits (noop) until every child is terminal — the child_finished
+    events wake it, so it never polls."""
+    kids = store.list_children(task_id)
+    return bool(kids) and any(c["status"] not in ("done", "failed") for c in kids)
+
+
+def _all_children_done(task_id: str) -> bool:
+    """True if this task fanned out and every child succeeded. A coordinator
+    task produces no code, so this — not a reviewer — gates its 'done'."""
+    kids = store.list_children(task_id)
+    return bool(kids) and all(c["status"] == "done" for c in kids)
+
+
 def _terminate(task_id: str, status: str) -> None:
     """Set a terminal status AND reclaim the task's disk (worktrees, bare
     clones, run logs). Best-effort cleanup — never let it block termination."""
+    task = store.get_task(task_id)
     store.set_status(task_id, status)
     try:
         from .worker import cleanup_task
         cleanup_task(task_id)
     except Exception:
         logger.exception("cleanup failed for task %s", task_id)
+
+    # Roll up to a fan-out parent: a finishing child notifies its parent's
+    # thread and wakes it, exactly as a worker posts worker_finished and wakes
+    # its task. The parent's next pass re-reads the thread and re-decides.
+    if task and task.get("parent_id"):
+        store.post_message(
+            task["parent_id"], "system", kind="child_finished",
+            text=f"[{status}] child '{task['goal']}' ({task['repo'] or 'no repo'})",
+        )
+        emit(task["parent_id"], "child_finished")
 
 
 def _park_on_error(task_id: str) -> None:
@@ -299,6 +340,11 @@ async def handle_event(
     if _worker_in_flight(task_id):
         return Decision(action="noop", why="worker already in flight"), None
 
+    # Fanned out and children are still running — wait. Their child_finished
+    # events wake this parent; the last one to finish lets the pass proceed.
+    if _children_pending(task_id):
+        return Decision(action="noop", why="waiting on child tasks"), None
+
     if _pass_count(task_id) >= MAX_PASSES:
         store.post_message(task_id, "orchestrator", kind="note",
                            text="[fail] pass budget exceeded — stopping to avoid runaway cost")
@@ -323,7 +369,7 @@ async def handle_event(
 
     # The orchestrator must not self-certify quality — a 'done' needs a
     # reviewer's approval on the thread. Otherwise, spawn one.
-    if decision.action == "done" and not _reviewer_approved(task_id):
+    if decision.action == "done" and not (_reviewer_approved(task_id) or _all_children_done(task_id)):
         decision = Decision(
             action="spawn_worker", role="reviewer",
             instruction=(f"Verify the task goal is fully met: {task['goal']}. "
@@ -362,6 +408,18 @@ async def _execute(task_id: str, decision: Decision):
             spawn_worker(task_id, decision.role, decision.instruction or "",
                         repo_name=task.get("repo") if task else None)
         )
+    if decision.action == "spawn_task":
+        # Fan out: one child task per repo, each running the normal loop. The
+        # parent stays active and waits for their child_finished roll-ups.
+        store.set_status(task_id, "active")
+        for sub in (decision.subtasks or []):
+            child = store.create_task(sub.goal, sub.repo or "", parent_id=task_id)
+            store.post_message(
+                task_id, "orchestrator", kind="note",
+                text=f"[spawn_task] child {child['id']}: {sub.goal} ({sub.repo or 'no repo'})",
+            )
+            emit(child["id"], "created")
+        return None
     if decision.action == "ask_human":
         store.post_message(task_id, "orchestrator", kind="question", text=decision.question or "")
         store.set_status(task_id, "waiting")

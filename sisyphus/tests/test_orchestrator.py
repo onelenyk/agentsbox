@@ -385,3 +385,80 @@ class TestTerminalCleanup:
         with patch("core.worker.cleanup_task") as mock_cleanup:
             await handle_event(task["id"], "worker_finished", decide_fn=decisions)
         mock_cleanup.assert_called_once_with(task["id"])
+
+
+class TestFanout:
+    @pytest.mark.asyncio
+    async def test_spawn_task_creates_children_and_emits(self, db_path):
+        from core.orchestrator import Subtask
+
+        parent = store.create_task("ticket PROJ-123")  # repo-less coordinator
+        decisions = _scripted([Decision(
+            action="spawn_task",
+            subtasks=[Subtask(repo="ios-app", goal="iOS impl"),
+                      Subtask(repo="android-app", goal="Android impl")],
+            why="fan out to both platforms",
+        )])
+        await handle_event(parent["id"], "worker_finished", decide_fn=decisions)
+
+        kids = store.list_children(parent["id"])
+        assert {c["repo"] for c in kids} == {"ios-app", "android-app"}
+        assert all(c["parent_id"] == parent["id"] for c in kids)
+        # a "created" event was queued for each child
+        assert orchestrator._get_queue().qsize() == 2
+
+    @pytest.mark.asyncio
+    async def test_parent_waits_while_a_child_is_pending(self, db_path):
+        parent = store.create_task("ticket")
+        store.create_task("iOS", repo="ios-app", parent_id=parent["id"])   # active
+        done_child = store.create_task("Android", repo="android-app", parent_id=parent["id"])
+        store.set_status(done_child["id"], "done")
+
+        async def _should_not_run(task_, thread_text):
+            raise AssertionError("decide must not run while a child is pending")
+
+        decision, bg = await handle_event(parent["id"], "child_finished", decide_fn=_should_not_run)
+        assert decision.action == "noop"
+
+    @pytest.mark.asyncio
+    async def test_child_termination_rolls_up_to_parent(self, db_path):
+        parent = store.create_task("ticket")
+        child = store.create_task("iOS", repo="ios-app", parent_id=parent["id"])
+        store.set_status(child["id"], "active")
+
+        with patch("core.worker.cleanup_task"):
+            orchestrator._terminate(child["id"], "done")
+
+        rolled = [m for m in store.get_thread(parent["id"]) if m["kind"] == "child_finished"]
+        assert rolled and "[done]" in rolled[0]["text"]
+        assert orchestrator._get_queue().qsize() == 1   # parent woken
+
+    @pytest.mark.asyncio
+    async def test_parent_done_when_all_children_done_without_reviewer(self, db_path):
+        parent = store.create_task("ticket")
+        for repo in ("ios-app", "android-app"):
+            c = store.create_task(repo, repo=repo, parent_id=parent["id"])
+            store.set_status(c["id"], "done")
+        store.set_status(parent["id"], "active")
+
+        decisions = _scripted([Decision(action="done", why="both platforms shipped")])
+        with patch("core.worker.cleanup_task"):
+            decision, bg = await handle_event(parent["id"], "child_finished", decide_fn=decisions)
+
+        # done was NOT overridden into a reviewer spawn (children gate it)
+        assert decision.action == "done"
+        assert store.get_task(parent["id"])["status"] == "done"
+
+    @pytest.mark.asyncio
+    async def test_leaf_task_still_needs_reviewer_for_done(self, db_path):
+        """A task with no children keeps the reviewer-approval gate."""
+        task = store.create_task("code task", repo="sisyphus")
+        store.set_status(task["id"], "active")
+
+        decisions = _scripted([Decision(action="done", why="looks done to me")])
+        decision, bg = await handle_event(task["id"], "worker_finished", decide_fn=decisions)
+        # no reviewer approval on the thread → overridden into a reviewer spawn
+        assert decision.action == "spawn_worker"
+        assert decision.role == "reviewer"
+        if bg:
+            bg.cancel()
