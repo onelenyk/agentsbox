@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sisyphus — Architecture</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d1117; color: #c9d1d9; padding: 40px; }
+  h1 { color: #f0f6fc; font-size: 28px; margin-bottom: 8px; }
+  .subtitle { color: #8b949e; font-size: 14px; margin-bottom: 32px; }
+  h2 { color: #f0f6fc; font-size: 20px; margin: 32px 0 12px; padding-bottom: 8px; border-bottom: 1px solid #30363d; }
+  .section { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; margin-bottom: 24px; }
+  .mermaid { background: #0d1117; display: flex; justify-content: center; }
+  .card { background: #21262d; border: 1px solid #30363d; border-radius: 6px; padding: 16px; margin-bottom: 12px; }
+  .card h3 { color: #58a6ff; font-size: 16px; margin-bottom: 8px; }
+  .card p, .card li { font-size: 13px; color: #8b949e; line-height: 1.6; }
+  .card ul { padding-left: 20px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; margin-right: 4px; }
+  .badge-green { background: #1b3a2d; color: #3fb950; }
+  .badge-blue { background: #1f3a5f; color: #58a6ff; }
+  .badge-red { background: #3d1f1f; color: #f85149; }
+  .badge-purple { background: #2d1f3d; color: #bc8cff; }
+  .badge-gray { background: #21262d; color: #8b949e; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+  .flow-step { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-bottom: 1px solid #21262d; }
+  .flow-num { background: #1f3a5f; color: #58a6ff; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; flex-shrink: 0; }
+  .flow-text { font-size: 13px; line-height: 1.5; }
+  .flow-text strong { color: #f0f6fc; }
+  .table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 12px; }
+  .table th { text-align: left; padding: 8px 12px; border-bottom: 2px solid #30363d; color: #8b949e; font-weight: 600; }
+  .table td { padding: 8px 12px; border-bottom: 1px solid #21262d; }
+  .table tr:hover td { background: #1c2128; }
+  .highlight { color: #58a6ff; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>⚡ Sisyphus — Architecture &amp; Data Flow</h1>
+<p class="subtitle">AI Agent Orchestration System · v2 · 82 tests · opencode v1.17.13</p>
+
+<!-- HIGH LEVEL -->
+<h2>1. High-Level Architecture</h2>
+<div class="section">
+<div class="mermaid">
+graph TB
+    subgraph Entry["Entry Points"]
+        CLI["🖥 CLI<br/>sisyphus.py<br/>Click commands"]
+        Web["🌐 Web UI<br/>FastAPI + HTMX<br/>port 7677"]
+        API["🔌 REST API<br/>/api/cards/*"]
+    end
+
+    subgraph Ops["Operations Layer"]
+        OPS["📦 core/operations.py<br/>Single Source of Truth<br/>create · run · resume · cancel"]
+    end
+
+    subgraph Engine["Core Engine"]
+        PL["⚙️ core/pipeline.py<br/>DAG · Waves · Reviewer Loop"]
+        LC["🚀 core/launcher.py<br/>Subprocess · Timeout · Cancel"]
+        ST["💾 core/state.py<br/>SQLite CRUD · FSM"]
+        RN["🏃 core/runners.py<br/>AI Runner Config"]
+    end
+
+    subgraph External["External"]
+        OC["🤖 opencode<br/>v1.17.13<br/>--format json --auto"]
+    end
+
+    CLI --> OPS
+    Web --> OPS
+    API --> OPS
+    OPS --> PL
+    PL --> LC
+    PL --> ST
+    LC --> OC
+    OC --> LC
+    LC --> RN
+
+    style Entry fill:#161b22,stroke:#30363d
+    style Ops fill:#1f3a5f,stroke:#58a6ff
+    style Engine fill:#1b3a2d,stroke:#3fb950
+    style External fill:#3d2e1f,stroke:#d29922
+</div>
+</div>
+
+<!-- CARD LIFECYCLE -->
+<h2>2. Card Lifecycle — Step by Step</h2>
+<div class="section">
+<div class="mermaid">
+sequenceDiagram
+    participant U as 👤 User
+    participant W as 🌐 Web UI
+    participant O as 📦 operations.py
+    participant P as ⚙️ pipeline.py
+    participant L as 🚀 launcher.py
+    participant OC as 🤖 opencode
+
+    U->>W: Click "+ New" → fill form
+    W->>O: create_card_only()
+    O->>O: INSERT INTO cards (status=backlog)
+    Note over U,W: Card appears in Backlog column
+
+    U->>W: Click "▶ Run"
+    W->>O: run_card(card_id)
+    O->>O: UPDATE cards SET status='running'
+    O->>P: run_pipeline(yaml, card)
+
+    P->>P: validate YAML
+    P->>P: create_run() → INSERT runs
+    P->>P: topological_sort() → BFS waves
+
+    loop Each Wave
+        P->>P: create_step() → INSERT steps
+        P->>P: transition_step("running")
+        P->>L: launch_agent(prompt, ...)
+        L->>OC: opencode run "prompt" --format json --auto
+        OC->>OC: Analyze code, read files
+        OC->>L: stdout: JSON events
+        OC-->>L: result.json + analysis.md
+        L->>L: read result.json
+        L->>P: AgentResult(status=completed)
+        P->>P: transition_step("completed")
+    end
+
+    P->>O: return {status: completed}
+    O->>O: UPDATE cards SET status='completed'
+    W->>W: board refresh → card moves to Completed
+    U->>W: Click card → see steps, resources, mermaid
+</div>
+</div>
+
+<!-- CORE MODULES -->
+<h2>3. Core Modules — What Each File Does</h2>
+<div class="section">
+<div class="grid">
+
+<div class="card">
+<h3>📦 operations.py <span class="badge badge-blue">363 lines</span></h3>
+<p>Single source of truth. Every card operation goes through here.</p>
+<ul>
+  <li><strong>create_card_only()</strong> → backlog</li>
+  <li><strong>create_and_run()</strong> → sync (CLI)</li>
+  <li><strong>create_and_run_async()</strong> → bg (Web)</li>
+  <li><strong>run_card()</strong> → run existing card</li>
+  <li><strong>resume_card()</strong> → reset steps, re-run</li>
+  <li><strong>cancel_card()</strong> → kill processes + DB</li>
+</ul>
+</div>
+
+<div class="card">
+<h3>⚙️ pipeline.py <span class="badge badge-green">564 lines</span></h3>
+<p>DAG execution engine with parallel waves.</p>
+<ul>
+  <li><strong>topological_sort()</strong> → BFS levels</li>
+  <li><strong>Wave execution</strong> → asyncio.gather</li>
+  <li><strong>Reviewer loop</strong> → max 3 retries</li>
+  <li><strong>Setup tools</strong> → fetch_jira, etc.</li>
+  <li><strong>Worktree isolation</strong> → per step</li>
+  <li><strong>Cancel check</strong> → between waves</li>
+</ul>
+</div>
+
+<div class="card">
+<h3>🚀 launcher.py <span class="badge badge-blue">268 lines</span></h3>
+<p>Spawns opencode subprocess, captures output.</p>
+<ul>
+  <li><strong>opencode run</strong> → non-interactive</li>
+  <li><strong>--format json --auto</strong> → JSON stdout</li>
+  <li><strong>stdin=stdout/stderr=PIPE</strong></li>
+  <li><strong>proc.communicate()</strong> → waits exit</li>
+  <li><strong>result.json</strong> → BaseResult validation</li>
+  <li><strong>analysis.md</strong> → saved as resource</li>
+</ul>
+</div>
+
+<div class="card">
+<h3>💾 state.py <span class="badge badge-green">254 lines</span></h3>
+<p>SQLite CRUD — 4 tables.</p>
+<ul>
+  <li><strong>cards</strong> — id, pipeline, status, platforms</li>
+  <li><strong>runs</strong> — id, card_id, status, error</li>
+  <li><strong>steps</strong> — id, run_id, agent, status</li>
+  <li><strong>resources</strong> — run_id, step_id, filename</li>
+</ul>
+</div>
+
+<div class="card">
+<h3>🔄 fsm.py <span class="badge badge-gray">40 lines</span></h3>
+<p>State machine — validates transitions.</p>
+<ul>
+  <li>pending → running → completed/failed/timeout</li>
+  <li>error → running (retry allowed)</li>
+  <li>⚠️ failed → running (BLOCKED — known issue)</li>
+</ul>
+</div>
+
+<div class="card">
+<h3>🏃 runners.py <span class="badge badge-purple">238 lines</span></h3>
+<p>AI runner CRUD — opencode, Claude, Ollama.</p>
+<ul>
+  <li><strong>add_runner()</strong> → name, binary, model</li>
+  <li><strong>health_check()</strong> → binary + API key + URL</li>
+  <li><strong>get_default_runner()</strong> → auto-seeded</li>
+  <li><strong>Web UI</strong> → /runners page</li>
+</ul>
+</div>
+
+<div class="card">
+<h3>🛠 recovery.py <span class="badge badge-gray">82 lines</span></h3>
+<p>Crash recovery on startup.</p>
+<ul>
+  <li>running steps → error (orchestrator_crash)</li>
+  <li>terminal runs → failed/completed</li>
+  <li>terminal cards → failed/completed</li>
+</ul>
+</div>
+
+<div class="card">
+<h3>🌲 worktree.py <span class="badge badge-green">167 lines</span></h3>
+<p>Git worktree isolation per step.</p>
+<ul>
+  <li>init_bare_clone() → lightweight clone</li>
+  <li>create_worktree() → per-step branch</li>
+  <li>set_access() → read/analyze/edit</li>
+  <li>remove_worktree() → cleanup</li>
+</ul>
+</div>
+
+</div>
+</div>
+
+<!-- DATA MODEL -->
+<h2>4. Data Model</h2>
+<div class="section">
+<div class="mermaid">
+erDiagram
+    CARDS ||--o{ RUNS : "card_id FK"
+    RUNS ||--o{ STEPS : "run_id FK"
+    STEPS ||--o{ RESOURCES : "step_id FK"
+    RUNS ||--o{ RESOURCES : "run_id FK"
+
+    CARDS {
+        string id PK
+        string pipeline_name
+        string status "backlog|created|running|completed|failed"
+        string platforms "JSON array"
+        string description
+        string jira_url
+        string created_at
+        string updated_at
+    }
+
+    RUNS {
+        string id PK
+        string card_id FK
+        string status "running|completed|failed"
+        int loop_count
+        string started_at
+        string finished_at
+        string error
+    }
+
+    STEPS {
+        string id PK
+        string run_id FK
+        string agent_name
+        int step_order
+        string status "pending|running|completed|failed|..."
+        string result_json
+        string error
+        string started_at
+        string completed_at
+    }
+
+    RESOURCES {
+        int id PK
+        string run_id FK
+        string step_id FK
+        string filename "result.json|analysis.md|..."
+        string resource_type
+        int step_order
+        string created_at
+    }
+</div>
+</div>
+
+<!-- STATUS FLOW -->
+<h2>5. Card Status Flow</h2>
+<div class="section">
+<div class="mermaid">
+stateDiagram-v2
+    [*] --> backlog: Create card
+
+    backlog --> running: Click "▶ Run"
+    backlog --> created: Create & Run (transient)
+
+    created --> running: Pipeline starts
+
+    running --> completed: All steps done
+    running --> failed: Step fails / cancel
+    running --> cancelled: User cancels
+
+    failed --> running: Resume
+    failed --> completed: On resume success
+
+    completed --> [*]
+    failed --> [*]
+</div>
+</div>
+
+<!-- KEY DECISIONS -->
+<h2>6. Key Numbers</h2>
+<div class="section">
+<table class="table">
+  <tr><th>Metric</th><th>Value</th></tr>
+  <tr><td>Total Python files</td><td>~40 files</td></tr>
+  <tr><td>Lines of code</td><td>~9,500 lines</td></tr>
+  <tr><td>Tests</td><td>82 passing</td></tr>
+  <tr><td>Pipeline steps per card</td><td>1 (investigate) · 6 (jira-sdlc)</td></tr>
+  <tr><td>Agent roles</td><td>8 (Android/iOS/KMP Engineer, Reviewer, PM, QA, Tech Lead)</td></tr>
+  <tr><td>Agent timeout</td><td>300s (investigate) · 1800s (SDLC)</td></tr>
+  <tr><td>Average completion time</td><td>30-60s (investigate, simple task)</td></tr>
+  <tr><td>Runner types</td><td>opencode, claude-cli, ollama, openai-api, custom</td></tr>
+  <tr><td>Kanban columns</td><td>5 (Backlog, Running, Created, Completed, Failed)</td></tr>
+  <tr><td>DB tables</td><td>4 (cards, runs, steps, resources) + runners</td></tr>
+</table>
+</div>
+
+<script>mermaid.initialize({ theme: 'dark', startOnLoad: true, securityLevel: 'loose' });</script>
+</body>
+</html>
