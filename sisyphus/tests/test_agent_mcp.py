@@ -65,7 +65,7 @@ def test_missing_token_rejected(db_path):
 def test_tools_list_matches_role(db_path):
     c = _client()
     for role, expected in [
-        ("explorer", {"get_context", "comment", "attach", "finish"}),
+        ("explorer", {"get_context", "comment", "attach", "propose_subtasks", "finish"}),
         ("engineer", {"get_context", "comment", "attach", "commit", "open_mr", "finish"}),
         ("reviewer", {"get_context", "comment", "attach", "approve", "request_changes"}),
     ]:
@@ -229,3 +229,27 @@ def test_reviewer_approve_finishes(db_path):
     out = _call(_client(), token, "approve", {"summary": "looks good"})
     assert json.loads(out["result"]["content"][0]["text"])["verdict"] == "approved"
     assert "worker_finished" in [m["kind"] for m in store.get_thread(task_id)]
+
+
+def test_propose_subtasks_posts_plan(db_path):
+    task_id, token = _session(db_path, "explorer")
+    out = _call(_client(), token, "propose_subtasks", {"items": [
+        {"repo": "ios-app", "goal": "iOS impl"},
+        {"repo": "android-app", "goal": "Android impl"},
+    ]})
+    assert out["result"]["isError"] is False
+    plan = [m for m in store.get_thread(task_id) if m["kind"] == "plan"]
+    assert plan and "[ios-app] iOS impl" in plan[0]["text"]
+    assert "[android-app] Android impl" in plan[0]["text"]
+
+
+def test_propose_subtasks_requires_items(db_path):
+    _, token = _session(db_path, "explorer")
+    out = _call(_client(), token, "propose_subtasks", {"items": []})
+    assert out["result"]["isError"] is True
+
+
+def test_propose_subtasks_denied_for_engineer(db_path):
+    _, token = _session(db_path, "engineer")
+    out = _call(_client(), token, "propose_subtasks", {"items": [{"goal": "x"}]})
+    assert out["result"]["isError"] is True  # not in the engineer's tool allowlist
