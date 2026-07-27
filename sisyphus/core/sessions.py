@@ -33,6 +33,13 @@ def revoke(token: str) -> None:
     _SESSIONS.pop(token, None)
 
 
+def revoke_task(task_id: str) -> None:
+    """Revoke every session for a task — used when a task is deleted so a
+    still-running worker can't write to a thread that no longer exists."""
+    for token in [t for t, s in _SESSIONS.items() if s.get("task_id") == task_id]:
+        _SESSIONS.pop(token, None)
+
+
 def clear() -> None:
     """Test helper — drop all sessions."""
     _SESSIONS.clear()

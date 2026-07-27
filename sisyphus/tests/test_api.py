@@ -122,6 +122,22 @@ def test_post_message_to_unknown_task_404(db_path):
     assert _client().post("/api/v1/tasks/nope/messages", json={"text": "x"}).status_code == 404
 
 
+def test_delete_task(db_path):
+    c = _client()
+    with patch("core.orchestrator.emit"):
+        tid = c.post("/api/v1/tasks", json={"goal": "g", "repo": "sisyphus"}).json()["task_id"]
+    with patch("core.worker.cleanup_task") as mock_cleanup:
+        r = c.request("DELETE", f"/api/v1/tasks/{tid}")
+    assert r.status_code == 200
+    assert r.json()["success"] is True
+    mock_cleanup.assert_called_once_with(tid)
+    assert c.get(f"/api/v1/tasks/{tid}").status_code == 404
+
+
+def test_delete_unknown_task_404(db_path):
+    assert _client().request("DELETE", "/api/v1/tasks/nope").status_code == 404
+
+
 def test_runner_not_found_404(db_path):
     init_runners_table()
     assert _client().post("/api/v1/runners/nope/set-default").status_code == 404

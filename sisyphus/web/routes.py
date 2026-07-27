@@ -264,3 +264,21 @@ async def task_reply(task_id: str, text: str = Form(...)):
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "taskUpdated"
     return resp
+
+@router.post("/api/tasks/{task_id}/delete")
+async def task_delete(task_id: str):
+    from core import sessions, store
+    from core.worker import cleanup_task
+    from fastapi.responses import Response
+
+    if not store.get_task(task_id):
+        return Response(status_code=404)
+    sessions.revoke_task(task_id)
+    store.delete_task(task_id)
+    try:
+        cleanup_task(task_id)
+    except Exception:
+        pass
+    resp = Response(status_code=200)
+    resp.headers["HX-Redirect"] = "/tasks"   # navigate back to the board
+    return resp

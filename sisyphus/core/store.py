@@ -108,6 +108,19 @@ def set_status(task_id: str, status: str) -> None:
     conn.close()
 
 
+def delete_task(task_id: str) -> bool:
+    """Delete a task and its whole thread. Returns True if the task existed.
+    Disk (worktrees, run logs) is reclaimed by the caller via
+    core.worker.cleanup_task — this only touches the database."""
+    conn = get_conn()
+    conn.execute("DELETE FROM messages WHERE task_id = ?", (task_id,))
+    cur = conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+    conn.commit()
+    existed = cur.rowcount > 0
+    conn.close()
+    return existed
+
+
 # ── Messages (the thread) ───────────────────────────────────────────────
 
 

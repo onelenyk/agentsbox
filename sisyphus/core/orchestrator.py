@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -46,7 +47,7 @@ class Decision(BaseModel):
 @dataclass
 class Event:
     task_id: str
-    type: str  # created | worker_finished | human_replied
+    type: str  # created | worker_finished | human_replied | continue
 
 
 _queue: Optional["asyncio.Queue[Event]"] = None
@@ -83,6 +84,10 @@ async def dispatch_forever() -> None:
             logger.exception(
                 "orchestrator pass failed for task %s (event=%s)", event.task_id, event.type
             )
+            # Never let an unexpected error leave a task silently stuck 'active'
+            # with nothing to wake it — park it as waiting so it is visible and
+            # a human reply can resume it.
+            _park_on_error(event.task_id)
 
 
 SYSTEM_PROMPT = """You are the Sisyphus orchestrator. You coordinate work on a \
@@ -99,6 +104,8 @@ Reply with EXACTLY one JSON object and nothing else, matching one of:
 {"action": "noop", "why": "..."}
 
 "why" is always required: a short one-line reason for the choice.
+Only choose "done" after a reviewer has APPROVED on the thread — if none has,
+spawn a reviewer instead.
 """
 
 
@@ -127,13 +134,37 @@ def _decide_via_llm_sync(thread_text: str) -> dict:
         base_url + "/chat/completions", data=body, method="POST",
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
     )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            payload = json.loads(resp.read())
-        content = payload["choices"][0]["message"]["content"]
-        return json.loads(content)
-    except (urllib.error.URLError, KeyError, IndexError, json.JSONDecodeError) as exc:
-        return {"action": "fail", "reason": f"orchestrator decision call failed: {exc}", "why": "decision error"}
+    # A transient network hiccup on our OWN decision call must not permanently
+    # fail (or silently stall) a task. Retry a few times, and on genuine
+    # exhaustion park via ask_human rather than fail — a human reply re-triggers
+    # a fresh decision. (URLError/socket.timeout/TimeoutError are all OSError.)
+    last_err = None
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                payload = json.loads(resp.read())
+            content = payload["choices"][0]["message"]["content"]
+            return json.loads(content)
+        except (urllib.error.URLError, OSError) as exc:
+            last_err = exc
+            time.sleep(2 * (attempt + 1))
+            continue
+        except (KeyError, IndexError, json.JSONDecodeError) as exc:
+            # The model answered but not with a parseable decision — recoverable
+            # by a human nudge, so don't permanently fail the task.
+            return {
+                "action": "ask_human",
+                "question": "I couldn't read a clear next-step decision. Please advise, or reply to have me retry.",
+                "why": f"unparseable decision: {exc}",
+            }
+    return {
+        "action": "ask_human",
+        "question": (
+            f"My decision service was unreachable after retries ({last_err}). "
+            "Check it, then reply here to resume."
+        ),
+        "why": "decision service unreachable",
+    }
 
 
 async def _decide(task: dict, thread_text: str) -> Decision:
@@ -194,6 +225,56 @@ def _consecutive_repeat(task_id: str) -> int:
     return n
 
 
+def _worker_in_flight(task_id: str) -> bool:
+    """True if a worker was spawned and hasn't reported back yet — i.e. the
+    most recent worker_started has no worker_finished after it. Used to stop a
+    mid-run event (e.g. a human reply) from spawning a SECOND worker for the
+    same task; the running worker's completion drives the next decision, which
+    will see whatever was posted in the meantime."""
+    thread = store.get_thread(task_id)
+    last_start = None
+    for i, m in enumerate(thread):
+        if m["kind"] == "worker_started":
+            last_start = i
+    if last_start is None:
+        return False
+    return not any(m["kind"] == "worker_finished" for m in thread[last_start + 1:])
+
+
+def _reviewer_approved(task_id: str) -> bool:
+    """True once a reviewer has posted an APPROVED result on the thread. The
+    orchestrator never self-certifies quality (see the system prompt), so
+    'done' is gated on this."""
+    return any(
+        m["author"] == "reviewer" and m["kind"] == "result" and m["text"].startswith("APPROVED")
+        for m in store.get_thread(task_id)
+    )
+
+
+def _terminate(task_id: str, status: str) -> None:
+    """Set a terminal status AND reclaim the task's disk (worktrees, bare
+    clones, run logs). Best-effort cleanup — never let it block termination."""
+    store.set_status(task_id, status)
+    try:
+        from .worker import cleanup_task
+        cleanup_task(task_id)
+    except Exception:
+        logger.exception("cleanup failed for task %s", task_id)
+
+
+def _park_on_error(task_id: str) -> None:
+    """Park an active task as 'waiting' after an unexpected pass error, so it's
+    visible and resumable instead of silently stuck."""
+    task = store.get_task(task_id)
+    if not task or task["status"] in ("done", "failed"):
+        return
+    store.post_message(task_id, "orchestrator", kind="note",
+                       text="[error] an internal error interrupted this pass — parked for review")
+    store.post_message(task_id, "orchestrator", kind="question",
+                       text="Something went wrong on my side. Reply here to resume, or check the daemon logs.")
+    store.set_status(task_id, "waiting")
+
+
 DecideFn = Callable[[dict, str], Awaitable[Decision]]
 
 
@@ -206,10 +287,16 @@ async def handle_event(
     if not task or task["status"] in ("done", "failed"):
         return Decision(action="noop", why="task missing or already terminal"), None
 
+    # A worker is still running — don't start a second one. Its worker_finished
+    # event drives the next decision, which will see anything posted meanwhile
+    # (e.g. a human reply). This makes mid-run events safe no-ops.
+    if _worker_in_flight(task_id):
+        return Decision(action="noop", why="worker already in flight"), None
+
     if _pass_count(task_id) >= MAX_PASSES:
         store.post_message(task_id, "orchestrator", kind="note",
                            text="[fail] pass budget exceeded — stopping to avoid runaway cost")
-        store.set_status(task_id, "failed")
+        _terminate(task_id, "failed")
         return Decision(action="fail", reason="pass budget exceeded", why="budget"), None
 
     if _consecutive_worker_failures(task_id) >= MAX_CONSECUTIVE_WORKER_FAILURES:
@@ -228,6 +315,16 @@ async def handle_event(
     decide = decide_fn or _decide
     decision = await decide(task, thread_text)
 
+    # The orchestrator must not self-certify quality — a 'done' needs a
+    # reviewer's approval on the thread. Otherwise, spawn one.
+    if decision.action == "done" and not _reviewer_approved(task_id):
+        decision = Decision(
+            action="spawn_worker", role="reviewer",
+            instruction=(f"Verify the task goal is fully met: {task['goal']}. "
+                         "Approve if it is; otherwise request changes with specifics."),
+            why="a reviewer must approve before done",
+        )
+
     store.post_message(task_id, "orchestrator", kind="note", text=f"[{decision.action}] {decision.why}")
 
     if _consecutive_repeat(task_id) > MAX_CONSECUTIVE_REPEATS:
@@ -235,10 +332,19 @@ async def handle_event(
             task_id, "orchestrator", kind="note",
             text=f"[fail] circuit breaker — {decision.action!r} repeated too many times",
         )
-        store.set_status(task_id, "failed")
+        _terminate(task_id, "failed")
         return Decision(action="fail", reason="circuit breaker tripped", why="thrash"), None
 
     bg_task = await _execute(task_id, decision)
+
+    # A pure think/no-op leaves the task active with nothing to wake it — re-emit
+    # so the loop takes another pass. Identical repeats trip the thrash breaker;
+    # the pass budget bounds a wandering one. Either way, never a silent stall.
+    if decision.action in ("note", "noop"):
+        cur = store.get_task(task_id)
+        if cur and cur["status"] == "active":
+            emit(task_id, "continue")
+
     return decision, bg_task
 
 
@@ -255,10 +361,10 @@ async def _execute(task_id: str, decision: Decision):
         store.set_status(task_id, "waiting")
         return None
     if decision.action == "done":
-        store.set_status(task_id, "done")
+        _terminate(task_id, "done")
         return None
     if decision.action == "fail":
-        store.set_status(task_id, "failed")
+        _terminate(task_id, "failed")
         return None
     return None  # note / noop: nothing further this pass
 

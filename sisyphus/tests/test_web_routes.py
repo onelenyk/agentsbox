@@ -189,3 +189,27 @@ def test_task_reply_unknown_task_404(db_path):
     client = _make_client()
     response = client.post("/api/tasks/nope/messages", data={"text": "x"})
     assert response.status_code == 404
+
+
+def test_task_delete_removes_and_redirects(db_path):
+    from core import store
+    task = _make_task()
+    client = _make_client()
+    with patch("core.worker.cleanup_task") as mock_cleanup:
+        response = client.post(f"/api/tasks/{task['id']}/delete")
+    assert response.status_code == 200
+    assert response.headers.get("HX-Redirect") == "/tasks"
+    mock_cleanup.assert_called_once_with(task["id"])
+    assert store.get_task(task["id"]) is None
+
+
+def test_task_delete_unknown_404(db_path):
+    client = _make_client()
+    assert client.post("/api/tasks/nope/delete").status_code == 404
+
+
+def test_task_detail_shows_delete_button(db_path):
+    task = _make_task(goal="deletable")
+    client = _make_client()
+    response = client.get(f"/api/tasks/{task['id']}/detail")
+    assert f"/api/tasks/{task['id']}/delete" in response.text
