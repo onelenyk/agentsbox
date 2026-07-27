@@ -25,7 +25,8 @@ def _clear_sessions():
 
 class TestNoRepo:
     @pytest.mark.asyncio
-    async def test_spawns_in_tmp_and_posts_started(self, db_path):
+    async def test_spawns_in_scratch_dir_and_posts_started(self, db_path, tmp_path, monkeypatch):
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
         task = store.create_task("investigate something")
         mock_launch = AsyncMock(return_value=AgentResult(status="completed", summary="ok"))
 
@@ -33,7 +34,10 @@ class TestNoRepo:
             await spawn_worker(task["id"], "explorer", "look around")
 
         call = mock_launch.call_args
-        assert call.args[2] == "/tmp"  # worktree_path
+        worktree = call.args[2]  # worktree_path
+        assert worktree == str(tmp_path / "scratch" / task["id"])
+        # a private scratch cwd with our agent-MCP config, not a shared /tmp
+        assert (tmp_path / "scratch" / task["id"] / "opencode.json").exists()
 
         thread = store.get_thread(task["id"])
         kinds = [m["kind"] for m in thread]

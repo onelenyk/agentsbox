@@ -155,12 +155,12 @@ async def create_task(body: CreateTask):
     from core import store
     from core.orchestrator import emit
 
-    if not body.repo.strip():
-        # A worker with no repo falls back to a shared /tmp cwd and never gets
-        # its agent-MCP config written (core.worker.spawn_worker skips it for
-        # that path) — it can never succeed. Reject at creation instead of
-        # letting the task churn through retries to a dead end.
-        raise HTTPException(status_code=422, detail="repo is required")
+    if not body.goal.strip():
+        raise HTTPException(status_code=422, detail="goal is required")
+    # A repo is optional: repo-less tasks (research / planning / Q&A) run in a
+    # private scratch dir (core.worker.spawn_worker). Without a repo the
+    # engineer's commit/open_mr tools have nothing to act on and return a clear
+    # "needs a repo" error — so such tasks are naturally read-only.
     task = store.create_task(body.goal, body.repo)
     emit(task["id"], "created")
     return {"task_id": task["id"], "status": task["status"]}

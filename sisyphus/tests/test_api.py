@@ -62,12 +62,20 @@ def test_create_task_emits_created_event(db_path):
     mock_emit.assert_called_once_with(body["task_id"], "created")
 
 
-def test_create_task_without_repo_rejected(db_path):
-    """A repo-less worker never gets its agent-MCP config written (falls back
-    to a shared /tmp cwd) and can never succeed — reject at creation."""
+def test_create_task_without_repo_allowed(db_path):
+    """Repo-less tasks (research / planning / Q&A) run in a private scratch dir
+    — allowed, and they emit the created event like any other task."""
     c = _client()
     with patch("core.orchestrator.emit") as mock_emit:
-        r = c.post("/api/v1/tasks", json={"goal": "do the thing"})
+        r = c.post("/api/v1/tasks", json={"goal": "research the options"})
+    assert r.status_code == 200
+    mock_emit.assert_called_once_with(r.json()["task_id"], "created")
+
+
+def test_create_task_without_goal_rejected(db_path):
+    c = _client()
+    with patch("core.orchestrator.emit") as mock_emit:
+        r = c.post("/api/v1/tasks", json={"goal": "   ", "repo": "sisyphus"})
     assert r.status_code == 422
     mock_emit.assert_not_called()
 

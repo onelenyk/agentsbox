@@ -172,7 +172,8 @@ def test_open_mr_requires_prior_commit(db_path):
     early = _call(c, token, "open_mr", {"title": "Fix", "description": "..."})
     assert early["result"]["isError"] is True  # no commit yet
 
-    with patch("core.git_ops.commit_all", return_value="a" * 40):
+    with patch("core.git_ops.is_git_repo", return_value=True), \
+         patch("core.git_ops.commit_all", return_value="a" * 40):
         _call(c, token, "commit", {"message": "fix: retry"})
     with patch("core.providers.publish_change", return_value={
         "ok": True, "platform": "local", "branch": "sisyphus/x",
@@ -187,7 +188,8 @@ def test_open_mr_requires_prior_commit(db_path):
 
 def test_commit_reports_sha_and_records_it(db_path):
     task_id, token = _session(db_path, "engineer")
-    with patch("core.git_ops.commit_all", return_value="deadbeef" + "0" * 32):
+    with patch("core.git_ops.is_git_repo", return_value=True), \
+         patch("core.git_ops.commit_all", return_value="deadbeef" + "0" * 32):
         out = _call(_client(), token, "commit", {"message": "add thing"})
     assert out["result"]["isError"] is False
     assert json.loads(out["result"]["content"][0]["text"])["sha"].startswith("deadbeef")
@@ -197,10 +199,22 @@ def test_commit_reports_sha_and_records_it(db_path):
 
 def test_commit_with_no_changes_errors(db_path):
     task_id, token = _session(db_path, "engineer")
-    with patch("core.git_ops.commit_all", return_value=None):
+    with patch("core.git_ops.is_git_repo", return_value=True), \
+         patch("core.git_ops.commit_all", return_value=None):
         out = _call(_client(), token, "commit", {"message": "nothing"})
     assert out["result"]["isError"] is True
     assert "nothing to commit" in json.loads(out["result"]["content"][0]["text"])["error"]
+    assert not any(m["kind"] == "commit" for m in store.get_thread(task_id))
+
+
+def test_commit_without_repo_errors_clearly(db_path):
+    """A repo-less task's scratch dir isn't a git repo — commit tells the worker
+    to report via finish() instead of failing with a raw git error."""
+    task_id, token = _session(db_path, "engineer")
+    with patch("core.git_ops.is_git_repo", return_value=False):
+        out = _call(_client(), token, "commit", {"message": "add thing"})
+    assert out["result"]["isError"] is True
+    assert "no repo" in json.loads(out["result"]["content"][0]["text"])["error"]
     assert not any(m["kind"] == "commit" for m in store.get_thread(task_id))
 
 

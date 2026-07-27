@@ -74,6 +74,8 @@ def _commit(session, message="", **_):
         return {"error": "commit message required"}
     from core import git_ops
 
+    if not git_ops.is_git_repo(session.get("worktree", "")):
+        return {"error": "this task has no repo — commit needs one; report your work with finish() instead"}
     try:
         sha = git_ops.commit_all(session["worktree"], message)
     except Exception as exc:  # noqa: BLE001
