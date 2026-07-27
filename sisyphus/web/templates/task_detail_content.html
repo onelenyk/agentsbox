@@ -42,7 +42,7 @@
     {% for m in messages %}
     <div style="padding:8px 0;border-bottom:1px solid #21262d">
         <div style="display:flex;gap:8px;align-items:baseline">
-            <span style="font-size:12px;font-weight:600;padding:1px 8px;border-radius:10px;background:{% if m.author == 'human' %}#1f3a5f;color:#58a6ff{% elif m.author == 'orchestrator' %}#2d1f3d;color:#bc8cff{% else %}#1b3a2d;color:#3fb950{% endif %}">{{ m.author }}/{{ m.kind }}</span>
+            <span style="font-size:12px;font-weight:600;padding:1px 8px;border-radius:10px;background:{% if m.kind == 'external' %}#3d2f10;color:#e3a008{% elif m.author == 'human' %}#1f3a5f;color:#58a6ff{% elif m.author == 'orchestrator' %}#2d1f3d;color:#bc8cff{% else %}#1b3a2d;color:#3fb950{% endif %}">{% if m.kind == 'external' %}🔔 {% endif %}{{ m.author }}/{{ m.kind }}</span>
             <span style="color:#8b949e;font-size:11px">{{ m.created_at[:19] }}</span>
         </div>
         <div style="margin-top:4px;font-size:13px;white-space:pre-wrap">{{ m.text }}</div>
