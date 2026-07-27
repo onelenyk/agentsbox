@@ -51,6 +51,25 @@ _WORKER_AGENT = "sisyphus-worker"
 _MCP_SERVER_NAME = "sisyphus_agent"
 
 
+def cleanup_task(task_id: str) -> None:
+    """Reclaim a finished task's disk: its git worktrees, per-task bare clone,
+    and run logs. Called when a task hits a terminal status (see
+    core.orchestrator._terminate) or is deleted. Best-effort; a git worktree
+    dir removed out from under the bare clone is fine because the bare clone
+    (its only registrar) is removed in the same sweep."""
+    import glob
+    import shutil
+
+    ws = os.environ.get("WORKSPACE_ROOT", "/workspace")
+    for pattern in (
+        f"{ws}/repos/worktrees/{task_id}_*",   # per-role worktrees
+        f"{ws}/repos/{task_id}_*",             # per-task bare clone
+        f"{ws}/runs/{task_id}",                # run logs
+    ):
+        for path in glob.glob(pattern):
+            shutil.rmtree(path, ignore_errors=True)
+
+
 def _prepare_repo(task_id: str, repo_name: Optional[str]):
     """Returns (bare_path, branch), or (None, None) if there's no repo to clone."""
     if not repo_name:

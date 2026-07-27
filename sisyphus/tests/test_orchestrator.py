@@ -87,8 +87,11 @@ class TestHumanLoop:
 
         decisions = _scripted([
             Decision(action="ask_human", question="Should I proceed?", why="needs approval"),
-            Decision(action="done", why="human said yes"),
+            Decision(action="spawn_worker", role="explorer", instruction="go", why="human said yes"),
         ])
+
+        async def fake_spawn(tid, role, instruction, repo_name=None, **kw):
+            store.post_message(tid, role, kind="result", text="done")
 
         decision, bg = await handle_event(task_id, "created", decide_fn=decisions)
         assert decision.action == "ask_human"
@@ -97,13 +100,17 @@ class TestHumanLoop:
         questions = [m for m in store.get_thread(task_id) if m["kind"] == "question"]
         assert questions[-1]["text"] == "Should I proceed?"
 
-        # Human replies in the same thread — the future web surface posts this
-        # message and calls emit(task_id, "human_replied"); we simulate both.
+        # Human replies in the same thread — the web surface posts this message
+        # and calls emit(task_id, "human_replied"); we simulate both. The reply
+        # resumes the loop out of 'waiting'.
         store.post_message(task_id, "human", kind="answer", text="yes, go ahead")
 
-        decision, bg = await handle_event(task_id, "human_replied", decide_fn=decisions)
-        assert decision.action == "done"
-        assert store.get_task(task_id)["status"] == "done"
+        with patch("core.orchestrator.spawn_worker", side_effect=fake_spawn):
+            decision, bg = await handle_event(task_id, "human_replied", decide_fn=decisions)
+            if bg:
+                await bg
+        assert decision.action == "spawn_worker"
+        assert store.get_task(task_id)["status"] == "active"
 
 
 class TestTerminalAndMissing:
@@ -272,3 +279,109 @@ class TestDecisionValidation:
         decision, bg = await handle_event(task["id"], "created", decide_fn=_garbage)
         assert decision.action == "fail"
         assert store.get_task(task["id"])["status"] == "failed"
+
+
+class TestWorkerInFlightGuard:
+    @pytest.mark.asyncio
+    async def test_event_during_active_worker_does_not_spawn_a_second(self, db_path):
+        """A worker is mid-run (worker_started, no worker_finished yet). A
+        human_replied event must NOT trigger a decision/second spawn."""
+        task = store.create_task("x", repo="sisyphus")
+        store.set_status(task["id"], "active")
+        store.post_message(task["id"], "system", kind="worker_started", text="spawning engineer")
+        store.post_message(task["id"], "human", kind="answer", text="one more thing")  # reply arrives mid-run
+
+        called = {"n": 0}
+
+        async def _decide(task_, thread_text):
+            called["n"] += 1
+            return Decision(action="spawn_worker", role="engineer", instruction="y", why="z")
+
+        decision, bg = await handle_event(task["id"], "human_replied", decide_fn=_decide)
+        assert decision.action == "noop"
+        assert bg is None
+        assert called["n"] == 0  # never even asked for a decision
+
+    @pytest.mark.asyncio
+    async def test_worker_finished_clears_in_flight_and_proceeds(self, db_path):
+        task = store.create_task("x", repo="sisyphus")
+        store.set_status(task["id"], "active")
+        store.post_message(task["id"], "system", kind="worker_started", text="spawning explorer")
+        store.post_message(task["id"], "explorer", kind="result", text="found it")
+        store.post_message(task["id"], "system", kind="worker_finished", text="explorer finished")
+
+        decisions = _scripted([Decision(action="ask_human", question="ok?", why="check")])
+        decision, bg = await handle_event(task["id"], "worker_finished", decide_fn=decisions)
+        assert decision.action == "ask_human"  # not blocked — worker is done
+
+
+class TestDoneRequiresReview:
+    @pytest.mark.asyncio
+    async def test_done_without_approval_is_converted_to_reviewer(self, db_path):
+        task = store.create_task("ship it", repo="sisyphus")
+        store.set_status(task["id"], "active")
+        store.post_message(task["id"], "engineer", kind="result", text="implemented")
+
+        async def fake_spawn(tid, role, instruction, repo_name=None, **kw):
+            store.post_message(tid, role, kind="worker_started", text="spawning")
+
+        decisions = _scripted([Decision(action="done", why="looks done to me")])
+        with patch("core.orchestrator.spawn_worker", side_effect=fake_spawn):
+            decision, bg = await handle_event(task["id"], "worker_finished", decide_fn=decisions)
+            if bg:
+                await bg
+        assert decision.action == "spawn_worker"
+        assert decision.role == "reviewer"
+        assert store.get_task(task["id"])["status"] == "active"  # NOT done
+
+    @pytest.mark.asyncio
+    async def test_done_with_approval_is_allowed(self, db_path):
+        task = store.create_task("ship it", repo="sisyphus")
+        store.set_status(task["id"], "active")
+        store.post_message(task["id"], "reviewer", kind="result", text="APPROVED: all good")
+
+        decisions = _scripted([Decision(action="done", why="reviewer approved")])
+        decision, bg = await handle_event(task["id"], "worker_finished", decide_fn=decisions)
+        assert decision.action == "done"
+        assert store.get_task(task["id"])["status"] == "done"
+
+
+class TestNoStall:
+    @pytest.mark.asyncio
+    async def test_note_re_emits_a_continue_event(self, db_path):
+        """A note leaves the task active — the loop must re-emit so it isn't
+        silently stuck with nothing to wake it."""
+        task = store.create_task("think", repo="sisyphus")
+        store.set_status(task["id"], "active")
+
+        decisions = _scripted([Decision(action="note", why="just thinking")])
+        await handle_event(task["id"], "created", decide_fn=decisions)
+
+        q = orchestrator._get_queue()
+        assert q.qsize() == 1
+        ev = q.get_nowait()
+        assert ev.task_id == task["id"] and ev.type == "continue"
+
+    @pytest.mark.asyncio
+    async def test_park_on_error_moves_active_task_to_waiting(self, db_path):
+        task = store.create_task("boom", repo="sisyphus")
+        store.set_status(task["id"], "active")
+
+        orchestrator._park_on_error(task["id"])
+
+        assert store.get_task(task["id"])["status"] == "waiting"
+        kinds = [m["kind"] for m in store.get_thread(task["id"])]
+        assert "question" in kinds  # resumable by a human reply
+
+
+class TestTerminalCleanup:
+    @pytest.mark.asyncio
+    async def test_done_reclaims_disk(self, db_path):
+        task = store.create_task("x", repo="sisyphus")
+        store.set_status(task["id"], "active")
+        store.post_message(task["id"], "reviewer", kind="result", text="APPROVED: ok")
+
+        decisions = _scripted([Decision(action="done", why="approved")])
+        with patch("core.worker.cleanup_task") as mock_cleanup:
+            await handle_event(task["id"], "worker_finished", decide_fn=decisions)
+        mock_cleanup.assert_called_once_with(task["id"])

@@ -3,6 +3,7 @@ import pytest
 
 from core.store import (
     create_task,
+    delete_task,
     get_task,
     get_thread,
     list_tasks,
@@ -88,3 +89,15 @@ class TestThread:
     def test_render_empty_thread(self, db_path):
         t = create_task("g")
         assert "(no messages yet)" in render_thread(t["id"])
+
+
+class TestDelete:
+    def test_delete_removes_task_and_thread(self, db_path):
+        t = create_task("g", repo="sisyphus")
+        post_message(t["id"], "orchestrator", kind="note", text="hi")
+        assert delete_task(t["id"]) is True
+        assert get_task(t["id"]) is None
+        assert get_thread(t["id"]) == []
+
+    def test_delete_unknown_returns_false(self, db_path):
+        assert delete_task("task-nope") is False

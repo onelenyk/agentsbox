@@ -204,6 +204,22 @@ async def post_task_message(task_id: str, body: TaskMessage):
     return {"id": message["id"], "task_id": task_id}
 
 
+@api.delete("/tasks/{task_id}")
+async def delete_task(task_id: str):
+    from core import sessions, store
+    from core.worker import cleanup_task
+
+    if not store.get_task(task_id):
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    sessions.revoke_task(task_id)   # stop any still-running worker from writing back
+    store.delete_task(task_id)
+    try:
+        cleanup_task(task_id)
+    except Exception:
+        pass
+    return {"success": True, "task_id": task_id}
+
+
 # ── Orchestrator control ────────────────────────────────────────────────
 
 

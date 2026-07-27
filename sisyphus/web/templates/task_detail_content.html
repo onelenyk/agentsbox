@@ -1,7 +1,13 @@
 <div class="detail-panel">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px">
         <h2 style="margin:0">{{ task.goal }}</h2>
-        <span class="status-badge {{ task.status }}">{{ task.status }}</span>
+        <div style="display:flex;align-items:center;gap:12px;flex-shrink:0">
+            <span class="status-badge {{ task.status }}">{{ task.status }}</span>
+            <button class="btn btn-danger" style="font-size:12px;padding:4px 10px"
+                    hx-post="/api/tasks/{{ task.id }}/delete"
+                    hx-confirm="Delete this task and its whole thread? This can't be undone."
+                    hx-swap="none">Delete</button>
+        </div>
     </div>
     {% if task.repo %}
     <div class="info-row"><span class="label">Repo</span><span class="value">{{ task.repo }}</span></div>
