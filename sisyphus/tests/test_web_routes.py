@@ -199,7 +199,7 @@ def test_task_delete_removes_and_redirects(db_path):
         response = client.post(f"/api/tasks/{task['id']}/delete")
     assert response.status_code == 200
     assert response.headers.get("HX-Redirect") == "/tasks"
-    mock_cleanup.assert_called_once_with(task["id"])
+    mock_cleanup.assert_called_once_with(task["id"], deep=True)
     assert store.get_task(task["id"]) is None
 
 

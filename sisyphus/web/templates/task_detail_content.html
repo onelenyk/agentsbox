@@ -23,7 +23,7 @@
         </div>
         <div style="margin-top:4px;font-size:13px;white-space:pre-wrap">{{ m.text }}</div>
         {% if m.attachment %}
-        <div style="margin-top:4px;font-size:12px">📎 {{ m.attachment }}</div>
+        <div style="margin-top:4px;font-size:12px">📎 <a href="/api/v1/tasks/{{ task.id }}/attachments/{{ m.attachment }}" target="_blank">{{ m.attachment }}</a></div>
         {% endif %}
     </div>
     {% else %}

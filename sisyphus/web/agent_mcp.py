@@ -50,6 +50,10 @@ def _comment(session, text="", **_):
 def _attach(session, filename="", description="", **_):
     if not filename or "/" in filename or "\\" in filename:
         return {"error": "filename must be a bare name"}
+    from core import attachments
+
+    if not attachments.save_from_worktree(session["task_id"], session.get("worktree", ""), filename):
+        return {"error": f"no file named {filename!r} in your working dir to attach"}
     store.post_message(
         session["task_id"], session["role"], kind="note",
         text=description or f"attached {filename}", attachment=filename,

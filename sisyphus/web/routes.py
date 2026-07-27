@@ -276,7 +276,7 @@ async def task_delete(task_id: str):
     sessions.revoke_task(task_id)
     store.delete_task(task_id)
     try:
-        cleanup_task(task_id)
+        cleanup_task(task_id, deep=True)
     except Exception:
         pass
     resp = Response(status_code=200)

@@ -65,7 +65,7 @@ class TestPublishLocal:
         assert result["platform"] == "local"
         assert result["branch"] == branch
         assert "feature.py" in result["stat"]
-        patch_path = Path(ws) / "tasks" / task["id"] / "change.patch"
+        patch_path = Path(ws) / "tasks" / task["id"] / "attachments" / "change.patch"
         assert patch_path.exists()
         assert "feature.py" in patch_path.read_text()
 
