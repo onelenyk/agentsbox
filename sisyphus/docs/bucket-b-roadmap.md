@@ -31,38 +31,60 @@ can "finish" work that produces zero real artifacts. This is the stated #1
 roadmap goal.
 
 **Goal.** The engineer's `commit` runs a real `git commit` on a task branch in
-its worktree; `open_mr` pushes that branch and opens a real PR/MR via the
-platform API. Credentials stay daemon-side — the worker only calls the tool;
-the daemon executes with server-side creds (matches the existing "daemon holds
-creds" principle).
+its worktree; `open_mr` publishes the change through a per-platform provider:
+GitHub, GitLab, or a local repo with no forge. Credentials stay daemon-side —
+the worker only calls the tool; the daemon executes with server-side creds.
 
-**Approach.**
-- Worktrees are already real git checkouts of the task's bare clone
-  (`core/worktree.py`). Create a task branch — `sisyphus/task-<id>` — at
-  worktree creation.
-- New `core/git_ops.py`: `commit(worktree, message)` → `git add -A && git
-  commit`; `push(worktree, branch)` → push to origin; `open_mr(repo, branch,
-  title, body)` → resolve platform from the repo's `source`/`platform`
-  (`core/repos.py`) and call the GitLab (creds already in `core/config.py`) or
-  GitHub API, returning the MR/PR URL.
-- Rewire `_commit`/`_open_mr` to call these (they run in the daemon, which has
-  the worktree via the session). Post the real commit SHA / MR URL to the
-  thread; keep the `open_mr`-requires-`commit` precondition.
-- **Graceful degradation:** a local/file remote (like the test repo) can't open
-  an MR — commit to the branch and post "committed to `<branch>`, no remote to
-  open an MR against" instead of failing.
+### Settled design (decisions taken)
 
-**Key files.** `web/agent_mcp.py`, new `core/git_ops.py`, `core/worktree.py`
-(branch creation), `core/repos.py` (platform + remote→API-project resolution),
-`core/config.py` (creds).
+**Shared git spine (all platforms, in a new `core/git_ops.py`):**
+- Create a task branch `sisyphus/task-<id>` in the worktree at spawn
+  (`core/worktree.py`), based off the repo's configured default branch.
+- `commit(worktree, message)` → real `git add -A && git commit` on that branch,
+  returns the SHA. Platform-agnostic.
+- Only `open_mr` differs → it delegates to a **provider** chosen by the repo's
+  platform.
 
-**Risks.** GitHub vs GitLab API differences; push permissions; mapping a clone
-URL to an API project path; interaction with `cleanup_task` (don't reclaim the
-worktree until the branch is pushed — push happens in `open_mr`, before
-terminal, so ok).
+**Provider abstraction (`core/providers/`), one interface:**
+`publish(worktree, repo, branch, title, body) -> ChangeRef`
 
-**Sub-steps:** (a) task branch + real commit in worktree; (b) push;
-(c) open MR/PR via API; (d) surface SHA + MR URL on the thread.
+- **GitHubProvider** — push branch to origin, `POST /repos/{owner}/{repo}/pulls`
+  via REST with a token, return the PR URL. *(Auth: REST + token — decided.)*
+- **GitLabProvider** — push branch, open an MR via REST with the token already
+  in `config.yaml`, return the MR URL.
+- **LocalProvider** *(source is a local path, no forge)* — compute
+  `git diff <base>..<task-branch>`, store it as a viewable/downloadable patch,
+  and post it to the thread as the change. **Read-only to the user's repo —
+  nothing is pushed back** *(decided: diff-in-thread default; no push-back)*.
+
+**Platform detection.** Auto-detect from the repo's `source` (`github.com` →
+github; the configured GitLab host → gitlab; a filesystem path / `file://` →
+local), with the per-repo `platform` field as an override. NOTE: `add_repo`
+already accepts `platform` but `_save_repo_config` currently **drops it** — fix
+it to persist, and derive the API project path (`owner/repo` for GitHub, project
+path for GitLab) from `source`.
+
+**Config.** Add a `github: {base_url?, token}` block alongside the existing
+`gitlab: {base_url, token}` (base_url optional, for GitHub Enterprise).
+
+**Tool surface stays identical** — engineer still calls `commit` then
+`open_mr`; the `open_mr`-requires-`commit` precondition stays. The thread result
+gets richer: a PR/MR **URL** for forge repos, or a **diff + branch name** for
+local ones (this is what feeds roadmap item #4).
+
+**Key files.** `web/agent_mcp.py` (rewire `_commit`/`_open_mr`), new
+`core/git_ops.py`, new `core/providers/` (base + github + gitlab + local),
+`core/worktree.py` (task branch), `core/repos.py` (persist `platform`,
+source→project mapping), `core/config.py` / `config.yaml` (add `github` creds).
+
+**Risks.** GitHub vs GitLab REST shape differences; push permissions; clone-URL
+→ API-project mapping; `cleanup_task` must not reclaim the worktree before the
+diff is captured / branch pushed (both happen in `open_mr`, before any terminal
+status — safe).
+
+**Sub-steps:** (a) task branch + real commit; (b) provider interface + local
+diff; (c) GitLab REST publish; (d) GitHub REST publish; (e) surface SHA + URL/diff
+on the thread.
 
 ---
 
