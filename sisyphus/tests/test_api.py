@@ -130,7 +130,7 @@ def test_delete_task(db_path):
         r = c.request("DELETE", f"/api/v1/tasks/{tid}")
     assert r.status_code == 200
     assert r.json()["success"] is True
-    mock_cleanup.assert_called_once_with(tid)
+    mock_cleanup.assert_called_once_with(tid, deep=True)
     assert c.get(f"/api/v1/tasks/{tid}").status_code == 404
 
 

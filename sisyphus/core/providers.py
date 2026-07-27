@@ -9,7 +9,6 @@ Credentials never reach the worker: the worker only calls the open_mr tool; the
 daemon (this code) does the git/API work with server-side creds.
 """
 import os
-from pathlib import Path
 
 from . import git_ops
 
@@ -68,12 +67,10 @@ def _publish_local(task_id: str, bare: str, base: str, branch: str, title: str) 
     if not patch.strip():
         return {"error": "no changes between the task branch and the base — nothing to open"}
 
+    from . import attachments
+
     stat = git_ops.diff_stat(bare, base, branch).strip()
-    ws = os.environ.get("WORKSPACE_ROOT", "/workspace")
-    out_dir = Path(ws) / "tasks" / task_id
-    out_dir.mkdir(parents=True, exist_ok=True)
-    patch_path = out_dir / "change.patch"
-    patch_path.write_text(patch, encoding="utf-8")
+    patch_path = attachments.save_text(task_id, "change.patch", patch)
 
     return {
         "ok": True,
@@ -81,5 +78,5 @@ def _publish_local(task_id: str, bare: str, base: str, branch: str, title: str) 
         "branch": branch,
         "stat": stat,
         "patch_file": "change.patch",
-        "patch_path": str(patch_path),
+        "patch_path": patch_path,
     }

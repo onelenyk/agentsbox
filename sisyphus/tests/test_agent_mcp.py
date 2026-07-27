@@ -92,16 +92,45 @@ def test_comment_writes_thread(db_path):
     assert thread[-1]["text"] == "found the bug"
 
 
-def test_attach_records_filename(db_path):
-    task_id, token = _session(db_path)
-    _call(_client(), token, "attach", {"filename": "analysis.md", "description": "the plan"})
-    assert store.get_thread(task_id)[-1]["attachment"] == "analysis.md"
+def test_attach_persists_file_and_records_filename(db_path, tmp_path):
+    sessions.clear()
+    task = store.create_task("do the thing", repo="sisyphus")
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    (wt / "analysis.md").write_text("the findings")
+    token = sessions.mint(task["id"], "explorer", worktree=str(wt))
+
+    out = _call(_client(), token, "attach", {"filename": "analysis.md", "description": "the plan"})
+    assert out["result"]["isError"] is False
+    assert store.get_thread(task["id"])[-1]["attachment"] == "analysis.md"
+    # persisted into the durable store so it survives worktree cleanup
+    from core import attachments
+    assert attachments.read(task["id"], "analysis.md") == "the findings"
+
+
+def test_attach_missing_file_errors(db_path, tmp_path):
+    sessions.clear()
+    task = store.create_task("x", repo="sisyphus")
+    wt = tmp_path / "wt"; wt.mkdir()
+    token = sessions.mint(task["id"], "explorer", worktree=str(wt))
+    out = _call(_client(), token, "attach", {"filename": "nope.md"})
+    assert out["result"]["isError"] is True
 
 
 def test_attach_rejects_path(db_path):
     task_id, token = _session(db_path)
     out = _call(_client(), token, "attach", {"filename": "../etc/passwd"})
     assert out["result"]["isError"] is True
+
+
+def test_attachment_served_over_api(db_path):
+    from core import attachments
+    task = store.create_task("x", repo="sisyphus")
+    attachments.save_text(task["id"], "change.patch", "diff --git a/x b/x\n")
+    r = _client().get(f"/api/v1/tasks/{task['id']}/attachments/change.patch")
+    assert r.status_code == 200
+    assert "diff --git" in r.text
+    assert _client().get(f"/api/v1/tasks/{task['id']}/attachments/missing.txt").status_code == 404
 
 
 def test_finish_posts_result_and_revokes(db_path):

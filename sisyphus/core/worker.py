@@ -51,21 +51,28 @@ _WORKER_AGENT = "sisyphus-worker"
 _MCP_SERVER_NAME = "sisyphus_agent"
 
 
-def cleanup_task(task_id: str) -> None:
+def cleanup_task(task_id: str, deep: bool = False) -> None:
     """Reclaim a finished task's disk: its git worktrees, per-task bare clone,
     and run logs. Called when a task hits a terminal status (see
     core.orchestrator._terminate) or is deleted. Best-effort; a git worktree
     dir removed out from under the bare clone is fine because the bare clone
-    (its only registrar) is removed in the same sweep."""
+    (its only registrar) is removed in the same sweep.
+
+    *deep* (task deletion only) also removes the durable attachments/diff store
+    under tasks/<id>. It's kept for done/failed tasks so the change patch stays
+    retrievable, and only wiped when the task itself is deleted."""
     import glob
     import shutil
 
     ws = os.environ.get("WORKSPACE_ROOT", "/workspace")
-    for pattern in (
+    patterns = [
         f"{ws}/repos/worktrees/{task_id}_*",   # per-role worktrees
         f"{ws}/repos/{task_id}_*",             # per-task bare clone
         f"{ws}/runs/{task_id}",                # run logs
-    ):
+    ]
+    if deep:
+        patterns.append(f"{ws}/tasks/{task_id}")   # attachments + saved patches
+    for pattern in patterns:
         for path in glob.glob(pattern):
             shutil.rmtree(path, ignore_errors=True)
 
