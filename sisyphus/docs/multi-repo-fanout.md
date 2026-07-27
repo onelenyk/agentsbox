@@ -1,5 +1,10 @@
 # Plan — Multi-repo task fan-out (parent → children)
 
+> **Status: IMPLEMENTED.** All layers shipped — `parent_id` data model,
+> `spawn_task` + roll-up + guards in the orchestrator, cascade delete,
+> `propose_subtasks` planner tool, and the subtasks/breadcrumb/board UI. 276
+> tests green; verified live. Sections below are the design record.
+
 ## Motivation
 
 A single unit of intent often spans several codebases. The driving example: a
