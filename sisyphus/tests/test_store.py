@@ -92,6 +92,37 @@ class TestThread:
         assert "(no messages yet)" in render_thread(t["id"])
 
 
+class TestWindowing:
+    def test_short_thread_is_full_even_for_prompt(self, db_path):
+        t = create_task("g", repo="sisyphus")
+        for i in range(5):
+            post_message(t["id"], "explorer", kind="note", text=f"note {i}")
+        rendered = render_thread(t["id"], for_prompt=True)
+        assert "note 0" in rendered and "note 4" in rendered
+        assert "omitted" not in rendered
+
+    def test_long_thread_windows_head_keeps_important(self, db_path):
+        t = create_task("big task", repo="sisyphus")
+        # a load-bearing result early in the head
+        post_message(t["id"], "orchestrator", kind="note", text="[spawn_worker] start")
+        post_message(t["id"], "explorer", kind="result", text="IMPORTANT early finding")
+        # lots of routine worker chatter to push past the window
+        for i in range(50):
+            post_message(t["id"], "explorer", kind="note", text=f"routine chatter {i}")
+        post_message(t["id"], "human", kind="answer", text="a recent human reply")
+
+        full = render_thread(t["id"])
+        windowed = render_thread(t["id"], for_prompt=True, max_messages=40, tail=10)
+
+        assert len(windowed) < len(full)                 # actually shorter
+        assert "IMPORTANT early finding" in windowed      # important head kept
+        assert "[spawn_worker] start" in windowed          # orchestrator decision kept
+        assert "a recent human reply" in windowed          # tail kept
+        assert "omitted" in windowed                       # routine head collapsed
+        # early routine chatter dropped, recent-tail chatter kept
+        assert "routine chatter 0" not in windowed
+
+
 class TestDelete:
     def test_delete_removes_task_and_thread(self, db_path):
         t = create_task("g", repo="sisyphus")
