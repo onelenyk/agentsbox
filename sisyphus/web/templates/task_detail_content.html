@@ -14,6 +14,30 @@
     {% endif %}
     <div class="info-row"><span class="label">Created</span><span class="value">{{ task.created_at[:19] }}</span></div>
 
+    {% if result and (result.summary or result.change or result.commits) %}
+    <div style="margin-top:18px;border:1px solid #30363d;border-radius:8px;padding:16px;background:#0d1117">
+        <div style="font-family:monospace;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:#8b949e;margin-bottom:10px">Result</div>
+        {% if result.summary %}
+        <div style="font-size:14px;white-space:pre-wrap;margin-bottom:12px">{{ result.summary }}</div>
+        {% endif %}
+        {% if result.change %}
+        <div style="margin-bottom:10px">
+            {% if result.change.url %}
+            <a href="{{ result.change.url }}" target="_blank" class="btn btn-primary" style="font-size:12px;padding:5px 12px">View change ↗</a>
+            {% elif result.change.attachment %}
+            <a href="/api/v1/tasks/{{ task.id }}/attachments/{{ result.change.attachment }}" target="_blank" class="btn btn-secondary" style="font-size:12px;padding:5px 12px">📎 View diff ({{ result.change.attachment }})</a>
+            {% endif %}
+            <div style="font-family:monospace;font-size:12px;color:#8b949e;white-space:pre-wrap;margin-top:8px">{{ result.change.text }}</div>
+        </div>
+        {% endif %}
+        {% if result.commits %}
+        <div style="font-family:monospace;font-size:12px;color:#8b949e">
+            {% for c in result.commits %}<div>✓ {{ c }}</div>{% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
     <h3 style="margin-top:20px">Thread</h3>
     {% for m in messages %}
     <div style="padding:8px 0;border-bottom:1px solid #21262d">

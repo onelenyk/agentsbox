@@ -9,6 +9,7 @@ from core.store import (
     list_tasks,
     post_message,
     render_thread,
+    result_view,
     set_status,
 )
 
@@ -101,3 +102,27 @@ class TestDelete:
 
     def test_delete_unknown_returns_false(self, db_path):
         assert delete_task("task-nope") is False
+
+
+class TestResultView:
+    def test_local_change_surfaces_commits_and_patch(self, db_path):
+        t = create_task("g", repo="sisyphus")
+        post_message(t["id"], "engineer", kind="commit", text="add x (abc12345)")
+        post_message(t["id"], "engineer", kind="mr",
+                     text="Add x\n\nBranch: sisyphus/x\n\n x | 1 +", attachment="change.patch")
+        post_message(t["id"], "engineer", kind="result", text="did the thing")
+        rv = result_view(t["id"])
+        assert rv["summary"] == "did the thing"
+        assert rv["commits"] == ["add x (abc12345)"]
+        assert rv["change"]["attachment"] == "change.patch"
+        assert rv["change"]["url"] is None
+
+    def test_forge_change_extracts_url(self, db_path):
+        t = create_task("g", repo="sisyphus")
+        post_message(t["id"], "engineer", kind="mr", text="Add x: https://gh/pr/7")
+        rv = result_view(t["id"])
+        assert rv["change"]["url"] == "https://gh/pr/7"
+
+    def test_no_change_is_none(self, db_path):
+        t = create_task("g", repo="sisyphus")
+        assert result_view(t["id"])["change"] is None

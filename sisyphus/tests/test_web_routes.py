@@ -213,3 +213,18 @@ def test_task_detail_shows_delete_button(db_path):
     client = _make_client()
     response = client.get(f"/api/tasks/{task['id']}/detail")
     assert f"/api/tasks/{task['id']}/delete" in response.text
+
+
+def test_task_detail_shows_result_card_with_diff_link(db_path):
+    from core import store
+    task = _make_task(goal="ship")
+    store.post_message(task["id"], "engineer", kind="commit", text="add x (abc12345)")
+    store.post_message(task["id"], "engineer", kind="mr",
+                       text="Add x\n\nBranch: sisyphus/x", attachment="change.patch")
+    store.post_message(task["id"], "engineer", kind="result", text="done and dusted")
+    client = _make_client()
+    response = client.get(f"/api/tasks/{task['id']}/detail")
+    assert "Result" in response.text
+    assert "done and dusted" in response.text
+    assert f"/api/v1/tasks/{task['id']}/attachments/change.patch" in response.text
+    assert "abc12345" in response.text

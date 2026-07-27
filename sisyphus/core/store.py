@@ -13,6 +13,7 @@ worker coordination surface, and the record of produced artifacts.
 Status is a tiny enum the orchestrator sets directly (single writer → no FSM).
 """
 import json
+import re
 from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import uuid4
@@ -172,3 +173,35 @@ def render_thread(task_id: str) -> str:
     if len(lines) == 3:
         lines.append("(no messages yet)")
     return "\n".join(lines)
+
+
+_URL_RE = re.compile(r"https?://\S+")
+
+
+def result_view(task_id: str) -> dict:
+    """A structured, actionable summary derived from the thread — for the UI's
+    Result card. No new schema; just reads the messages workers already post:
+    the final result summary, any commits, and the change (a forge MR/PR URL or
+    a local diff patch)."""
+    task = get_task(task_id)
+    thread = get_thread(task_id)
+    results = [m for m in thread if m["kind"] == "result"]
+    commits = [m["text"] for m in thread if m["kind"] == "commit"]
+    mrs = [m for m in thread if m["kind"] == "mr"]
+
+    change = None
+    if mrs:
+        m = mrs[-1]
+        url = _URL_RE.search(m["text"] or "")
+        change = {
+            "text": m["text"],
+            "attachment": m["attachment"],           # local diff patch, if any
+            "url": url.group(0) if url else None,     # forge MR/PR link, if any
+        }
+
+    return {
+        "status": task["status"] if task else None,
+        "summary": results[-1]["text"] if results else None,
+        "commits": commits,
+        "change": change,
+    }
