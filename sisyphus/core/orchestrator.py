@@ -47,7 +47,7 @@ class Decision(BaseModel):
 @dataclass
 class Event:
     task_id: str
-    type: str  # created | worker_finished | human_replied | continue
+    type: str  # created | worker_finished | human_replied | continue | external
 
 
 _queue: Optional["asyncio.Queue[Event]"] = None
@@ -106,6 +106,12 @@ Reply with EXACTLY one JSON object and nothing else, matching one of:
 "why" is always required: a short one-line reason for the choice.
 Only choose "done" after a reviewer has APPROVED on the thread — if none has,
 spawn a reviewer instead.
+
+Messages prefixed with "[external]" are forge events about the change you shipped
+(CI results, reviews, a merge). React to them:
+- CI failed → spawn an engineer to diagnose and fix it.
+- Reviewer requested changes / left comments → spawn an engineer to address them.
+- The change was merged → the work has landed; choose "done".
 """
 
 

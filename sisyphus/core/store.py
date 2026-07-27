@@ -109,6 +109,21 @@ def set_status(task_id: str, status: str) -> None:
     conn.close()
 
 
+def find_task_by_mr(url: str) -> Optional[dict]:
+    """Find the task whose thread opened a merge request at *url* — how an
+    incoming forge webhook (CI, review, merge) maps back to a task."""
+    if not url:
+        return None
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT task_id FROM messages WHERE kind = 'mr' AND text LIKE ? "
+        "ORDER BY seq DESC LIMIT 1",
+        (f"%{url}%",),
+    ).fetchone()
+    conn.close()
+    return get_task(row["task_id"]) if row else None
+
+
 def delete_task(task_id: str) -> bool:
     """Delete a task and its whole thread. Returns True if the task existed.
     Disk (worktrees, run logs) is reclaimed by the caller via

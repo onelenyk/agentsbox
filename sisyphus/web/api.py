@@ -4,7 +4,7 @@ Thin wrappers over ``core/`` that return JSON, consumed by the MCP server (and
 any HTTP client). The browser's htmx routes live in ``web/routes.py``; this
 router is JSON-only.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 api = APIRouter(prefix="/api/v1")
@@ -231,6 +231,36 @@ async def delete_task(task_id: str):
     except Exception:
         pass
     return {"success": True, "task_id": task_id}
+
+
+# ── Forge webhooks (MR lifecycle) ───────────────────────────────────────
+
+
+@api.post("/webhooks/{platform}")
+async def receive_webhook(platform: str, request: Request):
+    """Ingest a forge event (CI result, review, merge) and wake the owning task.
+    Maps the payload's MR/PR URL to a task, records an [external] message, and
+    re-opens a terminal/waiting task so the orchestrator reacts on the next pass."""
+    from core import store, webhooks
+    from core.orchestrator import emit
+
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    parsed = webhooks.parse(platform, payload)
+    if not parsed:
+        return {"ok": True, "ignored": True}
+    mr_url, summary = parsed
+    task = store.find_task_by_mr(mr_url)
+    if not task:
+        return {"ok": True, "matched": False}
+
+    store.post_message(task["id"], "system", kind="external", text=summary)
+    if task["status"] in ("done", "failed", "waiting"):
+        store.set_status(task["id"], "active")   # re-open so the loop re-engages
+    emit(task["id"], "external")
+    return {"ok": True, "task_id": task["id"]}
 
 
 # ── Orchestrator control ────────────────────────────────────────────────
