@@ -23,6 +23,9 @@ import urllib.request
 from typing import Any
 
 DAEMON_URL = os.environ.get("SISYPHUS_DAEMON_URL", "http://127.0.0.1:7677").rstrip("/")
+# Shared API token — only needed when the daemon has auth enabled AND is reached
+# non-locally (a loopback daemon exempts localhost). Empty = send no header.
+API_TOKEN = os.environ.get("SISYPHUS_API_TOKEN", "").strip()
 
 
 def _daemon(method: str, path: str, payload: dict | None = None, params: dict | None = None) -> dict:
@@ -33,10 +36,10 @@ def _daemon(method: str, path: str, payload: dict | None = None, params: dict | 
         if query:
             url += "?" + query
     data = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(
-        url, data=data, method=method,
-        headers={"Content-Type": "application/json"},
-    )
+    headers = {"Content-Type": "application/json"}
+    if API_TOKEN:
+        headers["Authorization"] = f"Bearer {API_TOKEN}"
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
             body = resp.read().decode()

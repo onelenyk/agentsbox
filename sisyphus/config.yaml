@@ -1,5 +1,10 @@
 default_model: deepseek
 default_timeout: 300
+api:
+  # Shared bearer token guarding /api/v1. Empty/unset = auth disabled.
+  token: ${SISYPHUS_API_TOKEN}
+  # Skip the token check for loopback clients (the local MCP client / dev).
+  allow_localhost: true
 github:
   base_url: ${GITHUB_BASE_URL}
   token: ${GITHUB_TOKEN}
