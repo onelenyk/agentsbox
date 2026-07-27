@@ -159,20 +159,63 @@ def get_thread(task_id: str) -> List[dict]:
     return [dict(r) for r in rows]
 
 
-def render_thread(task_id: str) -> str:
-    """Compact transcript of a task, for feeding the orchestrator's LLM decision.
+def _keep_in_window(m: dict) -> bool:
+    """Which older messages survive windowing: the load-bearing ones — every
+    orchestrator decision/question, human reply, worker lifecycle event, and
+    any worker outcome/artifact (result / commit / mr / attachment). Only a
+    worker's routine progress notes are collapsible."""
+    if m["author"] in ("orchestrator", "human", "system"):
+        return True
+    if m["kind"] in ("result", "commit", "mr"):
+        return True
+    return bool(m["attachment"])
 
-    The board *is* the orchestrator's memory — this is how it re-reads it."""
+
+def render_thread(task_id: str, for_prompt: bool = False,
+                  max_messages: int = 40, tail: int = 20) -> str:
+    """Compact transcript of a task.
+
+    Default (for_prompt=False): the full thread — used for the UI/API and human
+    reading. The board *is* the orchestrator's memory — this is how it re-reads it.
+
+    for_prompt=True bounds the tokens on a long task: once past *max_messages*,
+    the older head is windowed — every decision, question, human reply, and
+    worker outcome kept verbatim; routine progress notes collapsed to a count —
+    and the last *tail* messages are always kept verbatim. Deterministic, no
+    extra model call."""
     task = get_task(task_id)
     if not task:
         return f"(unknown task {task_id})"
-    lines = [f"Task: {task['goal']}", f"Status: {task['status']}", "---"]
-    for m in get_thread(task_id):
+
+    def _line(m):
         att = f"  [attachment: {m['attachment']}]" if m["attachment"] else ""
-        lines.append(f"{m['seq']}. [{m['author']}/{m['kind']}] {m['text']}{att}")
-    if len(lines) == 3:
-        lines.append("(no messages yet)")
-    return "\n".join(lines)
+        return f"{m['seq']}. [{m['author']}/{m['kind']}] {m['text']}{att}"
+
+    header = [f"Task: {task['goal']}", f"Status: {task['status']}", "---"]
+    msgs = get_thread(task_id)
+
+    if not (for_prompt and len(msgs) > max_messages):
+        lines = header + [_line(m) for m in msgs]
+        if not msgs:
+            lines.append("(no messages yet)")
+        return "\n".join(lines)
+
+    head, recent = msgs[:-tail], msgs[-tail:]
+    out = list(header)
+    omitted = 0
+    for m in head:
+        if _keep_in_window(m):
+            if omitted:
+                out.append(f"… ({omitted} routine progress notes omitted) …")
+                omitted = 0
+            out.append(_line(m))
+        else:
+            omitted += 1
+    if omitted:
+        out.append(f"… ({omitted} routine progress notes omitted) …")
+    out.append("--- recent ---")
+    out += [_line(m) for m in recent]
+    return "\n".join(out)
 
 
 _URL_RE = re.compile(r"https?://\S+")

@@ -311,7 +311,7 @@ async def handle_event(
         store.set_status(task_id, "waiting")
         return Decision(action="ask_human", question=question, why="repeated worker failures"), None
 
-    thread_text = store.render_thread(task_id)
+    thread_text = store.render_thread(task_id, for_prompt=True)
     decide = decide_fn or _decide
     decision = await decide(task, thread_text)
 

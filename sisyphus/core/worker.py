@@ -244,7 +244,7 @@ async def spawn_worker(
         text=f"spawning {role}: {instruction}",
     )
 
-    prompt = _build_prompt(role_def, task["goal"], instruction, store.render_thread(task_id))
+    prompt = _build_prompt(role_def, task["goal"], instruction, store.render_thread(task_id, for_prompt=True))
     # Layout matches what launcher._derive_run_id expects (runs/{run_id}/
     # resources/{step_id}), using task_id as the run id and role as the step
     # id — so worker logs land under runs/{task_id}/logs/{role}.log instead

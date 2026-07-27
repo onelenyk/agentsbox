@@ -37,7 +37,7 @@ def _end_worker(session: dict) -> None:
 
 def _get_context(session, **_):
     task = store.get_task(session["task_id"])
-    return {"goal": task["goal"] if task else "", "thread": store.render_thread(session["task_id"])}
+    return {"goal": task["goal"] if task else "", "thread": store.render_thread(session["task_id"], for_prompt=True)}
 
 
 def _comment(session, text="", **_):
