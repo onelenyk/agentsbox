@@ -6,6 +6,7 @@ from core.store import (
     delete_task,
     get_task,
     get_thread,
+    list_children,
     list_tasks,
     post_message,
     render_thread,
@@ -44,6 +45,31 @@ class TestTasks:
         t = create_task("g")
         with pytest.raises(ValueError):
             set_status(t["id"], "bogus")
+
+
+class TestFanout:
+    def test_child_carries_parent_id(self, db_path):
+        parent = create_task("ticket PROJ-123")   # repo-less coordinator
+        ios = create_task("iOS impl", repo="ios-app", parent_id=parent["id"])
+        assert ios["parent_id"] == parent["id"]
+        assert get_task(ios["id"])["parent_id"] == parent["id"]
+
+    def test_top_level_task_has_no_parent(self, db_path):
+        t = create_task("plain task", repo="sisyphus")
+        assert t["parent_id"] is None
+
+    def test_list_children(self, db_path):
+        parent = create_task("ticket")
+        ios = create_task("iOS", repo="ios-app", parent_id=parent["id"])
+        android = create_task("Android", repo="android-app", parent_id=parent["id"])
+        other = create_task("unrelated", repo="x")
+        kids = list_children(parent["id"])
+        assert [c["id"] for c in kids] == [ios["id"], android["id"]]
+        assert other["id"] not in [c["id"] for c in kids]
+
+    def test_list_children_empty_for_leaf(self, db_path):
+        t = create_task("leaf", repo="x")
+        assert list_children(t["id"]) == []
 
 
 class TestThread:
