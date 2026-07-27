@@ -273,12 +273,15 @@ async def task_delete(task_id: str):
 
     if not store.get_task(task_id):
         return Response(status_code=404)
-    sessions.revoke_task(task_id)
-    store.delete_task(task_id)
-    try:
-        cleanup_task(task_id, deep=True)
-    except Exception:
-        pass
+    tree = store.task_tree(task_id)   # root + fan-out descendants
+    for tid in tree:
+        sessions.revoke_task(tid)
+    store.delete_task(task_id)        # cascades the whole subtree in the DB
+    for tid in tree:
+        try:
+            cleanup_task(tid, deep=True)
+        except Exception:
+            pass
     resp = Response(status_code=200)
     resp.headers["HX-Redirect"] = "/tasks"   # navigate back to the board
     return resp

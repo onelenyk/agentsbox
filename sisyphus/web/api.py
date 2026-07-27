@@ -224,12 +224,15 @@ async def delete_task(task_id: str):
 
     if not store.get_task(task_id):
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-    sessions.revoke_task(task_id)   # stop any still-running worker from writing back
-    store.delete_task(task_id)
-    try:
-        cleanup_task(task_id, deep=True)   # also drop the task's attachments store
-    except Exception:
-        pass
+    tree = store.task_tree(task_id)   # root + fan-out descendants
+    for tid in tree:
+        sessions.revoke_task(tid)     # stop any still-running worker from writing back
+    store.delete_task(task_id)        # cascades the whole subtree in the DB
+    for tid in tree:
+        try:
+            cleanup_task(tid, deep=True)   # also drop each node's attachments store
+        except Exception:
+            pass
     return {"success": True, "task_id": task_id}
 
 

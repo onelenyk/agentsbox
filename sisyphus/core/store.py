@@ -147,13 +147,26 @@ def find_task_by_mr(url: str) -> Optional[dict]:
     return get_task(row["task_id"]) if row else None
 
 
+def task_tree(task_id: str) -> List[str]:
+    """A task id plus all of its descendant task ids (fan-out children, and
+    theirs). Used so deletion reclaims a whole subtree's disk/sessions, not just
+    the root. Depth is capped at one level today, but this recurses regardless."""
+    ids = [task_id]
+    for child in list_children(task_id):
+        ids.extend(task_tree(child["id"]))
+    return ids
+
+
 def delete_task(task_id: str) -> bool:
-    """Delete a task and its whole thread. Returns True if the task existed.
-    Disk (worktrees, run logs) is reclaimed by the caller via
+    """Delete a task, its whole thread, and any descendant tasks + threads
+    (fan-out children cascade). Returns True if the root task existed. Disk
+    (worktrees, run logs, attachments) is reclaimed per node by the caller via
     core.worker.cleanup_task — this only touches the database."""
+    ids = task_tree(task_id)
     conn = get_conn()
-    conn.execute("DELETE FROM messages WHERE task_id = ?", (task_id,))
-    cur = conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+    placeholders = ",".join("?" * len(ids))
+    conn.execute(f"DELETE FROM messages WHERE task_id IN ({placeholders})", ids)
+    cur = conn.execute(f"DELETE FROM tasks WHERE id IN ({placeholders})", ids)
     conn.commit()
     existed = cur.rowcount > 0
     conn.close()
