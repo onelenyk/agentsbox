@@ -1,22 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Runtime — Sisyphus{% endblock %}
 {% block content %}
-<h1>Runtime Settings</h1>
-<h2 style="font-size:14px;color:#8b949e;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">Configuration</h2>
-<div class="card" style="padding:16px;font-family:monospace;font-size:12px;white-space:pre-wrap;color:#c9d1d9;max-height:400px;overflow-y:auto">
-workspace_root: {{ config.workspace_root or '/workspace' }}
-default_model: {{ config.default_model or 'deepseek' }}
-default_timeout: {{ config.default_timeout or 300 }}
+<div class="page-head"><div><h1>Runtime</h1><div class="sub">Daemon configuration (read-only).</div></div></div>
+<div class="panel">
+    <div class="result__label">Configuration</div>
+    <pre class="mono" style="font-size:12px;white-space:pre-wrap;color:var(--text-2);line-height:1.7;margin-top:6px">workspace_root:   {{ config.workspace_root or '/workspace' }}
+default_model:    {{ config.default_model or 'deepseek' }}
+default_timeout:  {{ config.default_timeout or 300 }}
 max_review_loops: {{ config.max_review_loops or 3 }}
-log_level: {{ config.log_level or 'info' }}
+log_level:        {{ config.log_level or 'info' }}
 
-jira:
-  base_url: {{ config.jira.base_url or '(set in .env)' }}
-
-gitlab:
-  base_url: {{ config.gitlab.base_url or '(set in .env)' }}
-
-openrouter:
-  base_url: {{ config.openrouter.base_url or 'https://openrouter.ai/api/v1' }}
+jira.base_url:       {{ config.jira.base_url or '(set in .env)' }}
+gitlab.base_url:     {{ config.gitlab.base_url or '(set in .env)' }}
+openrouter.base_url: {{ config.openrouter.base_url or 'https://openrouter.ai/api/v1' }}</pre>
 </div>
 {% endblock %}

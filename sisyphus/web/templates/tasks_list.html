@@ -1,44 +1,41 @@
-<div class="kanban-grid">
+<div class="board">
     {% for status in ["active", "waiting", "done", "failed"] %}
-    <div class="kanban-col">
-        <h2>{{ status|capitalize }} <span class="count">{{ columns[status]|length }}</span></h2>
-        {% for t in columns[status] %}
-        <div class="card" onclick="window.location.href='/tasks/{{ t.id }}'">
-            <div class="title">{{ t.goal[:80] ~ '…' if t.goal|length > 80 else t.goal }}</div>
-            <div class="meta">
-                {% if t.repo %}
-                <span class="repo-badge">{{ t.repo }}</span>
-                {% endif %}
-                <span class="badge" style="font-family:monospace">{{ t.id }}</span>
-                {% if t.child_total %}
-                <span class="badge" style="background:#21262d;color:#8b949e">⑂ {{ t.child_done }}/{{ t.child_total }}</span>
-                {% endif %}
-            </div>
-            <div class="card-stats">
-                <span class="stat-time-created" data-created="{{ t.created_at }}"></span>
-            </div>
+    <div class="board-col">
+        <div class="board-col__head">
+            <span class="label">{{ status }}</span>
+            <span class="count tnum">{{ columns[status]|length }}</span>
         </div>
-        {% else %}
-        <div class="empty-state"><p>No tasks</p></div>
-        {% endfor %}
+        <div class="board-col__body">
+            {% for t in columns[status] %}
+            <a class="task-card" href="/tasks/{{ t.id }}">
+                <div class="task-card__title">{{ t.goal[:90] ~ '…' if t.goal|length > 90 else t.goal }}</div>
+                <div class="task-card__meta">
+                    {% if t.repo %}<span class="badge">{{ t.repo }}</span>{% endif %}
+                    <span class="badge badge--mono">{{ t.id }}</span>
+                    {% if t.child_total %}<span class="chip">⑂ {{ t.child_done }}/{{ t.child_total }}</span>{% endif %}
+                </div>
+                <div class="task-card__foot"><span class="reltime" data-created="{{ t.created_at }}"></span></div>
+            </a>
+            {% else %}
+            <div class="empty">No tasks</div>
+            {% endfor %}
+        </div>
     </div>
     {% endfor %}
 </div>
 <script>
-(function() {
-    function fmtRelative(iso) {
-        var diff = Date.now() - new Date(iso).getTime();
-        if (diff < 0) return '';
-        var s = Math.floor(diff / 1000);
+(function () {
+    function rel(iso) {
+        var d = Date.now() - new Date(iso).getTime();
+        if (d < 0) return '';
+        var s = Math.floor(d / 1000);
         if (s < 60) return s + 's ago';
         if (s < 3600) return Math.floor(s / 60) + 'm ago';
         if (s < 86400) return Math.floor(s / 3600) + 'h ago';
         return Math.floor(s / 86400) + 'd ago';
     }
-    document.querySelectorAll('.stat-time-created').forEach(function(el) {
-        var created = el.dataset.created;
-        if (!created) return;
-        el.textContent = fmtRelative(created);
+    document.querySelectorAll('.reltime').forEach(function (el) {
+        if (el.dataset.created) el.textContent = rel(el.dataset.created);
     });
 })();
 </script>

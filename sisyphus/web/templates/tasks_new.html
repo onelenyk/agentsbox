@@ -1,34 +1,36 @@
-<div id="newTaskModal" class="modal-overlay active" onclick="if(event.target===this)this.remove()">
+<div id="newTaskModal" class="modal-backdrop" onclick="if(event.target===this)this.remove()">
     <div class="modal" onclick="event.stopPropagation()">
-        <h2>New Task</h2>
+        <div class="modal__head"><h2>New Task</h2></div>
         <form hx-post="/api/tasks" hx-target="#newTaskModal" hx-swap="outerHTML">
-            <div class="form-group">
-                <label>Goal</label>
-                <textarea name="goal" rows="3" required placeholder="What should get done?"></textarea>
+            <div class="modal__body">
+                <div class="field">
+                    <label>Goal</label>
+                    <textarea name="goal" rows="3" required placeholder="What should get done?"></textarea>
+                </div>
+                <div class="field">
+                    <label>Repository</label>
+                    <select name="repo">
+                        <option value="" selected>None — research / planning / Q&A</option>
+                        {% for r in repos %}
+                        <option value="{{ r.name }}">{{ r.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <span class="hint">A repo-less task runs read-only in a scratch dir — no commits or merge requests.</span>
+                </div>
+                <div class="field">
+                    <label>Handled by</label>
+                    <select name="agent">
+                        <option value="" selected>Auto — orchestrator dispatches</option>
+                        {% for a in agents %}
+                        <option value="{{ a.name }}">{{ a.name }} (solo)</option>
+                        {% endfor %}
+                    </select>
+                    <span class="hint">Pick an agent to run it solo, or leave on Auto to let the orchestrator coordinate.</span>
+                </div>
             </div>
-            <div class="form-group">
-                <label>Repository</label>
-                <select name="repo">
-                    <option value="" selected>None — research / planning / Q&A</option>
-                    {% for r in repos %}
-                    <option value="{{ r.name }}">{{ r.name }}</option>
-                    {% endfor %}
-                </select>
-                <div style="font-size:11px;color:#8b949e;margin-top:4px">A repo-less task runs read-only in a scratch dir — no commits or merge requests.</div>
-            </div>
-            <div class="form-group">
-                <label>Handled by</label>
-                <select name="agent">
-                    <option value="" selected>Auto — orchestrator dispatches</option>
-                    {% for a in agents %}
-                    <option value="{{ a.name }}">{{ a.name }} (solo)</option>
-                    {% endfor %}
-                </select>
-                <div style="font-size:11px;color:#8b949e;margin-top:4px">Pick an agent to run it solo, or leave on Auto to let the orchestrator coordinate.</div>
-            </div>
-            <div class="form-actions" style="display:flex;gap:8px">
-                <button type="button" class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
-                <button type="submit" class="btn btn-primary">Create</button>
+            <div class="modal__actions">
+                <button type="button" class="btn btn--ghost" onclick="this.closest('.modal-backdrop').remove()">Cancel</button>
+                <button type="submit" class="btn btn--primary">Create Task</button>
             </div>
         </form>
     </div>

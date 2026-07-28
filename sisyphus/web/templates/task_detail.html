@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block title %}{{ task.id }} — Sisyphus{% endblock %}
 {% block content %}
-<div class="header-bar">
-    <h1><a href="/tasks" style="color:#8b949e;font-size:16px;font-weight:400">Tasks</a> / {{ task.id }}</h1>
+<div class="page-head">
+    <h1 class="row" style="gap:8px"><a href="/tasks" class="muted" style="font-size:15px;font-weight:500">Tasks</a><span class="muted">/</span><span class="mono" style="font-size:15px">{{ task.id }}</span></h1>
 </div>
 <div id="task-detail" hx-get="/api/tasks/{{ task.id }}/detail" hx-trigger="taskUpdated from:body{% if task.status in ('active', 'waiting') %}, every 3s{% endif %}" hx-swap="innerHTML">
     {% include "task_detail_content.html" %}

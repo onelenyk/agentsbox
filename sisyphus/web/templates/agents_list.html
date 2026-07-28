@@ -1,33 +1,28 @@
 {% if agents %}
-<table class="data-table">
-    <thead>
-        <tr>
-            <th>Name</th>
-            <th>Kind</th>
-            <th>Tools</th>
-            <th>Runtime</th>
-            <th>Model</th>
-            <th>Actions</th>
-        </tr>
-    </thead>
+<div class="table-wrap"><div class="table-scroll">
+<table class="table">
+    <thead><tr><th>Name</th><th>Kind</th><th>Tools</th><th>Runtime</th><th>Model</th><th></th></tr></thead>
     <tbody>
         {% for a in agents %}
         <tr>
-            <td><strong>{{ a.name }}</strong>{% if a.is_builtin %} <span class="badge" style="background:#21262d;color:#8b949e">built-in</span>{% endif %}</td>
-            <td>{{ a.kind }}</td>
-            <td style="font-family:monospace;font-size:11px;color:#8b949e">{{ a.tools|join(', ') or '—' }}</td>
+            <td><span class="name">{{ a.name }}</span>{% if a.is_builtin %} <span class="badge">built-in</span>{% endif %}</td>
+            <td><span class="badge {{ 'badge--accent' if a.kind == 'orchestrator' else '' }}">{{ a.kind }}</span></td>
+            <td class="mono muted" style="font-size:11px">{{ a.tools|join(', ') or '—' }}</td>
             <td>{{ runners.get(a.runner_id) or 'default' }}</td>
             <td>{{ a.model or '—' }}</td>
             <td>
-                <button class="btn btn-sm" style="font-size:11px" hx-get="/api/agents/{{ a.name }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
-                {% if not a.is_builtin %}
-                <button class="btn btn-sm" style="font-size:11px;color:#f85149" hx-post="/api/agents/{{ a.name }}/delete" hx-confirm="Delete agent {{ a.name }}?" hx-swap="none">Delete</button>
-                {% endif %}
+                <div class="row" style="justify-content:flex-end">
+                    <button class="btn btn--ghost btn--sm" hx-get="/api/agents/{{ a.name }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
+                    {% if not a.is_builtin %}
+                    <button class="btn btn--danger btn--sm" hx-post="/api/agents/{{ a.name }}/delete" hx-confirm="Delete agent {{ a.name }}?" hx-swap="none">Delete</button>
+                    {% endif %}
+                </div>
             </td>
         </tr>
         {% endfor %}
     </tbody>
 </table>
+</div></div>
 {% else %}
-<div class="empty-state"><p>No agents. Add one to get started.</p></div>
+<div class="empty">No agents. Add one to get started.</div>
 {% endif %}

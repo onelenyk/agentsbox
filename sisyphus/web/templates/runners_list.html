@@ -1,44 +1,32 @@
 {% if runners %}
-<table class="data-table">
-    <thead>
-        <tr>
-            <th>Name</th>
-            <th>Binary</th>
-            <th>Type</th>
-            <th>Model</th>
-            <th>Default</th>
-            <th>Health</th>
-            <th>Actions</th>
-        </tr>
-    </thead>
+<div class="table-wrap"><div class="table-scroll">
+<table class="table">
+    <thead><tr><th>Name</th><th>Binary</th><th>Type</th><th>Model</th><th>Default</th><th>Health</th><th></th></tr></thead>
     <tbody>
         {% for r in runners %}
         <tr>
-            <td><strong>{{ r.name }}</strong></td>
+            <td><span class="name">{{ r.name }}</span></td>
             <td><code>{{ r.binary }}</code></td>
             <td>{{ r.type }}</td>
             <td>{{ r.model or '—' }}</td>
-            <td>{% if r.is_default %}⭐{% endif %}</td>
+            <td>{% if r.is_default %}<span class="badge badge--accent">default</span>{% endif %}</td>
             <td>
-                <span class="health-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;
-                    background:{% if r.health_status=='healthy' %}#3fb950{% elif r.health_status=='unhealthy' %}#f85149{% else %}#8b949e{% endif %};margin-right:4px"></span>
-                {{ r.health_status }}
-                {% if r.health_error %}
-                <div style="font-size:10px;color:#f85149;margin-top:2px">{{ r.health_error[:80] }}</div>
-                {% endif %}
+                <span class="health {{ 'is-healthy' if r.health_status=='healthy' else ('is-unhealthy' if r.health_status=='unhealthy' else '') }}"><span class="dot"></span>{{ r.health_status }}</span>
+                {% if r.health_error %}<div style="font-size:10px;color:var(--bad);margin-top:3px">{{ r.health_error[:80] }}</div>{% endif %}
             </td>
             <td>
-                <button class="btn btn-sm" hx-post="/api/runners/{{ r.id }}/health" hx-swap="none" style="font-size:11px">Check</button>
-                {% if not r.is_default %}
-                <button class="btn btn-sm" hx-post="/api/runners/{{ r.id }}/set-default" hx-swap="none" style="font-size:11px" title="Set as default">⭐</button>
-                {% endif %}
-                <button class="btn btn-sm" style="font-size:11px" hx-get="/api/runners/{{ r.id }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
-                <button class="btn btn-sm" style="font-size:11px;color:#f85149" hx-post="/api/runners/{{ r.id }}/delete" hx-confirm="Delete {{ r.name }}?" hx-swap="none">Delete</button>
+                <div class="row" style="justify-content:flex-end">
+                    <button class="btn btn--ghost btn--sm" hx-post="/api/runners/{{ r.id }}/health" hx-swap="none">Check</button>
+                    {% if not r.is_default %}<button class="btn btn--ghost btn--sm" hx-post="/api/runners/{{ r.id }}/set-default" hx-swap="none" title="Set as default">★</button>{% endif %}
+                    <button class="btn btn--ghost btn--sm" hx-get="/api/runners/{{ r.id }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
+                    <button class="btn btn--danger btn--sm" hx-post="/api/runners/{{ r.id }}/delete" hx-confirm="Delete {{ r.name }}?" hx-swap="none">Delete</button>
+                </div>
             </td>
         </tr>
         {% endfor %}
     </tbody>
 </table>
+</div></div>
 {% else %}
-<div class="empty-state"><p>No AI runners configured. Add one to get started.</p></div>
+<div class="empty">No AI runners configured. Add one to get started.</div>
 {% endif %}
