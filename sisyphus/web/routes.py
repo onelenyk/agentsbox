@@ -281,11 +281,16 @@ async def tasks_list_view(request: Request):
 @router.get("/api/tasks/new-form", response_class=HTMLResponse)
 async def tasks_new_form(request: Request):
     from core.repos import list_repos
-    return _tmpl().TemplateResponse("tasks_new.html", {"request": request, "repos": list_repos()})
+    from core.agents import list_agents
+    return _tmpl().TemplateResponse("tasks_new.html", {
+        "request": request, "repos": list_repos(),
+        "agents": list_agents(kind="worker"),
+    })
 
 @router.post("/api/tasks")
-async def tasks_create(goal: str = Form(...), repo: str = Form("")):
+async def tasks_create(goal: str = Form(...), repo: str = Form(""), agent: str = Form("")):
     from core import store
+    from core.agents import get_agent
     from core.orchestrator import emit
     from fastapi.responses import Response
 
@@ -293,8 +298,12 @@ async def tasks_create(goal: str = Form(...), repo: str = Form("")):
         # htmx doesn't swap on non-2xx; this surfaces via the global error
         # toast (base.html's htmx:afterRequest handler).
         return Response(status_code=422)
+    if agent.strip():
+        a = get_agent(agent)
+        if not a or a["kind"] != "worker":
+            return Response(status_code=422)
     # Repo optional — repo-less tasks run in a scratch dir (see web/api.py).
-    task = store.create_task(goal, repo)
+    task = store.create_task(goal, repo, agent=agent or None)
     emit(task["id"], "created")
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "taskCreated"

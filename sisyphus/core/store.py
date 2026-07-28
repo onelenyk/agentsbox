@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     repo       TEXT NOT NULL DEFAULT '',
     status     TEXT NOT NULL DEFAULT 'active',
     parent_id  TEXT REFERENCES tasks(id),   -- NULL = top-level; set = child (a tree)
+    agent      TEXT,                          -- pinned handling agent; NULL = orchestrator dispatches
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -62,6 +63,8 @@ def _migrate(conn) -> None:
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()}
     if "parent_id" not in cols:
         conn.execute("ALTER TABLE tasks ADD COLUMN parent_id TEXT REFERENCES tasks(id)")
+    if "agent" not in cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN agent TEXT")
 
 
 def _now() -> str:
@@ -76,14 +79,14 @@ def _dict(row) -> Optional[dict]:
 
 
 def create_task(goal: str, repo: str = "", status: str = "active",
-                parent_id: Optional[str] = None) -> dict:
+                parent_id: Optional[str] = None, agent: Optional[str] = None) -> dict:
     task_id = f"task-{uuid4().hex[:8]}"
     now = _now()
     conn = get_conn()
     conn.execute(
-        "INSERT INTO tasks (id, goal, repo, status, parent_id, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (task_id, goal, repo, status, parent_id, now, now),
+        "INSERT INTO tasks (id, goal, repo, status, parent_id, agent, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (task_id, goal, repo, status, parent_id, agent or None, now, now),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()

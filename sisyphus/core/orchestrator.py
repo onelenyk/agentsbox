@@ -308,6 +308,12 @@ async def handle_event(
     if _children_pending(task_id):
         return Decision(action="noop", why="waiting on child tasks"), None
 
+    # Single-agent mode: a task with a pinned agent skips the orchestrator
+    # entirely — that one agent handles it solo, and its result completes the
+    # task (no dispatch, no reviewer).
+    if task.get("agent"):
+        return await _handle_single_agent(task)
+
     if _pass_count(task_id) >= MAX_PASSES:
         store.post_message(task_id, "orchestrator", kind="note",
                            text="[fail] pass budget exceeded — stopping to avoid runaway cost")
@@ -361,6 +367,34 @@ async def handle_event(
             emit(task_id, "continue")
 
     return decision, bg_task
+
+
+async def _handle_single_agent(task: dict) -> tuple:
+    """Drive a task pinned to one agent, with no orchestrator in the loop:
+    spawn the agent once; when it reports back, its result completes the task
+    (or its absence fails it). One shot — no dispatch, no reviewer, no retry."""
+    task_id = task["id"]
+    thread = store.get_thread(task_id)
+
+    if not any(m["kind"] == "worker_started" for m in thread):
+        store.set_status(task_id, "active")
+        bg = asyncio.create_task(
+            spawn_worker(task_id, task["agent"], task["goal"], repo_name=task.get("repo"))
+        )
+        return Decision(action="spawn_worker", role=task["agent"],
+                        why=f"single-agent task — running {task['agent']}"), bg
+
+    # The agent has run. A reported result (finish/approve) → done; none → failed.
+    if any(m["kind"] == "result" for m in thread):
+        store.post_message(task_id, "orchestrator", kind="note",
+                           text=f"[done] {task['agent']} completed the task")
+        _terminate(task_id, "done")
+        return Decision(action="done", why="pinned agent completed"), None
+    store.post_message(task_id, "orchestrator", kind="note",
+                       text=f"[fail] {task['agent']} ended without a result")
+    _terminate(task_id, "failed")
+    return Decision(action="fail", reason="pinned agent produced no result",
+                    why="single-agent failure"), None
 
 
 async def _execute(task_id: str, decision: Decision):

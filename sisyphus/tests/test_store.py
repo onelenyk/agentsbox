@@ -201,3 +201,14 @@ class TestResultView:
     def test_no_change_is_none(self, db_path):
         t = create_task("g", repo="sisyphus")
         assert result_view(t["id"])["change"] is None
+
+
+class TestTaskAgent:
+    def test_agent_defaults_to_none(self, db_path):
+        t = create_task("g", repo="x")
+        assert t["agent"] is None
+
+    def test_agent_persisted(self, db_path):
+        t = create_task("g", repo="x", agent="engineer")
+        assert t["agent"] == "engineer"
+        assert get_task(t["id"])["agent"] == "engineer"

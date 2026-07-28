@@ -212,6 +212,7 @@ async def delete_agent_ep(name: str):
 class CreateTask(BaseModel):
     goal: str
     repo: str = ""
+    agent: str = ""   # pin a handling agent; empty = orchestrator dispatches
 
 
 class TaskMessage(BaseModel):
@@ -229,7 +230,14 @@ async def create_task(body: CreateTask):
     # private scratch dir (core.worker.spawn_worker). Without a repo the
     # engineer's commit/open_mr tools have nothing to act on and return a clear
     # "needs a repo" error — so such tasks are naturally read-only.
-    task = store.create_task(body.goal, body.repo)
+    # An agent is optional: pinning one runs it solo (single-agent mode); empty
+    # lets the orchestrator dispatch. A pinned agent must be a real worker agent.
+    if body.agent.strip():
+        from core.agents import get_agent
+        a = get_agent(body.agent)
+        if not a or a["kind"] != "worker":
+            raise HTTPException(status_code=422, detail="agent must be an existing worker agent")
+    task = store.create_task(body.goal, body.repo, agent=body.agent or None)
     emit(task["id"], "created")
     return {"task_id": task["id"], "status": task["status"]}
 

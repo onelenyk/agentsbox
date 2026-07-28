@@ -490,3 +490,47 @@ class TestDecideViaAgent:
         src = inspect.getsource(o)
         assert "urllib" not in src
         assert "chat/completions" not in src
+
+
+class TestSingleAgentMode:
+    @pytest.mark.asyncio
+    async def test_pinned_agent_runs_without_orchestrator(self, db_path):
+        from unittest.mock import AsyncMock
+        task = store.create_task("do it solo", repo="sisyphus", agent="engineer")
+
+        async def _decide_must_not_run(task_, thread_text):
+            raise AssertionError("orchestrator _decide must not run for a pinned agent")
+
+        async def fake_spawn(tid, agent, instruction, repo_name=None, **kw):
+            store.post_message(tid, agent, kind="worker_started", text="spawning")
+
+        with patch("core.orchestrator.spawn_worker", side_effect=fake_spawn):
+            decision, bg = await handle_event(task["id"], "created", decide_fn=_decide_must_not_run)
+            if bg:
+                await bg
+        assert decision.action == "spawn_worker"
+        assert decision.role == "engineer"
+
+    @pytest.mark.asyncio
+    async def test_result_completes_the_task(self, db_path):
+        task = store.create_task("solo", repo="sisyphus", agent="engineer")
+        store.post_message(task["id"], "engineer", kind="worker_started", text="spawning")
+        store.post_message(task["id"], "engineer", kind="result", text="did it")
+        store.post_message(task["id"], "system", kind="worker_finished", text="engineer finished")
+
+        with patch("core.worker.cleanup_task"):
+            decision, bg = await handle_event(task["id"], "worker_finished")
+        assert decision.action == "done"
+        assert store.get_task(task["id"])["status"] == "done"
+
+    @pytest.mark.asyncio
+    async def test_no_result_fails_the_task(self, db_path):
+        task = store.create_task("solo", repo="sisyphus", agent="engineer")
+        store.post_message(task["id"], "engineer", kind="worker_started", text="spawning")
+        store.post_message(task["id"], "system", kind="worker_finished",
+                           text="engineer ended without reporting a result")
+
+        with patch("core.worker.cleanup_task"):
+            decision, bg = await handle_event(task["id"], "worker_finished")
+        assert decision.action == "fail"
+        assert store.get_task(task["id"])["status"] == "failed"

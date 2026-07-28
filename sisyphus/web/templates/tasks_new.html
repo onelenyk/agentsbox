@@ -16,6 +16,16 @@
                 </select>
                 <div style="font-size:11px;color:#8b949e;margin-top:4px">A repo-less task runs read-only in a scratch dir — no commits or merge requests.</div>
             </div>
+            <div class="form-group">
+                <label>Handled by</label>
+                <select name="agent">
+                    <option value="" selected>Auto — orchestrator dispatches</option>
+                    {% for a in agents %}
+                    <option value="{{ a.name }}">{{ a.name }} (solo)</option>
+                    {% endfor %}
+                </select>
+                <div style="font-size:11px;color:#8b949e;margin-top:4px">Pick an agent to run it solo, or leave on Auto to let the orchestrator coordinate.</div>
+            </div>
             <div class="form-actions" style="display:flex;gap:8px">
                 <button type="button" class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
                 <button type="submit" class="btn btn-primary">Create</button>
