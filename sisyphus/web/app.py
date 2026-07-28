@@ -7,6 +7,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 os.environ.setdefault("WORKSPACE_ROOT", str(_REPO_ROOT / "workspace"))
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from web.routes import router
 from web.api import api as api_router
 from web.agent_mcp import agent_mcp
@@ -14,6 +15,7 @@ from web.auth import api_token_guard
 
 app = FastAPI(title="Sisyphus", version="2.0")
 app.middleware("http")(api_token_guard)
+app.mount("/static", StaticFiles(directory=str(_REPO_ROOT / "web" / "static")), name="static")
 app.include_router(router)
 app.include_router(api_router)
 app.include_router(agent_mcp)

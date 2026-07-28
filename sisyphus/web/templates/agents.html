@@ -1,12 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Agents — Sisyphus{% endblock %}
 {% block content %}
-<div class="header-bar">
-    <h1>Agents</h1>
-    <button class="btn btn-primary" hx-get="/api/agents/new-form" hx-target="body" hx-swap="beforeend">+ Add Agent</button>
+<div class="page-head">
+    <div>
+        <h1>Agents</h1>
+        <div class="sub">A persona + a set of tools + which CLI runtime runs it.</div>
+    </div>
+    <div class="actions">
+        <button class="btn btn--primary" hx-get="/api/agents/new-form" hx-target="body" hx-swap="beforeend">+ Add Agent</button>
+    </div>
 </div>
-<p style="color:#8b949e;font-size:13px;margin-top:-8px">An agent is a persona + a set of tools + which CLI runtime runs it.</p>
 <div id="agents-list" hx-get="/api/agents/list" hx-trigger="load, agentsUpdated from:body" hx-swap="innerHTML">
-    <div class="empty-state"><p>Loading...</p></div>
+    <div class="empty">Loading…</div>
 </div>
 {% endblock %}

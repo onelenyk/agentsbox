@@ -1,48 +1,34 @@
-<div id="newAgentModal" class="modal-overlay active" onclick="if(event.target===this)this.remove()">
+<div id="newAgentModal" class="modal-backdrop" onclick="if(event.target===this)this.remove()">
     <div class="modal" onclick="event.stopPropagation()">
-        <h2>New Agent</h2>
+        <div class="modal__head"><h2>New Agent</h2></div>
         <form hx-post="/api/agents" hx-target="#newAgentModal" hx-swap="outerHTML">
-            <div class="form-group">
-                <label>Name</label>
-                <input name="name" required placeholder="e.g. docs-writer">
-            </div>
-            <div class="form-group">
-                <label>Kind</label>
-                <select name="kind">
-                    <option value="worker" selected>worker — does the task</option>
-                    <option value="orchestrator">orchestrator — decides</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Persona</label>
-                <textarea name="persona" rows="3" placeholder="What this agent is and how it behaves"></textarea>
-            </div>
-            <div class="form-group">
-                <label>Tools</label>
-                <div style="display:flex;flex-wrap:wrap;gap:8px">
-                    {% for t in catalog %}
-                    <label style="font-size:12px;font-weight:400;display:flex;align-items:center;gap:4px">
-                        <input type="checkbox" name="tools" value="{{ t }}"> {{ t }}
-                    </label>
-                    {% endfor %}
+            <div class="modal__body">
+                <div class="field"><label>Name</label><input name="name" required placeholder="e.g. docs-writer"></div>
+                <div class="field"><label>Kind</label>
+                    <select name="kind">
+                        <option value="worker" selected>worker — does the task</option>
+                        <option value="orchestrator">orchestrator — decides</option>
+                    </select>
                 </div>
+                <div class="field"><label>Persona</label><textarea name="persona" rows="3" placeholder="What this agent is and how it behaves"></textarea></div>
+                <div class="field"><label>Tools</label>
+                    <div class="checks">
+                        {% for t in catalog %}
+                        <label class="check"><input type="checkbox" name="tools" value="{{ t }}"> {{ t }}</label>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="field"><label>Runtime</label>
+                    <select name="runner_id">
+                        <option value="" selected>default runner</option>
+                        {% for r in runners %}<option value="{{ r.id }}">{{ r.name }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="field"><label>Model override (optional)</label><input name="model" placeholder="leave blank to use the runtime's model"></div>
             </div>
-            <div class="form-group">
-                <label>Runtime</label>
-                <select name="runner_id">
-                    <option value="" selected>default runner</option>
-                    {% for r in runners %}
-                    <option value="{{ r.id }}">{{ r.name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Model override (optional)</label>
-                <input name="model" placeholder="leave blank to use the runtime's model">
-            </div>
-            <div class="form-actions" style="display:flex;gap:8px">
-                <button type="button" class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
-                <button type="submit" class="btn btn-primary">Create</button>
+            <div class="modal__actions">
+                <button type="button" class="btn btn--ghost" onclick="this.closest('.modal-backdrop').remove()">Cancel</button>
+                <button type="submit" class="btn btn--primary">Create Agent</button>
             </div>
         </form>
     </div>

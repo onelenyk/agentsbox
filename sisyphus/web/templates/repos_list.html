@@ -1,21 +1,26 @@
 {% if repos %}
-{% for r in repos %}
-<div class="agent-card" style="margin-bottom:12px">
-    <div class="agent-header">
-        <div>
-            <div class="agent-name">{{ r.name }}</div>
-            <div class="agent-role" style="font-size:11px;word-break:break-all">{{ r.source[:60] }}</div>
-        </div>
-        <span class="access-badge {{ 'analyze' if r.cloned else 'read' }}">{{ 'cloned' if r.cloned else 'pending' }}</span>
-    </div>
-    <div class="agent-meta">
-        Branch: <span>{{ r.branch }}</span>
-    </div>
-    <div style="margin-top:8px">
-        <button class="btn" style="font-size:11px;padding:4px 8px" hx-get="/api/repos/{{ r.name }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button> <button class="btn" style="font-size:11px;padding:4px 8px" hx-post="/api/repos/{{ r.name }}/update" hx-swap="none">Fetch</button> <button class="btn" style="font-size:11px;padding:4px 8px;color:#f85149" hx-delete="/api/repos/{{ r.name }}" hx-confirm="Delete {{ r.name }}?" hx-swap="none" hx-on:after-request="htmx.trigger('#repos-list', 'load')">Delete</button>
-    </div>
-</div>
-{% endfor %}
+<div class="table-wrap"><div class="table-scroll">
+<table class="table">
+    <thead><tr><th>Name</th><th>Source</th><th>Branch</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+        {% for r in repos %}
+        <tr>
+            <td><span class="name">{{ r.name }}</span></td>
+            <td class="mono muted" style="font-size:11px;word-break:break-all">{{ r.source[:64] }}</td>
+            <td>{{ r.branch }}</td>
+            <td>{% if r.cloned %}<span class="status status--done">cloned</span>{% else %}<span class="status status--waiting">pending</span>{% endif %}</td>
+            <td>
+                <div class="row" style="justify-content:flex-end">
+                    <button class="btn btn--ghost btn--sm" hx-get="/api/repos/{{ r.name }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
+                    <button class="btn btn--ghost btn--sm" hx-post="/api/repos/{{ r.name }}/update" hx-swap="none">Fetch</button>
+                    <button class="btn btn--danger btn--sm" hx-delete="/api/repos/{{ r.name }}" hx-confirm="Delete {{ r.name }}?" hx-swap="none" hx-on:after-request="htmx.trigger('#repos-list', 'load')">Delete</button>
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div></div>
 {% else %}
-<div class="empty-state"><p>No repositories configured. Add one to get started.</p></div>
+<div class="empty">No repositories configured. Add one to get started.</div>
 {% endif %}

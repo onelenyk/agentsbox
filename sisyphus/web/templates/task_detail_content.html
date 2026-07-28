@@ -1,41 +1,38 @@
-<div class="detail-panel">
+<div class="panel">
     {% if parent %}
-    <div style="font-size:12px;margin-bottom:10px;color:#8b949e">↑ Part of <a href="/tasks/{{ parent.id }}" style="color:#58a6ff">{{ parent.goal }}</a></div>
+    <div class="breadcrumb">↑ Part of <a href="/tasks/{{ parent.id }}">{{ parent.goal }}</a></div>
     {% endif %}
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px">
-        <h2 style="margin:0">{{ task.goal }}</h2>
-        <div style="display:flex;align-items:center;gap:12px;flex-shrink:0">
-            <span class="status-badge {{ task.status }}">{{ task.status }}</span>
-            <button class="btn btn-danger" style="font-size:12px;padding:4px 10px"
+    <div class="panel__head">
+        <h2>{{ task.goal }}</h2>
+        <div class="row" style="flex-shrink:0">
+            <span class="status status--{{ task.status }}">{{ task.status }}</span>
+            <button class="btn btn--danger btn--sm"
                     hx-post="/api/tasks/{{ task.id }}/delete"
                     hx-confirm="Delete this task and its whole thread? This can't be undone."
                     hx-swap="none">Delete</button>
         </div>
     </div>
-    {% if task.repo %}
-    <div class="info-row"><span class="label">Repo</span><span class="value">{{ task.repo }}</span></div>
-    {% endif %}
-    <div class="info-row"><span class="label">Handled by</span><span class="value">{{ task.agent ~ ' (solo)' if task.agent else 'orchestrator' }}</span></div>
-    <div class="info-row"><span class="label">Created</span><span class="value">{{ task.created_at[:19] }}</span></div>
+
+    {% if task.repo %}<div class="kv"><span class="k">Repo</span><span class="v">{{ task.repo }}</span></div>{% endif %}
+    <div class="kv"><span class="k">Handled by</span><span class="v">{{ task.agent ~ ' (solo)' if task.agent else 'orchestrator' }}</span></div>
+    <div class="kv"><span class="k">Created</span><span class="v mono">{{ task.created_at[:19] }}</span></div>
 
     {% if result and (result.summary or result.change or result.commits) %}
-    <div style="margin-top:18px;border:1px solid #30363d;border-radius:8px;padding:16px;background:#0d1117">
-        <div style="font-family:monospace;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:#8b949e;margin-bottom:10px">Result</div>
-        {% if result.summary %}
-        <div style="font-size:14px;white-space:pre-wrap;margin-bottom:12px">{{ result.summary }}</div>
-        {% endif %}
+    <div class="result">
+        <div class="result__label">Result</div>
+        {% if result.summary %}<div class="result__summary">{{ result.summary }}</div>{% endif %}
         {% if result.change %}
         <div style="margin-bottom:10px">
             {% if result.change.url %}
-            <a href="{{ result.change.url }}" target="_blank" class="btn btn-primary" style="font-size:12px;padding:5px 12px">View change ↗</a>
+            <a href="{{ result.change.url }}" target="_blank" class="btn btn--primary btn--sm">View change ↗</a>
             {% elif result.change.attachment %}
-            <a href="/api/v1/tasks/{{ task.id }}/attachments/{{ result.change.attachment }}" target="_blank" class="btn btn-secondary" style="font-size:12px;padding:5px 12px">📎 View diff ({{ result.change.attachment }})</a>
+            <a href="/api/v1/tasks/{{ task.id }}/attachments/{{ result.change.attachment }}" target="_blank" class="btn btn--ghost btn--sm">📎 View diff ({{ result.change.attachment }})</a>
             {% endif %}
-            <div style="font-family:monospace;font-size:12px;color:#8b949e;white-space:pre-wrap;margin-top:8px">{{ result.change.text }}</div>
+            <div class="result__commits" style="margin-top:8px">{{ result.change.text }}</div>
         </div>
         {% endif %}
         {% if result.commits %}
-        <div style="font-family:monospace;font-size:12px;color:#8b949e">
+        <div class="result__commits">
             {% for c in result.commits %}<div>✓ {{ c }}</div>{% endfor %}
         </div>
         {% endif %}
@@ -43,38 +40,36 @@
     {% endif %}
 
     {% if children %}
-    <div style="margin-top:18px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-            <h3 style="margin:0">Subtasks</h3>
-            <span class="badge" style="background:#21262d;color:#8b949e">{{ children|selectattr('status','equalto','done')|list|length }}/{{ children|length }} done</span>
-        </div>
-        {% for c in children %}
-        <a href="/tasks/{{ c.id }}" style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border:1px solid #21262d;border-radius:6px;margin-bottom:6px;text-decoration:none;color:#c9d1d9">
-            <span style="font-size:13px">{{ c.goal }} <span style="color:#8b949e">({{ c.repo or 'no repo' }})</span></span>
-            <span class="status-badge {{ c.status }}">{{ c.status }}</span>
-        </a>
-        {% endfor %}
-    </div>
+    <div class="section-title">Subtasks <span class="chip">{{ children|selectattr('status','equalto','done')|list|length }}/{{ children|length }} done</span></div>
+    {% for c in children %}
+    <a class="subtask" href="/tasks/{{ c.id }}">
+        <span class="goal">{{ c.goal }} <span class="muted">({{ c.repo or 'no repo' }})</span></span>
+        <span class="status status--{{ c.status }}">{{ c.status }}</span>
+    </a>
+    {% endfor %}
     {% endif %}
 
-    <h3 style="margin-top:20px">Thread</h3>
-    {% for m in messages %}
-    <div style="padding:8px 0;border-bottom:1px solid #21262d">
-        <div style="display:flex;gap:8px;align-items:baseline">
-            <span style="font-size:12px;font-weight:600;padding:1px 8px;border-radius:10px;background:{% if m.kind == 'external' %}#3d2f10;color:#e3a008{% elif m.author == 'human' %}#1f3a5f;color:#58a6ff{% elif m.author == 'orchestrator' %}#2d1f3d;color:#bc8cff{% else %}#1b3a2d;color:#3fb950{% endif %}">{% if m.kind == 'external' %}🔔 {% endif %}{{ m.author }}/{{ m.kind }}</span>
-            <span style="color:#8b949e;font-size:11px">{{ m.created_at[:19] }}</span>
+    <div class="section-title">Thread</div>
+    <div class="thread">
+        {% for m in messages %}
+        {% set tone = 'external' if m.kind == 'external' else ('human' if m.author == 'human' else ('orchestrator' if m.author == 'orchestrator' else 'worker')) %}
+        <div class="msg">
+            <div class="msg__head">
+                <span class="tag tag--{{ tone }}">{% if m.kind == 'external' %}🔔 {% endif %}{{ m.author }}/{{ m.kind }}</span>
+                <span class="msg__time">{{ m.created_at[:19] }}</span>
+            </div>
+            <div class="msg__body">{{ m.text }}</div>
+            {% if m.attachment %}
+            <div class="msg__att">📎 <a href="/api/v1/tasks/{{ task.id }}/attachments/{{ m.attachment }}" target="_blank">{{ m.attachment }}</a></div>
+            {% endif %}
         </div>
-        <div style="margin-top:4px;font-size:13px;white-space:pre-wrap">{{ m.text }}</div>
-        {% if m.attachment %}
-        <div style="margin-top:4px;font-size:12px">📎 <a href="/api/v1/tasks/{{ task.id }}/attachments/{{ m.attachment }}" target="_blank">{{ m.attachment }}</a></div>
-        {% endif %}
+        {% else %}
+        <div class="empty">No messages yet.</div>
+        {% endfor %}
     </div>
-    {% else %}
-    <div style="color:#8b949e;font-size:13px;padding:8px 0">No messages yet.</div>
-    {% endfor %}
 
-    <form hx-post="/api/tasks/{{ task.id }}/messages" hx-swap="none" style="margin-top:10px" onsubmit="setTimeout(() => this.reset(), 0)">
-        <textarea name="text" required rows="2" placeholder="Reply…" style="width:100%;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:8px;font-size:13px;resize:vertical"></textarea>
-        <button type="submit" class="btn btn-primary" style="margin-top:6px">Reply</button>
+    <form class="composer" hx-post="/api/tasks/{{ task.id }}/messages" hx-swap="none" onsubmit="setTimeout(() => this.reset(), 0)">
+        <textarea name="text" required rows="2" placeholder="Reply…"></textarea>
+        <button type="submit" class="btn btn--primary" style="margin-top:8px">Reply</button>
     </form>
 </div>

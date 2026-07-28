@@ -1,10 +1,16 @@
 {% extends "base.html" %}
+{% block title %}Repos — Sisyphus{% endblock %}
 {% block content %}
-<div class="header-bar">
-    <h1>Repositories</h1>
-    <button class="btn btn-primary" hx-get="/api/repos/new-form" hx-target="body" hx-swap="beforeend">+ Add Repo</button>
+<div class="page-head">
+    <div>
+        <h1>Repositories</h1>
+        <div class="sub">Git repos agents work in — local paths or remotes (GitHub/GitLab).</div>
+    </div>
+    <div class="actions">
+        <button class="btn btn--primary" hx-get="/api/repos/new-form" hx-target="body" hx-swap="beforeend">+ Add Repo</button>
+    </div>
 </div>
 <div id="repos-list" hx-get="/api/repos/list" hx-trigger="load, reposUpdated from:body" hx-swap="innerHTML">
-    <div class="empty-state"><p>Loading...</p></div>
+    <div class="empty">Loading…</div>
 </div>
 {% endblock %}

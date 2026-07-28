@@ -1,22 +1,24 @@
-<div class="modal-overlay active" onclick="if(event.target===this)this.remove()">
+<div class="modal-backdrop" onclick="if(event.target===this)this.remove()">
     <div class="modal" onclick="event.stopPropagation()">
-        <h2>Edit {{ runner.name }}</h2>
+        <div class="modal__head"><h2>Edit {{ runner.name }}</h2></div>
         <form hx-post="/api/runners/{{ runner.id }}/edit" hx-target="#modal-container" hx-swap="outerHTML" hx-on:after-request="htmx.trigger('#runners-list', 'load')">
-            <div class="form-group"><label>Name</label><input type="text" name="name" value="{{ runner.name }}" required></div>
-            <div class="form-group"><label>Binary</label><input type="text" name="binary" value="{{ runner.binary }}" required></div>
-            <div class="form-group"><label>Type</label>
-                <select name="type">
-                    {% for t in ['opencode','claude-cli','ollama','openai-api','custom'] %}
-                    <option value="{{ t }}" {{ 'selected' if runner.type==t else '' }}>{{ t }}</option>
-                    {% endfor %}
-                </select>
+            <div class="modal__body">
+                <div class="field"><label>Name</label><input type="text" name="name" value="{{ runner.name }}" required></div>
+                <div class="field"><label>Binary</label><input type="text" name="binary" value="{{ runner.binary }}" required></div>
+                <div class="field"><label>Type</label>
+                    <select name="type">
+                        {% for t in ['opencode','claude-cli','ollama','openai-api','custom'] %}
+                        <option value="{{ t }}" {{ 'selected' if runner.type==t else '' }}>{{ t }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="field"><label>Model</label><input type="text" name="model" value="{{ runner.model }}"></div>
+                <div class="field"><label>API Key Env</label><input type="text" name="api_key_env" value="{{ runner.api_key_env }}"></div>
+                <div class="field"><label>Base URL</label><input type="text" name="base_url" value="{{ runner.base_url }}"></div>
             </div>
-            <div class="form-group"><label>Model</label><input type="text" name="model" value="{{ runner.model }}"></div>
-            <div class="form-group"><label>API Key Env</label><input type="text" name="api_key_env" value="{{ runner.api_key_env }}"></div>
-            <div class="form-group"><label>Base URL</label><input type="text" name="base_url" value="{{ runner.base_url }}"></div>
-            <div class="form-actions">
-                <button type="button" class="btn" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
-                <button type="submit" class="btn btn-primary">Save</button>
+            <div class="modal__actions">
+                <button type="button" class="btn btn--ghost" onclick="this.closest('.modal-backdrop').remove()">Cancel</button>
+                <button type="submit" class="btn btn--primary">Save</button>
             </div>
         </form>
     </div>

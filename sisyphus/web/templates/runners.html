@@ -1,11 +1,16 @@
 {% extends "base.html" %}
-{% block title %}Runners — Sisyphus{% endblock %}
+{% block title %}Runtimes — Sisyphus{% endblock %}
 {% block content %}
-<div class="header-bar">
-    <h1>AI Runners</h1>
-    <button class="btn btn-primary" hx-get="/api/runners/new-form" hx-target="body" hx-swap="beforeend">+ Add Runner</button>
+<div class="page-head">
+    <div>
+        <h1>Runtimes</h1>
+        <div class="sub">Local CLI backends that run agents (opencode, claude-cli, …).</div>
+    </div>
+    <div class="actions">
+        <button class="btn btn--primary" hx-get="/api/runners/new-form" hx-target="body" hx-swap="beforeend">+ Add Runtime</button>
+    </div>
 </div>
 <div id="runners-list" hx-get="/api/runners/list" hx-trigger="load, runnersUpdated from:body" hx-swap="innerHTML">
-    <div class="empty-state"><p>Loading...</p></div>
+    <div class="empty">Loading…</div>
 </div>
 {% endblock %}
