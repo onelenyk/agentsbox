@@ -1,5 +1,10 @@
 # Plan — Configurable Agents + orchestrator-as-agent (all AI via local CLI)
 
+> **Status: IMPLEMENTED (all 3 phases).** Phase 1 — DB-backed Agent entity +
+> Agents UI. Phase 2 — orchestrator is an agent; decisions are MCP tool calls,
+> no raw model HTTP anywhere in core. Phase 3 — task-level agent selection
+> (single-agent mode). 317 tests green. Sections below are the design record.
+
 ## Motivation
 
 Two goals, one underlying change:
