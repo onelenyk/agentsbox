@@ -79,3 +79,21 @@ class TestOrchestratorAgent:
     def test_listed_by_kind(self, agents):
         names = {a["name"] for a in list_agents(kind="orchestrator")}
         assert names == {"orchestrator"}
+
+
+class TestUpgradeSeeding:
+    def test_orchestrator_added_to_a_worker_only_db(self, db_path):
+        """A DB seeded before the orchestrator agent existed (Phase 1) gains it
+        on the next init — otherwise _decide would have no agent to run."""
+        from core.agents import get_agent, init_agents_table
+        from core.db import get_conn
+        # simulate the old (worker-only) state
+        conn = get_conn()
+        conn.execute("DELETE FROM agents WHERE kind = 'orchestrator'")
+        conn.commit()
+        conn.close()
+        assert get_agent("orchestrator") is None
+
+        init_agents_table()   # upgrade re-adds it, workers untouched
+        assert get_agent("orchestrator")["kind"] == "orchestrator"
+        assert len(list_agents(kind="worker")) == 3
