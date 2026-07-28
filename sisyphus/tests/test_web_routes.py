@@ -329,3 +329,18 @@ def test_agents_delete_builtin_blocked(db_path):
     from core.agents import init_agents_table
     init_agents_table()
     assert _make_client().post("/api/agents/engineer/delete").status_code == 422
+
+
+def test_new_task_form_has_agent_dropdown(db_path):
+    r = _make_client().get("/api/tasks/new-form")
+    assert "Auto" in r.text and "orchestrator dispatches" in r.text
+    assert "engineer (solo)" in r.text
+
+
+def test_task_detail_shows_handling_agent(db_path):
+    from core import store
+    solo = store.create_task("solo task", repo="sisyphus", agent="engineer")
+    auto = store.create_task("auto task", repo="sisyphus")
+    c = _make_client()
+    assert "engineer (solo)" in c.get(f"/api/tasks/{solo['id']}/detail").text
+    assert "orchestrator" in c.get(f"/api/tasks/{auto['id']}/detail").text

@@ -15,6 +15,7 @@
     {% if task.repo %}
     <div class="info-row"><span class="label">Repo</span><span class="value">{{ task.repo }}</span></div>
     {% endif %}
+    <div class="info-row"><span class="label">Handled by</span><span class="value">{{ task.agent ~ ' (solo)' if task.agent else 'orchestrator' }}</span></div>
     <div class="info-row"><span class="label">Created</span><span class="value">{{ task.created_at[:19] }}</span></div>
 
     {% if result and (result.summary or result.change or result.commits) %}

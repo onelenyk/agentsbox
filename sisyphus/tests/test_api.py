@@ -149,3 +149,26 @@ def test_delete_unknown_task_404(db_path):
 def test_runner_not_found_404(db_path):
     init_runners_table()
     assert _client().post("/api/v1/runners/nope/set-default").status_code == 404
+
+
+def test_create_task_with_valid_agent(db_path):
+    c = _client()
+    with patch("core.orchestrator.emit"):
+        r = c.post("/api/v1/tasks", json={"goal": "solo", "repo": "sisyphus", "agent": "engineer"})
+    assert r.status_code == 200
+
+
+def test_create_task_with_unknown_agent_rejected(db_path):
+    c = _client()
+    with patch("core.orchestrator.emit") as mock_emit:
+        r = c.post("/api/v1/tasks", json={"goal": "solo", "repo": "sisyphus", "agent": "nope"})
+    assert r.status_code == 422
+    mock_emit.assert_not_called()
+
+
+def test_create_task_with_orchestrator_as_agent_rejected(db_path):
+    """The orchestrator isn't a worker — can't pin it as a solo handler."""
+    c = _client()
+    with patch("core.orchestrator.emit"):
+        r = c.post("/api/v1/tasks", json={"goal": "solo", "repo": "sisyphus", "agent": "orchestrator"})
+    assert r.status_code == 422
