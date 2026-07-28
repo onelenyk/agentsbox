@@ -293,3 +293,39 @@ def test_task_detail_shows_result_card_with_diff_link(db_path):
     assert "done and dusted" in response.text
     assert f"/api/v1/tasks/{task['id']}/attachments/change.patch" in response.text
     assert "abc12345" in response.text
+
+
+def test_agents_page_and_list(db_path):
+    from core.agents import init_agents_table
+    init_agents_table()
+    client = _make_client()
+    assert client.get("/agents").status_code == 200
+    listed = client.get("/api/agents/list")
+    assert "engineer" in listed.text
+    assert "built-in" in listed.text
+
+
+def test_agents_new_form_has_tool_catalog(db_path):
+    from core.agents import init_agents_table
+    init_agents_table()
+    r = _make_client().get("/api/agents/new-form")
+    assert 'name="tools"' in r.text
+    assert "get_context" in r.text and "commit" in r.text
+
+
+def test_agents_create_and_delete_via_form(db_path):
+    from core.agents import init_agents_table, get_agent
+    init_agents_table()
+    client = _make_client()
+    r = client.post("/api/agents", data={"name": "docs-writer", "kind": "worker",
+                                          "persona": "writes docs", "tools": ["get_context", "finish"]})
+    assert r.status_code == 200
+    assert get_agent("docs-writer")["tools"] == ["get_context", "finish"]
+    assert client.post("/api/agents/docs-writer/delete").status_code == 200
+    assert get_agent("docs-writer") is None
+
+
+def test_agents_delete_builtin_blocked(db_path):
+    from core.agents import init_agents_table
+    init_agents_table()
+    assert _make_client().post("/api/agents/engineer/delete").status_code == 422

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from pathlib import Path
+from typing import List
 from fastapi import APIRouter, Request, Form
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -188,6 +189,73 @@ async def runners_health(runner_id: str):
     await health_check(runner_id)
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "runnersUpdated"
+    return resp
+
+# ── Agents ──────────────────────────────────────────────────────────────
+
+@router.get("/agents", response_class=HTMLResponse)
+async def agents_page(request: Request):
+    return _tmpl().TemplateResponse("agents.html", {"request": request, "active_page": "agents"})
+
+@router.get("/api/agents/list", response_class=HTMLResponse)
+async def agents_list_view(request: Request):
+    from core.agents import list_agents
+    from core.runners import list_runners
+    runners = {r["id"]: r["name"] for r in list_runners()}
+    return _tmpl().TemplateResponse("agents_list.html",
+                                    {"request": request, "agents": list_agents(), "runners": runners})
+
+@router.get("/api/agents/new-form", response_class=HTMLResponse)
+async def agents_new_form(request: Request):
+    from web.agent_mcp import TOOLS
+    from core.runners import list_runners
+    return _tmpl().TemplateResponse("agents_new.html",
+                                    {"request": request, "catalog": list(TOOLS), "runners": list_runners()})
+
+@router.post("/api/agents")
+async def agents_add(name: str = Form(...), kind: str = Form("worker"), persona: str = Form(""),
+                     model: str = Form(""), runner_id: str = Form(""), tools: List[str] = Form([])):
+    from core.agents import add_agent, get_agent
+    from fastapi.responses import Response
+    if not name.strip() or get_agent(name):
+        return Response(status_code=409)
+    add_agent(name, persona, tools, runner_id or None, model, kind)
+    resp = Response(status_code=200)
+    resp.headers["HX-Trigger"] = "agentsUpdated"
+    return resp
+
+@router.get("/api/agents/{name}/edit-form", response_class=HTMLResponse)
+async def agents_edit_form(request: Request, name: str):
+    from core.agents import get_agent
+    from web.agent_mcp import TOOLS
+    from core.runners import list_runners
+    agent = get_agent(name)
+    if not agent:
+        return HTMLResponse("not found", status_code=404)
+    return _tmpl().TemplateResponse("agents_edit.html",
+                                    {"request": request, "agent": agent,
+                                     "catalog": list(TOOLS), "runners": list_runners()})
+
+@router.post("/api/agents/{name}/edit")
+async def agents_edit(name: str, persona: str = Form(""), model: str = Form(""),
+                      runner_id: str = Form(""), tools: List[str] = Form([])):
+    from core.agents import update_agent
+    from fastapi.responses import Response
+    update_agent(name, persona=persona, model=model, runner_id=runner_id or None, tools=tools)
+    resp = Response(status_code=200)
+    resp.headers["HX-Trigger"] = "agentsUpdated"
+    return resp
+
+@router.post("/api/agents/{name}/delete")
+async def agents_delete(name: str):
+    from core.agents import delete_agent
+    from fastapi.responses import Response
+    try:
+        delete_agent(name)
+    except ValueError:
+        return Response(status_code=422)   # built-in — protected
+    resp = Response(status_code=200)
+    resp.headers["HX-Trigger"] = "agentsUpdated"
     return resp
 
 # ── Tasks (Task+Thread system) ──────────────────────────────────────────
