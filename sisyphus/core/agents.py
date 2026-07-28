@@ -47,12 +47,16 @@ def init_agents_table() -> None:
         )
     """)
     conn.commit()
-    if conn.execute("SELECT COUNT(*) FROM agents").fetchone()[0] == 0:
-        _seed_builtins(conn)
+    if conn.execute("SELECT COUNT(*) FROM agents WHERE kind = 'worker'").fetchone()[0] == 0:
+        _seed_workers(conn)
+    # Ensure the orchestrator agent exists even on a DB seeded before it did
+    # (Phase 1 → Phase 2 upgrade) — without it, _decide has no agent to run.
+    if conn.execute("SELECT COUNT(*) FROM agents WHERE kind = 'orchestrator'").fetchone()[0] == 0:
+        _seed_orchestrator(conn)
     conn.close()
 
 
-def _seed_builtins(conn) -> None:
+def _seed_workers(conn) -> None:
     """Seed the built-in worker agents from the legacy roles dict — same
     personas and tool allowlists, so existing behaviour is preserved."""
     from .roles import ROLES
@@ -66,10 +70,15 @@ def _seed_builtins(conn) -> None:
             (f"agent-{uuid4().hex[:8]}", name, spec["persona"],
              json.dumps(spec["tools"]), now, now),
         )
+    conn.commit()
 
-    # The orchestrator itself is an agent — its decisions are tool calls, so no
-    # direct model HTTP. Persona + tool list come from core.orchestrator.
+
+def _seed_orchestrator(conn) -> None:
+    """Seed the orchestrator agent — its decisions are tool calls, so no direct
+    model HTTP. Persona + tool list come from core.orchestrator."""
     from .orchestrator import ORCHESTRATOR_PERSONA, ORCHESTRATOR_TOOLS
+
+    now = _now()
     conn.execute(
         """INSERT INTO agents (id, name, persona, tools, runner_id, model,
            kind, enabled, is_builtin, created_at, updated_at)
