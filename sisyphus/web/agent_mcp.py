@@ -12,8 +12,7 @@ request (notifications get 202). Mounted in the daemon where the DB is writable.
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
-from core import sessions, store
-from core.roles import role_tools
+from core import agents, sessions, store
 
 agent_mcp = APIRouter()
 
@@ -169,10 +168,10 @@ TOOLS = {
 }
 
 
-def _tools_for_role(role: str) -> list:
+def _tools_for_agent(agent_name: str) -> list:
     return [
         {"name": name, "description": TOOLS[name][0], "inputSchema": TOOLS[name][1]}
-        for name in role_tools(role)
+        for name in agents.agent_tools(agent_name) if name in TOOLS
     ]
 
 
@@ -203,14 +202,14 @@ def _handle(req: dict, session):
                 "error": {"code": -32001, "message": "invalid or missing session token"}}
 
     if method == "tools/list":
-        return {"jsonrpc": "2.0", "id": req_id, "result": {"tools": _tools_for_role(session["role"])}}
+        return {"jsonrpc": "2.0", "id": req_id, "result": {"tools": _tools_for_agent(session["role"])}}
 
     if method == "tools/call":
         name = params.get("name", "")
         args = params.get("arguments", {})
-        allowed = role_tools(session["role"])
+        allowed = agents.agent_tools(session["role"])
         if name not in allowed:
-            raw = {"error": f"tool {name!r} not permitted for role {session['role']!r}"}
+            raw = {"error": f"tool {name!r} not permitted for agent {session['role']!r}"}
         else:
             try:
                 raw = TOOLS[name][2](session, **args)
