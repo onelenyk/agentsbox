@@ -17,8 +17,10 @@ def _tmpl():
 @router.on_event("startup")
 async def startup():
     from core.runners import init_runners_table
+    from core.agents import init_agents_table
     init_db()
     init_runners_table()  # daemon is self-sufficient: seed the runners table
+    init_agents_table()   # and the agents (personas + tool allowlists)
 
     import web.agent_mcp as agent_mcp
     from core import orchestrator
