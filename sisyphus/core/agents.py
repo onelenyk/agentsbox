@@ -1,0 +1,159 @@
+"""Agents — a worker's persona + tool allowlist + which CLI runtime runs it.
+
+Promotes the old hardcoded roles (core/roles.py) into a configurable, DB-backed
+entity, mirroring core/runners.py. An Agent is:
+
+    { name, persona, tools[], runner_id?, model, kind, enabled, is_builtin }
+
+  - persona   : system-prompt text describing the agent.
+  - tools     : allowlist — a subset of the agent-MCP tool catalog
+                (web/agent_mcp.py TOOLS). The token-scoped server enforces it.
+  - runner_id : which CLI runtime (runners.id) executes it; NULL = default runner.
+  - model     : optional per-agent model override.
+  - kind      : "worker" (does the task) or "orchestrator" (decides — Phase 2).
+
+The built-in worker agents (explorer/engineer/reviewer) are seeded from the
+legacy roles dict so behaviour is unchanged during the migration.
+"""
+import json
+from datetime import datetime, timezone
+from typing import List, Optional
+from uuid import uuid4
+
+from .db import get_conn
+
+AGENT_KINDS = ("worker", "orchestrator")
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def init_agents_table() -> None:
+    conn = get_conn()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS agents (
+            id         TEXT PRIMARY KEY,
+            name       TEXT NOT NULL UNIQUE,
+            persona    TEXT NOT NULL DEFAULT '',
+            tools      TEXT NOT NULL DEFAULT '[]',   -- json array of tool names
+            runner_id  TEXT,                          -- NULL = default runner
+            model      TEXT NOT NULL DEFAULT '',
+            kind       TEXT NOT NULL DEFAULT 'worker',
+            enabled    INTEGER NOT NULL DEFAULT 1,
+            is_builtin INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    if conn.execute("SELECT COUNT(*) FROM agents").fetchone()[0] == 0:
+        _seed_builtins(conn)
+    conn.close()
+
+
+def _seed_builtins(conn) -> None:
+    """Seed the built-in worker agents from the legacy roles dict — same
+    personas and tool allowlists, so existing behaviour is preserved."""
+    from .roles import ROLES
+
+    now = _now()
+    for name, spec in ROLES.items():
+        conn.execute(
+            """INSERT INTO agents (id, name, persona, tools, runner_id, model,
+               kind, enabled, is_builtin, created_at, updated_at)
+               VALUES (?, ?, ?, ?, NULL, '', 'worker', 1, 1, ?, ?)""",
+            (f"agent-{uuid4().hex[:8]}", name, spec["persona"],
+             json.dumps(spec["tools"]), now, now),
+        )
+    conn.commit()
+
+
+def _row(row) -> Optional[dict]:
+    if row is None:
+        return None
+    d = dict(row)
+    d["tools"] = json.loads(d.get("tools") or "[]")
+    return d
+
+
+def list_agents(kind: Optional[str] = None) -> List[dict]:
+    conn = get_conn()
+    if kind:
+        rows = conn.execute(
+            "SELECT * FROM agents WHERE kind = ? ORDER BY is_builtin DESC, name ASC", (kind,)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM agents ORDER BY is_builtin DESC, name ASC"
+        ).fetchall()
+    conn.close()
+    return [_row(r) for r in rows]
+
+
+def get_agent(name: str) -> Optional[dict]:
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM agents WHERE name = ?", (name,)).fetchone()
+    conn.close()
+    return _row(row)
+
+
+def agent_tools(name: str) -> List[str]:
+    a = get_agent(name)
+    return list(a["tools"]) if a else []
+
+
+def add_agent(name: str, persona: str = "", tools: Optional[list] = None,
+              runner_id: Optional[str] = None, model: str = "",
+              kind: str = "worker") -> dict:
+    if kind not in AGENT_KINDS:
+        raise ValueError(f"invalid kind {kind!r}; must be one of {AGENT_KINDS}")
+    now = _now()
+    aid = f"agent-{uuid4().hex[:8]}"
+    conn = get_conn()
+    conn.execute(
+        """INSERT INTO agents (id, name, persona, tools, runner_id, model,
+           kind, enabled, is_builtin, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)""",
+        (aid, name, persona, json.dumps(tools or []), runner_id, model, kind, now, now),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM agents WHERE id = ?", (aid,)).fetchone()
+    conn.close()
+    return _row(row)
+
+
+def update_agent(name: str, **fields) -> Optional[dict]:
+    allowed = {"persona", "tools", "runner_id", "model", "kind", "enabled"}
+    updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
+    if "tools" in updates and isinstance(updates["tools"], list):
+        updates["tools"] = json.dumps(updates["tools"])
+    if "kind" in updates and updates["kind"] not in AGENT_KINDS:
+        raise ValueError(f"invalid kind {updates['kind']!r}")
+    if not updates:
+        return get_agent(name)
+    updates["updated_at"] = _now()
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    values = list(updates.values()) + [name]
+    conn = get_conn()
+    conn.execute(f"UPDATE agents SET {set_clause} WHERE name = ?", values)
+    conn.commit()
+    conn.close()
+    return get_agent(name)
+
+
+def delete_agent(name: str) -> bool:
+    """Delete a non-builtin agent. Built-ins are protected (they are the
+    orchestrator's known roster and the migration's source of truth)."""
+    conn = get_conn()
+    row = conn.execute("SELECT is_builtin FROM agents WHERE name = ?", (name,)).fetchone()
+    if row is None:
+        conn.close()
+        return False
+    if row["is_builtin"]:
+        conn.close()
+        raise ValueError(f"cannot delete built-in agent {name!r}")
+    conn.execute("DELETE FROM agents WHERE name = ?", (name,))
+    conn.commit()
+    conn.close()
+    return True
