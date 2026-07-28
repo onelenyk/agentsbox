@@ -253,3 +253,36 @@ def test_propose_subtasks_denied_for_engineer(db_path):
     _, token = _session(db_path, "engineer")
     out = _call(_client(), token, "propose_subtasks", {"items": [{"goal": "x"}]})
     assert out["result"]["isError"] is True  # not in the engineer's tool allowlist
+
+
+# ── orchestrator decision tools ─────────────────────────────────────────
+
+
+def test_decide_tool_records_decision_on_session(db_path):
+    task_id, token = _session(db_path, "orchestrator")
+    out = _call(_client(), token, "decide_spawn_worker",
+                {"agent": "engineer", "instruction": "fix it", "why": "start"})
+    assert out["result"]["isError"] is False
+    dec = sessions.resolve(token)["decision"]
+    assert dec["action"] == "spawn_worker"
+    assert dec["role"] == "engineer"        # agent name lands in the Decision.role field
+    assert dec["instruction"] == "fix it"
+
+
+def test_decide_complete_records_done(db_path):
+    task_id, token = _session(db_path, "orchestrator")
+    _call(_client(), token, "decide_complete", {"why": "all children shipped"})
+    assert sessions.resolve(token)["decision"]["action"] == "done"
+
+
+def test_decide_spawn_worker_requires_agent(db_path):
+    _, token = _session(db_path, "orchestrator")
+    out = _call(_client(), token, "decide_spawn_worker", {"agent": ""})
+    assert out["result"]["isError"] is True
+
+
+def test_worker_cannot_call_decision_tools(db_path):
+    _, token = _session(db_path, "engineer")
+    out = _call(_client(), token, "decide_complete", {"why": "x"})
+    assert out["result"]["isError"] is True   # not in the engineer's allowlist
+    assert "not permitted" in json.loads(out["result"]["content"][0]["text"])["error"]

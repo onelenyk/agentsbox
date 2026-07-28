@@ -133,6 +133,49 @@ def _approve(session, summary="", **_):
     return {"ok": True, "verdict": "approved"}
 
 
+# ── Orchestrator decision tools ─────────────────────────────────────────
+# The orchestrator agent calls exactly one of these per pass. They do NOT
+# execute the action — they record the chosen Decision on the session, which
+# core.orchestrator._decide reads back and hands to _execute (so all the
+# spawn/worktree/disk logic stays in one place and the guards still apply).
+
+
+def _record(session, decision: dict):
+    session["decision"] = decision
+    return {"ok": True}
+
+
+def _decide_spawn_worker(session, agent="", instruction="", why="", **_):
+    if not agent.strip():
+        return {"error": "agent required (the worker agent to run)"}
+    return _record(session, {"action": "spawn_worker", "role": agent,
+                             "instruction": instruction, "why": why})
+
+
+def _decide_spawn_task(session, subtasks=None, why="", **_):
+    if not subtasks:
+        return {"error": "subtasks required: a list of {repo, goal}"}
+    return _record(session, {"action": "spawn_task", "subtasks": subtasks, "why": why})
+
+
+def _decide_ask_human(session, question="", why="", **_):
+    if not question.strip():
+        return {"error": "question required"}
+    return _record(session, {"action": "ask_human", "question": question, "why": why})
+
+
+def _decide_complete(session, why="", **_):
+    return _record(session, {"action": "done", "why": why})
+
+
+def _decide_fail(session, reason="", why="", **_):
+    return _record(session, {"action": "fail", "reason": reason, "why": why or reason})
+
+
+def _decide_note(session, text="", why="", **_):
+    return _record(session, {"action": "note", "why": why or text})
+
+
 def _request_changes(session, reason="", **_):
     if not reason.strip():
         return {"error": "reason required for request_changes"}
@@ -165,6 +208,19 @@ TOOLS = {
                 {"type": "object", "properties": {"summary": {"type": "string"}}}, _approve),
     "request_changes": ("Request changes with a reason (a reviewer's way to finish).",
                         {"type": "object", "properties": {"reason": {"type": "string"}}, "required": ["reason"]}, _request_changes),
+    # Orchestrator decision tools (kind=orchestrator agents).
+    "decide_spawn_worker": ("Decide: run a worker agent on the task.",
+                            {"type": "object", "properties": {"agent": {"type": "string"}, "instruction": {"type": "string"}, "why": {"type": "string"}}, "required": ["agent"]}, _decide_spawn_worker),
+    "decide_spawn_task": ("Decide: fan out across repos (one child task per {repo, goal}).",
+                          {"type": "object", "properties": {"subtasks": {"type": "array", "items": {"type": "object", "properties": {"repo": {"type": "string"}, "goal": {"type": "string"}}, "required": ["goal"]}}, "why": {"type": "string"}}, "required": ["subtasks"]}, _decide_spawn_task),
+    "decide_ask_human": ("Decide: pause and ask the human a question.",
+                         {"type": "object", "properties": {"question": {"type": "string"}, "why": {"type": "string"}}, "required": ["question"]}, _decide_ask_human),
+    "decide_complete": ("Decide: the task is done (needs reviewer approval or all children done).",
+                        {"type": "object", "properties": {"why": {"type": "string"}}}, _decide_complete),
+    "decide_fail": ("Decide: the task cannot be completed.",
+                    {"type": "object", "properties": {"reason": {"type": "string"}, "why": {"type": "string"}}, "required": ["reason"]}, _decide_fail),
+    "decide_note": ("Decide: record a thought and take another turn.",
+                    {"type": "object", "properties": {"text": {"type": "string"}, "why": {"type": "string"}}}, _decide_note),
 }
 
 

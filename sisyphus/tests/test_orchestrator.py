@@ -462,3 +462,31 @@ class TestFanout:
         assert decision.role == "reviewer"
         if bg:
             bg.cancel()
+
+
+class TestDecideViaAgent:
+    @pytest.mark.asyncio
+    async def test_decide_translates_recorded_decision(self, db_path):
+        from unittest.mock import AsyncMock
+        from core.orchestrator import _decide
+        task = store.create_task("g", repo="sisyphus")
+        with patch("core.worker.spawn_decider",
+                   AsyncMock(return_value={"action": "note", "why": "thinking"})):
+            d = await _decide(task, "thread")
+        assert d.action == "note" and d.why == "thinking"
+
+    @pytest.mark.asyncio
+    async def test_decide_falls_back_to_ask_human_when_no_decision(self, db_path):
+        from unittest.mock import AsyncMock
+        from core.orchestrator import _decide
+        task = store.create_task("g", repo="sisyphus")
+        with patch("core.worker.spawn_decider", AsyncMock(return_value=None)):
+            d = await _decide(task, "thread")
+        assert d.action == "ask_human"
+
+    def test_no_raw_model_http_in_orchestrator(self):
+        import inspect
+        import core.orchestrator as o
+        src = inspect.getsource(o)
+        assert "urllib" not in src
+        assert "chat/completions" not in src
