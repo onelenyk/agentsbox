@@ -1,6 +1,6 @@
 <div class="board">
     {% for status in ["active", "waiting", "done", "failed"] %}
-    <div class="board-col">
+    <div class="board-col board-col--{{ status }}">
         <div class="board-col__head">
             <span class="label">{{ status }}</span>
             <span class="count tnum">{{ columns[status]|length }}</span>

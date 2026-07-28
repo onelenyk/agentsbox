@@ -164,6 +164,17 @@ code { font-family: var(--mono); font-size: .92em; color: var(--text-2); }
 }
 .board-col__body { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 
+/* per-status column color */
+.board-col--active  { --col: var(--accent); --col-bg: var(--accent-bg); }
+.board-col--waiting { --col: var(--warn);   --col-bg: var(--warn-bg); }
+.board-col--done    { --col: var(--good);   --col-bg: var(--good-bg); }
+.board-col--failed  { --col: var(--bad);    --col-bg: var(--bad-bg); }
+.board-col { box-shadow: inset 0 2px 0 var(--col, transparent); }
+.board-col__head { background: var(--col-bg, transparent); }
+.board-col__head .label { color: var(--col, var(--text-2)); }
+.board-col__head .count { color: var(--col, var(--muted)); background: var(--col-bg, var(--panel-2)); }
+.board-col .task-card:hover { border-color: var(--col, var(--border-2)); }
+
 .task-card {
   display: block; background: var(--panel-2); border: 1px solid var(--border);
   border-radius: var(--r); padding: 12px; cursor: pointer;
