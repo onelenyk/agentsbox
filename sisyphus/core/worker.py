@@ -16,10 +16,9 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from . import sessions, store
+from . import agents, sessions, store
 from .launcher import launch_agent
 from .repos import get_repo
-from .roles import get_role
 from .worktree import create_worktree, get_repo_name_from_url, init_bare_clone, set_access
 
 DAEMON_URL = os.environ.get("SISYPHUS_DAEMON_URL", "http://127.0.0.1:7677")
@@ -210,10 +209,19 @@ async def spawn_worker(
 ) -> None:
     """Launch one worker for *task_id*. Fire-and-forget: the outcome lands on
     the thread via the agent's own tool calls, not in a return value."""
-    role_def = get_role(role)
+    role_def = agents.get_agent(role)   # `role` is now an agent name
+    if not role_def:
+        raise ValueError(f"unknown agent {role!r}")
     task = store.get_task(task_id)
     if not task:
         raise ValueError(f"unknown task {task_id}")
+
+    # An agent may pin a specific CLI runtime; NULL runner_id → default runner.
+    runner_name = None
+    if role_def.get("runner_id"):
+        from .runners import get_runner
+        r = get_runner(role_def["runner_id"])
+        runner_name = r["name"] if r else None
 
     bare_path, branch = _prepare_repo(task_id, repo_name or task.get("repo"))
     if bare_path:
@@ -262,6 +270,7 @@ async def spawn_worker(
     result = await launch_agent(
         agent_def, prompt, worktree_path, output_dir,
         timeout=timeout, idle_timeout=idle_timeout, step_id=f"{task_id}-{role}",
+        runner_name=runner_name,
         # Our own agent, defined in the project config above — see
         # _write_opencode_config's docstring for why a borrowed built-in name
         # ("build") wasn't durable.

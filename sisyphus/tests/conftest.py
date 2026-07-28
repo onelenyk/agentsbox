@@ -28,4 +28,9 @@ def db_path(tmp_path):
     core.db.DB_PATH = str(db)
     core.db.init_db()
 
+    # Seed the built-in agents (explorer/engineer/reviewer) — the worker and
+    # agent-MCP now resolve personas/tools from the agents table, as at startup.
+    from core.agents import init_agents_table
+    init_agents_table()
+
     yield str(db)
