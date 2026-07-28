@@ -183,3 +183,42 @@ class TestCrashFallback:
         kinds = [m["kind"] for m in store.get_thread(task["id"])]
         assert kinds.count("worker_finished") == 0  # only the real "result", no fallback
         assert "result" in kinds
+
+
+class TestSpawnDecider:
+    @pytest.mark.asyncio
+    async def test_returns_decision_recorded_by_the_agent(self, db_path, tmp_path, monkeypatch):
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+        from core.agents import init_agents_table
+        init_agents_table()
+        from core.worker import spawn_decider
+        task = store.create_task("coordinate", repo="sisyphus")
+
+        async def fake_launch(*a, **k):
+            # simulate the orchestrator agent calling a decide_* tool
+            for s in list(sessions._SESSIONS.values()):
+                if s["task_id"] == task["id"]:
+                    s["decision"] = {"action": "note", "why": "thinking"}
+            return AgentResult(status="completed", summary="ok")
+
+        with patch("core.worker.launch_agent", AsyncMock(side_effect=fake_launch)):
+            dec = await spawn_decider(task["id"], "orchestrator", "the thread")
+        assert dec == {"action": "note", "why": "thinking"}
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_agent_records_nothing(self, db_path, tmp_path, monkeypatch):
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+        from core.agents import init_agents_table
+        init_agents_table()
+        from core.worker import spawn_decider
+        task = store.create_task("coordinate", repo="sisyphus")
+        with patch("core.worker.launch_agent",
+                   AsyncMock(return_value=AgentResult(status="completed", summary="ok"))):
+            dec = await spawn_decider(task["id"], "orchestrator", "thread")
+        assert dec is None
+
+    @pytest.mark.asyncio
+    async def test_unknown_agent_returns_none(self, db_path):
+        from core.worker import spawn_decider
+        task = store.create_task("x", repo="sisyphus")
+        assert await spawn_decider(task["id"], "nope", "thread") is None

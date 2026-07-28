@@ -66,6 +66,17 @@ def _seed_builtins(conn) -> None:
             (f"agent-{uuid4().hex[:8]}", name, spec["persona"],
              json.dumps(spec["tools"]), now, now),
         )
+
+    # The orchestrator itself is an agent — its decisions are tool calls, so no
+    # direct model HTTP. Persona + tool list come from core.orchestrator.
+    from .orchestrator import ORCHESTRATOR_PERSONA, ORCHESTRATOR_TOOLS
+    conn.execute(
+        """INSERT INTO agents (id, name, persona, tools, runner_id, model,
+           kind, enabled, is_builtin, created_at, updated_at)
+           VALUES (?, 'orchestrator', ?, ?, NULL, '', 'orchestrator', 1, 1, ?, ?)""",
+        (f"agent-{uuid4().hex[:8]}", ORCHESTRATOR_PERSONA,
+         json.dumps(ORCHESTRATOR_TOOLS), now, now),
+    )
     conn.commit()
 
 

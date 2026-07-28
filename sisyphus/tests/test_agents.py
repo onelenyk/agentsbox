@@ -66,3 +66,16 @@ class TestCrud:
     def test_unknown_agent_is_none(self, agents):
         assert get_agent("nope") is None
         assert agent_tools("nope") == []
+
+
+class TestOrchestratorAgent:
+    def test_seeded_as_orchestrator_kind(self, agents):
+        o = get_agent("orchestrator")
+        assert o is not None
+        assert o["kind"] == "orchestrator"
+        assert "decide_spawn_worker" in o["tools"]
+        assert "decide_complete" in o["tools"]
+
+    def test_listed_by_kind(self, agents):
+        names = {a["name"] for a in list_agents(kind="orchestrator")}
+        assert names == {"orchestrator"}

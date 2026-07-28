@@ -11,12 +11,7 @@ is expressed as spawn_worker(role="reviewer", ...), whose verdict comes back
 as the next worker_finished event.
 """
 import asyncio
-import json
 import logging
-import os
-import time
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Literal, Optional
 
@@ -96,104 +91,72 @@ async def dispatch_forever() -> None:
             _park_on_error(event.task_id)
 
 
-SYSTEM_PROMPT = """You are the Sisyphus orchestrator. You coordinate work on a \
-task by choosing exactly ONE next action. You never do the work yourself, and \
-you never judge whether a worker's output is good enough — delegate that \
-evaluation to a reviewer worker instead.
+# The orchestrator is itself an Agent (seeded into the agents table). Its
+# persona is the decision doctrine below; its tools are the decision tools it
+# calls (one per pass) — served by web/agent_mcp.py, scoped by its agent token.
+# There is NO direct model HTTP anywhere: the decision comes from a local CLI
+# session, exactly like a worker's.
+ORCHESTRATOR_TOOLS = [
+    "get_context", "decide_spawn_worker", "decide_spawn_task",
+    "decide_ask_human", "decide_complete", "decide_fail", "decide_note",
+]
 
-Reply with EXACTLY one JSON object and nothing else, matching one of:
-{"action": "spawn_worker", "role": "explorer"|"engineer"|"reviewer", "instruction": "...", "why": "..."}
-{"action": "spawn_task", "subtasks": [{"repo": "ios-app", "goal": "..."}, {"repo": "android-app", "goal": "..."}], "why": "..."}
-{"action": "ask_human", "question": "...", "why": "..."}
-{"action": "note", "why": "..."}
-{"action": "done", "why": "..."}
-{"action": "fail", "reason": "...", "why": "..."}
-{"action": "noop", "why": "..."}
+ORCHESTRATOR_PERSONA = """You are the Sisyphus orchestrator. You coordinate work \
+on a task by choosing exactly ONE next action per turn. You never do the work \
+yourself, and you never judge whether a worker's output is good enough — delegate \
+that to a reviewer worker instead.
 
-"why" is always required: a short one-line reason for the choice.
-Only choose "done" after a reviewer has APPROVED on the thread — if none has,
-spawn a reviewer instead.
-
-Use "spawn_task" to fan a task out across multiple repos: when the work spans
-separate codebases (e.g. a ticket needing an iOS and an Android implementation),
-create one child task per repo. A worker's "plan" message lists the proposed
-{repo, goal} splits — turn it into subtasks. Each child then runs on its own.
-Once children exist, they report back as "[<status>] child ..." messages: a task
-whose children are all done is itself done (no separate reviewer needed); if any
-child failed, spawn_task a fix-child on that repo or ask the human.
+Read the task thread, then CALL exactly one decision tool:
+- decide_spawn_worker(agent, instruction, why) — run a worker agent
+  (e.g. "explorer", "engineer", "reviewer") on the task.
+- decide_spawn_task(subtasks, why) — fan out across repos: one child task per
+  {repo, goal}. Use when the work spans separate codebases (e.g. a ticket needing
+  an iOS and an Android implementation). A worker's "plan" message lists the
+  proposed splits — turn it into subtasks. Children report back as
+  "[<status>] child ..." messages; a task whose children are all done is itself
+  done (no separate reviewer needed); if any child failed, spawn a fix-child.
+- decide_ask_human(question, why) — pause and ask the human.
+- decide_complete(why) — the task is done. ONLY after a reviewer has APPROVED on
+  the thread (or all children are done); otherwise spawn a reviewer instead.
+- decide_fail(reason, why) — the task cannot be completed.
+- decide_note(text, why) — record a thought and take another turn.
 
 Messages prefixed with "[external]" are forge events about the change you shipped
-(CI results, reviews, a merge). React to them:
-- CI failed → spawn an engineer to diagnose and fix it.
-- Reviewer requested changes / left comments → spawn an engineer to address them.
-- The change was merged → the work has landed; choose "done".
-"""
+(CI results, reviews, a merge): CI failed → spawn an engineer; changes requested
+→ spawn an engineer; merged → decide_complete.
+
+"why" is always a short one-line reason. Call the tool as a real invocation, not
+as text; make exactly one call, then stop."""
 
 
-def _decide_via_llm_sync(thread_text: str) -> dict:
-    """Ask the default runner's model for one decision. Synchronous (run via
-    asyncio.to_thread) since it's a single blocking HTTP call, not a coding
-    session — no opencode subprocess needed for this."""
-    from .runners import get_default_runner
-
-    runner = get_default_runner()
-    if not runner:
-        return {"action": "fail", "reason": "no runner configured", "why": "cannot decide without a model"}
-
-    api_key = os.environ.get(runner.get("api_key_env", "") or "", "")
-    base_url = (runner.get("base_url") or "https://openrouter.ai/api/v1").rstrip("/")
-    model = runner.get("model") or "deepseek/deepseek-chat"
-
-    body = json.dumps({
-        "model": model,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": thread_text},
-        ],
-    }).encode()
-    req = urllib.request.Request(
-        base_url + "/chat/completions", data=body, method="POST",
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
-    )
-    # A transient network hiccup on our OWN decision call must not permanently
-    # fail (or silently stall) a task. Retry a few times, and on genuine
-    # exhaustion park via ask_human rather than fail — a human reply re-triggers
-    # a fresh decision. (URLError/socket.timeout/TimeoutError are all OSError.)
-    last_err = None
-    for attempt in range(3):
-        try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                payload = json.loads(resp.read())
-            content = payload["choices"][0]["message"]["content"]
-            return json.loads(content)
-        except (urllib.error.URLError, OSError) as exc:
-            last_err = exc
-            time.sleep(2 * (attempt + 1))
-            continue
-        except (KeyError, IndexError, json.JSONDecodeError) as exc:
-            # The model answered but not with a parseable decision — recoverable
-            # by a human nudge, so don't permanently fail the task.
-            return {
-                "action": "ask_human",
-                "question": "I couldn't read a clear next-step decision. Please advise, or reply to have me retry.",
-                "why": f"unparseable decision: {exc}",
-            }
-    return {
-        "action": "ask_human",
-        "question": (
-            f"My decision service was unreachable after retries ({last_err}). "
-            "Check it, then reply here to resume."
-        ),
-        "why": "decision service unreachable",
-    }
+def orchestrator_agent_name() -> str:
+    """The agent that decides for a task. Today the single built-in
+    'orchestrator'; a hook for per-task orchestrators later."""
+    from . import agents
+    orchestrators = agents.list_agents(kind="orchestrator")
+    return orchestrators[0]["name"] if orchestrators else "orchestrator"
 
 
 async def _decide(task: dict, thread_text: str) -> Decision:
-    raw = await asyncio.to_thread(_decide_via_llm_sync, thread_text)
+    """Produce one decision by running the orchestrator AGENT (a local CLI
+    session) — no direct model HTTP. The agent calls exactly one decision tool,
+    which records the choice; we read it back here."""
+    from .worker import spawn_decider
+
+    raw = await spawn_decider(task["id"], orchestrator_agent_name(), thread_text)
+    if not raw:
+        # The decider produced no decision (crash/timeout/misbehaviour). Park via
+        # ask_human rather than fail — a human reply re-triggers a fresh pass.
+        return Decision(
+            action="ask_human",
+            question=("I couldn't produce a next-step decision (the orchestrator "
+                      "agent returned nothing). Check the runtime, then reply to resume."),
+            why="decider produced no decision",
+        )
     try:
         return Decision(**raw)
     except ValidationError as exc:
-        return Decision(action="fail", reason=f"invalid decision: {exc}", why="malformed decision from the model")
+        return Decision(action="fail", reason=f"invalid decision: {exc}", why="malformed decision from the agent")
 
 
 def _pass_count(task_id: str) -> int:

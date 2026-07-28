@@ -67,7 +67,7 @@ def cleanup_task(task_id: str, deep: bool = False) -> None:
     patterns = [
         f"{ws}/repos/worktrees/{task_id}_*",   # per-role worktrees
         f"{ws}/repos/{task_id}_*",             # per-task bare clone
-        f"{ws}/scratch/{task_id}",             # repo-less scratch dir
+        f"{ws}/scratch/{task_id}*",            # repo-less + orchestrator scratch dirs
         f"{ws}/runs/{task_id}",                # run logs
     ]
     if deep:
@@ -293,3 +293,58 @@ async def spawn_worker(
         # time would be circular. By call time both modules are fully loaded.
         from .orchestrator import emit
         emit(task_id, "worker_finished")
+
+
+def _build_decider_prompt(agent: dict, thread_text: str) -> str:
+    """Prompt for the orchestrator agent: read the thread, call exactly one
+    decision tool. The persona (decision doctrine) comes from the agent row."""
+    prefix = f"{_MCP_SERVER_NAME}_"
+    tools = ", ".join(prefix + t for t in agent["tools"] if t.startswith("decide_"))
+    return (
+        "# How this run ends — read this first\n"
+        "You are an orchestrator. Read the task thread below and choose EXACTLY "
+        f"ONE next action by CALLING one of these tools: {tools}. Call it as a "
+        "real tool invocation (like `read` or `bash`), not as text describing it. "
+        "Make exactly one call, then stop. A plain-text reply does nothing.\n\n"
+        f"{agent['persona']}\n\n"
+        f"## Task thread\n{thread_text}\n"
+    )
+
+
+async def spawn_decider(task_id: str, agent_name: str, thread_text: str,
+                        timeout: Optional[int] = 180, idle_timeout: Optional[int] = 90):
+    """Run the orchestrator agent as a local CLI session to produce ONE decision.
+    Returns the recorded decision dict (from its decide_* tool call), or None if
+    it produced none (crash/timeout). No thread messages, no worktree — it runs
+    in an ephemeral scratch dir and only reads the thread."""
+    agent = agents.get_agent(agent_name)
+    if not agent:
+        return None
+
+    runner_name = None
+    if agent.get("runner_id"):
+        from .runners import get_runner
+        r = get_runner(agent["runner_id"])
+        runner_name = r["name"] if r else None
+
+    ws = os.environ.get("WORKSPACE_ROOT", "/workspace")
+    scratch = f"{ws}/scratch/{task_id}-orch"
+    os.makedirs(scratch, exist_ok=True)
+    token = sessions.mint(task_id, agent_name, worktree=scratch)
+    _write_opencode_config(scratch, token)
+
+    prompt = _build_decider_prompt(agent, thread_text)
+    output_dir = f"{ws}/runs/{task_id}/resources/orchestrator"
+    os.makedirs(output_dir, exist_ok=True)
+
+    agent_def = {"name": agent_name, "opencode_config": {}}
+    await launch_agent(
+        agent_def, prompt, scratch, output_dir,
+        timeout=timeout, idle_timeout=idle_timeout, step_id=f"{task_id}-orchestrator",
+        runner_name=runner_name, agent=_WORKER_AGENT,
+    )
+
+    session = sessions.resolve(token)
+    decision = session.get("decision") if session else None
+    sessions.revoke(token)
+    return decision
