@@ -138,6 +138,74 @@ async def runner_set_default(name: str):
     return {"success": True, "name": name}
 
 
+# ── Agents ─────────────────────────────────────────────────────────────
+
+
+class AddAgent(BaseModel):
+    name: str
+    persona: str = ""
+    tools: list = []
+    runner_id: str = ""
+    model: str = ""
+    kind: str = "worker"
+
+
+class UpdateAgent(BaseModel):
+    persona: str = None
+    tools: list = None
+    runner_id: str = None
+    model: str = None
+    enabled: int = None
+
+
+@api.get("/agents")
+async def list_agents_ep(kind: str = ""):
+    from core.agents import list_agents
+    return {"agents": list_agents(kind or None)}
+
+
+@api.get("/agents/tool-catalog")
+async def agent_tool_catalog():
+    """The full set of agent-MCP tools an agent can be granted, so a UI can
+    render the allowlist as checkboxes."""
+    from web.agent_mcp import TOOLS
+    return {"tools": [{"name": n, "description": TOOLS[n][0]} for n in TOOLS]}
+
+
+@api.post("/agents")
+async def add_agent_ep(body: AddAgent):
+    from core.agents import add_agent, get_agent
+    if get_agent(body.name):
+        raise HTTPException(status_code=409, detail=f"agent {body.name!r} already exists")
+    try:
+        a = add_agent(body.name, body.persona, body.tools,
+                      body.runner_id or None, body.model, body.kind)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"success": True, "agent": a}
+
+
+@api.patch("/agents/{name}")
+async def update_agent_ep(name: str, body: UpdateAgent):
+    from core.agents import get_agent, update_agent
+    if not get_agent(name):
+        raise HTTPException(status_code=404, detail=f"agent {name!r} not found")
+    a = update_agent(name, **body.model_dump(exclude_none=True))
+    return {"success": True, "agent": a}
+
+
+@api.delete("/agents/{name}")
+async def delete_agent_ep(name: str):
+    from core.agents import delete_agent
+    try:
+        ok = delete_agent(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"agent {name!r} not found")
+    return {"success": True, "name": name}
+
+
 # ── Tasks ──────────────────────────────────────────────────────────────
 
 
