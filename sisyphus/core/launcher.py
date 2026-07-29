@@ -34,6 +34,8 @@ class AgentResult:
     duration_ms: float = 0
     raw_stdout: str = ""
     raw_stderr: str = ""
+    usage: Optional[dict] = None   # token/cost summary parsed from the runner output
+    model: str = ""                # the model that ran (from the runner config)
 
 
 def _derive_run_id(output_dir: str) -> str:
@@ -279,10 +281,16 @@ async def launch_agent(
     except Exception:
         pass
 
+    # Token/cost usage is reported even on a timeout/cancel (work happened
+    # before the cutoff), so parse it regardless of terminal status.
+    from .usage import parse_usage
+    usage = parse_usage(stdout_str)
+    model = runner.get("model", "") if isinstance(runner, dict) else ""
+
     if status == "cancelled":
-        return AgentResult(status="cancelled", duration_ms=duration)
+        return AgentResult(status="cancelled", duration_ms=duration, usage=usage, model=model)
     if status == "timeout":
-        return AgentResult(status="timeout", duration_ms=duration, error=err)
+        return AgentResult(status="timeout", duration_ms=duration, error=err, usage=usage, model=model)
 
     # Success/failure here is meaningless for MCP-based workers — the caller
     # (core.worker) judges the outcome by whether the agent-MCP session was
@@ -290,4 +298,5 @@ async def launch_agent(
     return AgentResult(
         status="completed", duration_ms=duration,
         raw_stdout=stdout_str, raw_stderr=stderr_str,
+        usage=usage, model=model,
     )
