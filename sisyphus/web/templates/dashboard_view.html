@@ -1,0 +1,77 @@
+{% set ov = d.ov %}{% set t = ov.tasks %}{% set u = ov.usage %}{% set a = ov.activity %}
+<div class="kpis">
+    <div class="kpi kpi--live"><div class="l">Active</div><div class="v">{{ t.by_status.get('active', 0) }}</div><div class="d">{{ t.by_status.get('waiting', 0) }} waiting</div></div>
+    <div class="kpi"><div class="l">Done</div><div class="v">{{ t.done }}</div><div class="d">{{ t.completion_rate ~ '% completion' if t.completion_rate is not none else '—' }}</div></div>
+    <div class="kpi kpi--violet"><div class="l">Orchestrator passes</div><div class="v">{{ a.orchestrator_passes }}</div><div class="d">across {{ t.total }} tasks</div></div>
+    <div class="kpi kpi--amber"><div class="l">Total cost</div><div class="v">${{ '%.4f'|format(u.totals.cost) }}</div><div class="d">{{ '{:,}'.format(u.totals.tokens) }} tokens</div></div>
+</div>
+
+<div class="dash-grid">
+    <div class="stack">
+        <section class="panel">
+            <div class="panel__h"><span class="led {{ 'live' if d.active else 'idle' }}"></span><span class="t">Agents at work</span><span class="c">{{ d.active|selectattr('running')|list|length }} running</span></div>
+            <div class="panel__b">
+                {% for x in d.active %}
+                <a class="live-row" href="/tasks/{{ x.id }}">
+                    <div class="who"><span class="led {{ 'live' if x.running else 'idle' }}"></span><span class="role">{{ x.role }}</span></div>
+                    <div class="goal">{{ x.goal }} <small>· {{ x.repo or 'no repo' }}</small></div>
+                    <div class="meta">{{ 'running' if x.running else x.state }}</div>
+                </a>
+                {% else %}
+                <div class="empty">No active tasks — the board is quiet.</div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="panel">
+            <div class="panel__h"><span class="t">Queue · waiting</span><span class="c">{{ d.waiting|length }}</span></div>
+            <div class="panel__b">
+                {% for w in d.waiting %}
+                <a class="q-row" href="/tasks/{{ w.id }}"><span class="status status--waiting">waiting</span><span class="g">{{ w.goal }}</span><span class="id">{{ w.id }}</span></a>
+                {% else %}
+                <div class="empty">Nothing waiting on a human.</div>
+                {% endfor %}
+            </div>
+        </section>
+    </div>
+
+    <div class="stack">
+        <section class="panel">
+            <div class="panel__h"><span class="t">Cost by agent</span><span class="c">${{ '%.4f'|format(u.totals.cost) }}</span></div>
+            <div class="panel__b" style="padding:14px 16px">
+                {% if u.by_agent %}
+                {% set amax = (u.by_agent|map(attribute='cost')|list|max) or 0.0001 %}
+                <div class="bars">
+                    {% for r in u.by_agent %}
+                    <div class="bar-row"><span class="cap">{{ r.agent or '—' }}</span><span class="bar-track"><span class="bar-fill" style="width:{{ (100*r.cost/amax)|round }}%"></span></span><span class="val">${{ '%.4f'|format(r.cost) }} · {{ r.runs }}×</span></div>
+                    {% endfor %}
+                </div>
+                {% else %}<div class="empty">No usage yet.</div>{% endif %}
+            </div>
+        </section>
+
+        {% if ov.created_by_day %}
+        <section class="panel">
+            <div class="panel__h"><span class="t">Throughput</span><span class="c">tasks/day</span></div>
+            <div class="panel__b" style="padding:12px 14px">
+                {% set dmax = (ov.created_by_day|map(attribute='n')|list|max) or 1 %}
+                <div class="spark">
+                    {% for day in ov.created_by_day %}<div class="col" title="{{ day.day }}: {{ day.n }}"><span style="--h:{{ (100*day.n/dmax)|round }}%"></span></div>{% endfor %}
+                </div>
+            </div>
+        </section>
+        {% endif %}
+
+        <section class="panel">
+            <div class="panel__h"><span class="t">Activity</span></div>
+            <div class="feed">
+                {% for m in d.recent %}
+                {% set tone = 'external' if m.kind == 'external' else ('human' if m.author == 'human' else ('orchestrator' if m.author == 'orchestrator' else 'worker')) %}
+                <div class="ev"><span class="tag tag--{{ tone }}">{{ m.author[:4] }}</span><span class="txt">{{ m.text[:80] }}</span></div>
+                {% else %}
+                <div class="empty">No activity yet.</div>
+                {% endfor %}
+            </div>
+        </section>
+    </div>
+</div>

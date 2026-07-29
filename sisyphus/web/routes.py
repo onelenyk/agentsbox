@@ -35,7 +35,16 @@ async def startup():
 
 @router.get("/", response_class=HTMLResponse)
 async def root():
-    return HTMLResponse('<meta http-equiv="refresh" content="0;url=/tasks">')
+    return HTMLResponse('<meta http-equiv="refresh" content="0;url=/dashboard">')
+
+@router.get("/dashboard", response_class=HTMLResponse)
+async def dashboard_page(request: Request):
+    return _tmpl().TemplateResponse("dashboard.html", {"request": request, "active_page": "dashboard"})
+
+@router.get("/api/dashboard/view", response_class=HTMLResponse)
+async def dashboard_view(request: Request):
+    from core.stats import dashboard
+    return _tmpl().TemplateResponse("dashboard_view.html", {"request": request, "d": dashboard()})
 
 @router.get("/runtime", response_class=HTMLResponse)
 async def runtime_page(request: Request):

@@ -10,6 +10,35 @@ from . import usage as _usage
 from .db import get_conn
 
 
+def dashboard() -> dict:
+    """Live operational snapshot for the Mission Control dashboard: the KPI/usage
+    overview plus what's active right now, the queue, and recent activity."""
+    ov = overview()
+    conn = get_conn()
+
+    active = []
+    for t in conn.execute("SELECT * FROM tasks WHERE status = 'active' ORDER BY updated_at DESC LIMIT 8"):
+        last = conn.execute(
+            "SELECT author, kind FROM messages WHERE task_id = ? ORDER BY seq DESC LIMIT 1",
+            (t["id"],)).fetchone()
+        running = bool(last and last["kind"] == "worker_started")
+        active.append({
+            "id": t["id"], "goal": t["goal"], "repo": t["repo"], "agent": t["agent"],
+            "running": running,
+            "role": (last["author"] if running else None) or (t["agent"] or "orchestrator"),
+            "state": "running" if running else "deciding",
+        })
+
+    waiting = [dict(r) for r in conn.execute(
+        "SELECT id, goal, repo FROM tasks WHERE status = 'waiting' ORDER BY updated_at DESC LIMIT 6")]
+
+    recent = [dict(r) for r in conn.execute(
+        "SELECT task_id, author, kind, text FROM messages ORDER BY id DESC LIMIT 10")]
+
+    conn.close()
+    return {"ov": ov, "active": active, "waiting": waiting, "recent": recent}
+
+
 def _seconds(a: str, b: str) -> Optional[float]:
     try:
         return (datetime.fromisoformat(b) - datetime.fromisoformat(a)).total_seconds()
