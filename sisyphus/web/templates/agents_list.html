@@ -1,28 +1,31 @@
 {% if agents %}
-<div class="table-wrap"><div class="table-scroll">
-<table class="table">
-    <thead><tr><th>Name</th><th>Kind</th><th>Tools</th><th>Runtime</th><th>Model</th><th></th></tr></thead>
-    <tbody>
-        {% for a in agents %}
-        <tr>
-            <td><span class="name">{{ a.name }}</span>{% if a.is_builtin %} <span class="badge">built-in</span>{% endif %}</td>
-            <td><span class="badge {{ 'badge--accent' if a.kind == 'orchestrator' else '' }}">{{ a.kind }}</span></td>
-            <td class="mono muted" style="font-size:11px">{{ a.tools|join(', ') or '—' }}</td>
-            <td>{{ runners.get(a.runner_id) or 'default' }}</td>
-            <td>{{ a.model or '—' }}</td>
-            <td>
-                <div class="row" style="justify-content:flex-end">
-                    <button class="btn btn--ghost btn--sm" hx-get="/api/agents/{{ a.name }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
-                    {% if not a.is_builtin %}
-                    <button class="btn btn--danger btn--sm" hx-post="/api/agents/{{ a.name }}/delete" hx-confirm="Delete agent {{ a.name }}?" hx-swap="none">Delete</button>
-                    {% endif %}
-                </div>
-            </td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-</div></div>
+<div class="card-grid">
+    {% for a in agents %}
+    <div class="ecard">
+        <div class="ecard__head">
+            <div class="ecard__glyph {{ 'violet' if a.kind == 'orchestrator' else '' }}">{{ '◎' if a.kind == 'orchestrator' else '✦' }}</div>
+            <div>
+                <div class="ecard__name">{{ a.name }}</div>
+                <div class="ecard__sub">{{ 'built-in' if a.is_builtin else 'custom' }}</div>
+            </div>
+            <span class="badge {{ 'badge--accent' if a.kind == 'orchestrator' else '' }} right">{{ a.kind }}</span>
+        </div>
+        {% if a.persona %}<div class="ecard__persona">{{ a.persona }}</div>{% endif %}
+        <div class="tool-chips">
+            {% for t in a.tools %}<span class="tc">{{ t }}</span>{% endfor %}
+        </div>
+        <div class="ecard__foot">
+            <span class="ecard__sub">runtime · {{ runners.get(a.runner_id) or 'default' }}{% if a.model %} · {{ a.model }}{% endif %}</span>
+            <div class="acts">
+                <button class="btn btn--ghost btn--sm" hx-get="/api/agents/{{ a.name }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
+                {% if not a.is_builtin %}
+                <button class="btn btn--danger btn--sm" hx-post="/api/agents/{{ a.name }}/delete" hx-confirm="Delete agent {{ a.name }}?" hx-swap="none">Delete</button>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
 {% else %}
 <div class="empty">No agents. Add one to get started.</div>
 {% endif %}
