@@ -19,9 +19,11 @@ def _tmpl():
 async def startup():
     from core.runners import init_runners_table
     from core.agents import init_agents_table
+    from core.usage import init_usage_table
     init_db()
     init_runners_table()  # daemon is self-sufficient: seed the runners table
     init_agents_table()   # and the agents (personas + tool allowlists)
+    init_usage_table()    # and the per-run token/cost ledger
 
     import web.agent_mcp as agent_mcp
     from core import orchestrator
@@ -190,6 +192,17 @@ async def runners_health(runner_id: str):
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "runnersUpdated"
     return resp
+
+# ── Statistics ──────────────────────────────────────────────────────────
+
+@router.get("/stats", response_class=HTMLResponse)
+async def stats_page(request: Request):
+    return _tmpl().TemplateResponse("stats.html", {"request": request, "active_page": "stats"})
+
+@router.get("/api/stats/view", response_class=HTMLResponse)
+async def stats_view(request: Request):
+    from core.stats import overview
+    return _tmpl().TemplateResponse("stats_view.html", {"request": request, "s": overview()})
 
 # ── Agents ──────────────────────────────────────────────────────────────
 

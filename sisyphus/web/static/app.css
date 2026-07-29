@@ -314,6 +314,35 @@ select { cursor: pointer; appearance: none;
 .check:hover { border-color: var(--border-2); }
 .check input { width: auto; }
 
+/* ── Stat cards & charts ─────────────────────────────────────────────── */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.stat {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--r-lg); padding: 16px 18px;
+}
+.stat .label { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.stat .value { font-size: 26px; font-weight: 650; letter-spacing: -0.02em; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.stat .value.accent { color: var(--accent); }
+.stat .value.good { color: var(--good); }
+.stat .sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+
+.cols-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 820px) { .cols-2 { grid-template-columns: 1fr; } }
+
+.bars { display: flex; flex-direction: column; gap: 7px; }
+.bar-row { display: grid; grid-template-columns: 92px 1fr auto; align-items: center; gap: 10px; font-size: 12px; }
+.bar-row .cap { color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar-track { height: 8px; background: var(--inset); border-radius: var(--r-pill); overflow: hidden; }
+.bar-fill { height: 100%; background: var(--accent); border-radius: var(--r-pill); min-width: 2px; }
+.bar-fill.good { background: var(--good); }
+.bar-row .val { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.spark { display: flex; align-items: flex-end; gap: 3px; height: 64px; }
+.spark .col { flex: 1; background: var(--accent-bg); border-radius: 3px 3px 0 0; min-height: 2px; position: relative; }
+.spark .col > span { position: absolute; inset: 0; top: auto; height: var(--h, 0%); background: var(--accent); border-radius: 3px 3px 0 0; }
+.spark-labels { display: flex; gap: 3px; margin-top: 5px; }
+.spark-labels span { flex: 1; text-align: center; font-size: 9px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
 /* ── Empty state ─────────────────────────────────────────────────────── */
 .empty { text-align: center; color: var(--muted); font-size: 13px; padding: 24px 12px; }
 

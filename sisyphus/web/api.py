@@ -138,6 +138,15 @@ async def runner_set_default(name: str):
     return {"success": True, "name": name}
 
 
+# ── Statistics ─────────────────────────────────────────────────────────
+
+
+@api.get("/stats")
+async def get_stats():
+    from core.stats import overview
+    return overview()
+
+
 # ── Agents ─────────────────────────────────────────────────────────────
 
 

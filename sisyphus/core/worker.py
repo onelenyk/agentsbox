@@ -277,6 +277,9 @@ async def spawn_worker(
         agent=_WORKER_AGENT,
     )
 
+    from .usage import record_run
+    record_run(task_id, role, result.model, result.usage, result.duration_ms)
+
     # If the worker never called finish()/approve()/request_changes(), its
     # session is still active — that's the crash/timeout fallback signal.
     if sessions.resolve(token) is not None:
@@ -338,11 +341,14 @@ async def spawn_decider(task_id: str, agent_name: str, thread_text: str,
     os.makedirs(output_dir, exist_ok=True)
 
     agent_def = {"name": agent_name, "opencode_config": {}}
-    await launch_agent(
+    result = await launch_agent(
         agent_def, prompt, scratch, output_dir,
         timeout=timeout, idle_timeout=idle_timeout, step_id=f"{task_id}-orchestrator",
         runner_name=runner_name, agent=_WORKER_AGENT,
     )
+
+    from .usage import record_run
+    record_run(task_id, agent_name, result.model, result.usage, result.duration_ms)
 
     session = sessions.resolve(token)
     decision = session.get("decision") if session else None

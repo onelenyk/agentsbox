@@ -32,7 +32,9 @@ def db_path(tmp_path):
     # personas/tools/runtimes from these tables, as the daemon does at startup.
     from core.runners import init_runners_table
     from core.agents import init_agents_table
+    from core.usage import init_usage_table
     init_runners_table()
     init_agents_table()
+    init_usage_table()
 
     yield str(db)
