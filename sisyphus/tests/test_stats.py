@@ -49,3 +49,21 @@ def test_stats_page_and_view(db_path):
     assert "Total cost" in view.text
     assert "Cost by agent" in view.text
     assert "engineer" in view.text
+
+
+def test_dashboard_page_and_view(db_path):
+    _seed(db_path)
+    c = TestClient(app)
+    assert c.get("/dashboard").status_code == 200
+    v = c.get("/api/dashboard/view")
+    assert v.status_code == 200
+    assert "Agents at work" in v.text
+    assert "Cost by agent" in v.text
+
+
+def test_dashboard_data_shape(db_path):
+    _seed(db_path)
+    from core.stats import dashboard
+    d = dashboard()
+    assert "ov" in d and "active" in d and "waiting" in d and "recent" in d
+    assert any(x["id"] for x in d["active"])   # the active seed task

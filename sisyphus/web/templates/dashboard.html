@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Mission Control — Sisyphus{% endblock %}
+{% block content %}
+<div class="page-head">
+    <div>
+        <h1>Mission Control</h1>
+        <div class="sub mono" id="dash-sub">live operational overview</div>
+    </div>
+    <span class="liveflag"><span class="led live"></span> LIVE</span>
+</div>
+<div id="dash" hx-get="/api/dashboard/view" hx-trigger="load, every 5s" hx-swap="innerHTML">
+    <div class="empty">Loading…</div>
+</div>
+{% endblock %}

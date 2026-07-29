@@ -82,7 +82,7 @@ def test_root(db_path):
     response = client.get("/")
     assert response.status_code == 200
     assert "refresh" in response.text.lower()
-    assert "/tasks" in response.text
+    assert "/dashboard" in response.text
 
 
 # ── Tests: Tasks (Task+Thread system) ────────────────────────────────────
