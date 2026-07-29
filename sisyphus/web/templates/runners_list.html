@@ -1,32 +1,30 @@
 {% if runners %}
-<div class="table-wrap"><div class="table-scroll">
-<table class="table">
-    <thead><tr><th>Name</th><th>Binary</th><th>Type</th><th>Model</th><th>Default</th><th>Health</th><th></th></tr></thead>
-    <tbody>
-        {% for r in runners %}
-        <tr>
-            <td><span class="name">{{ r.name }}</span></td>
-            <td><code>{{ r.binary }}</code></td>
-            <td>{{ r.type }}</td>
-            <td>{{ r.model or '—' }}</td>
-            <td>{% if r.is_default %}<span class="badge badge--accent">default</span>{% endif %}</td>
-            <td>
-                <span class="health {{ 'is-healthy' if r.health_status=='healthy' else ('is-unhealthy' if r.health_status=='unhealthy' else '') }}"><span class="dot"></span>{{ r.health_status }}</span>
-                {% if r.health_error %}<div style="font-size:10px;color:var(--bad);margin-top:3px">{{ r.health_error[:80] }}</div>{% endif %}
-            </td>
-            <td>
-                <div class="row" style="justify-content:flex-end">
-                    <button class="btn btn--ghost btn--sm" hx-post="/api/runners/{{ r.id }}/health" hx-swap="none">Check</button>
-                    {% if not r.is_default %}<button class="btn btn--ghost btn--sm" hx-post="/api/runners/{{ r.id }}/set-default" hx-swap="none" title="Set as default">★</button>{% endif %}
-                    <button class="btn btn--ghost btn--sm" hx-get="/api/runners/{{ r.id }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
-                    <button class="btn btn--danger btn--sm" hx-post="/api/runners/{{ r.id }}/delete" hx-confirm="Delete {{ r.name }}?" hx-swap="none">Delete</button>
-                </div>
-            </td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-</div></div>
+<div class="card-grid">
+    {% for r in runners %}
+    <div class="ecard">
+        <div class="ecard__head">
+            <div class="ecard__glyph green">▸</div>
+            <div>
+                <div class="ecard__name">{{ r.name }}</div>
+                <div class="health {{ 'is-healthy' if r.health_status == 'healthy' else ('is-unhealthy' if r.health_status == 'unhealthy' else '') }}" style="font-size:11px;margin-top:2px"><span class="dot"></span>{{ r.health_status }}</div>
+            </div>
+            {% if r.is_default %}<span class="badge badge--accent right">default</span>{% endif %}
+        </div>
+        <div class="term"><span class="p">$</span> {{ r.binary }}</div>
+        <div class="meta-line"><span class="k">model</span><span class="v">{{ r.model or '—' }}</span></div>
+        <div class="meta-line"><span class="k">type</span><span class="v">{{ r.type }}</span></div>
+        {% if r.health_error %}<div style="font-size:11px;color:var(--bad)">{{ r.health_error[:90] }}</div>{% endif %}
+        <div class="ecard__foot">
+            <div class="acts" style="margin-left:0">
+                <button class="btn btn--ghost btn--sm" hx-post="/api/runners/{{ r.id }}/health" hx-swap="none">Check</button>
+                {% if not r.is_default %}<button class="btn btn--ghost btn--sm" hx-post="/api/runners/{{ r.id }}/set-default" hx-swap="none">★ Default</button>{% endif %}
+                <button class="btn btn--ghost btn--sm" hx-get="/api/runners/{{ r.id }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
+                <button class="btn btn--danger btn--sm" hx-post="/api/runners/{{ r.id }}/delete" hx-confirm="Delete {{ r.name }}?" hx-swap="none">Delete</button>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
 {% else %}
 <div class="empty">No AI runners configured. Add one to get started.</div>
 {% endif %}

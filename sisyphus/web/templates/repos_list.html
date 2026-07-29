@@ -1,26 +1,26 @@
 {% if repos %}
-<div class="table-wrap"><div class="table-scroll">
-<table class="table">
-    <thead><tr><th>Name</th><th>Source</th><th>Branch</th><th>Status</th><th></th></tr></thead>
-    <tbody>
-        {% for r in repos %}
-        <tr>
-            <td><span class="name">{{ r.name }}</span></td>
-            <td class="mono muted" style="font-size:11px;word-break:break-all">{{ r.source[:64] }}</td>
-            <td>{{ r.branch }}</td>
-            <td>{% if r.cloned %}<span class="status status--done">cloned</span>{% else %}<span class="status status--waiting">pending</span>{% endif %}</td>
-            <td>
-                <div class="row" style="justify-content:flex-end">
-                    <button class="btn btn--ghost btn--sm" hx-get="/api/repos/{{ r.name }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
-                    <button class="btn btn--ghost btn--sm" hx-post="/api/repos/{{ r.name }}/update" hx-swap="none">Fetch</button>
-                    <button class="btn btn--danger btn--sm" hx-delete="/api/repos/{{ r.name }}" hx-confirm="Delete {{ r.name }}?" hx-swap="none" hx-on:after-request="htmx.trigger('#repos-list', 'load')">Delete</button>
-                </div>
-            </td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-</div></div>
+<div class="card-grid">
+    {% for r in repos %}
+    <div class="ecard">
+        <div class="ecard__head">
+            <div class="ecard__glyph green">⎇</div>
+            <div>
+                <div class="ecard__name">{{ r.name }}</div>
+                <div class="ecard__sub">⎇ {{ r.branch }}</div>
+            </div>
+            {% if r.cloned %}<span class="status status--done right">cloned</span>{% else %}<span class="status status--waiting right">pending</span>{% endif %}
+        </div>
+        <div class="term wrap">{{ r.source }}</div>
+        <div class="ecard__foot">
+            <div class="acts" style="margin-left:0">
+                <button class="btn btn--ghost btn--sm" hx-get="/api/repos/{{ r.name }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
+                <button class="btn btn--ghost btn--sm" hx-post="/api/repos/{{ r.name }}/update" hx-swap="none">Fetch</button>
+                <button class="btn btn--danger btn--sm" hx-delete="/api/repos/{{ r.name }}" hx-confirm="Delete {{ r.name }}?" hx-swap="none" hx-on:after-request="htmx.trigger('#repos-list', 'load')">Delete</button>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
 {% else %}
 <div class="empty">No repositories configured. Add one to get started.</div>
 {% endif %}
