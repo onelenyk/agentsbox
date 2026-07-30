@@ -534,3 +534,20 @@ class TestSingleAgentMode:
             decision, bg = await handle_event(task["id"], "worker_finished")
         assert decision.action == "fail"
         assert store.get_task(task["id"])["status"] == "failed"
+
+
+class TestSpawnFailureNeverStalls:
+    @pytest.mark.asyncio
+    async def test_unknown_agent_wakes_task_instead_of_hanging(self, db_path):
+        """The orchestrator hallucinating an agent name must NOT leave the task
+        stalled 'active' forever (regression: 'unknown agent hephaestus')."""
+        task = store.create_task("g", repo="sisyphus")
+        store.set_status(task["id"], "active")
+        decisions = _scripted([Decision(action="spawn_worker", role="hephaestus",
+                                        instruction="x", why="bogus agent")])
+        decision, bg = await handle_event(task["id"], "created", decide_fn=decisions)
+        assert decision.action == "spawn_worker"
+        await bg   # the safe wrapper runs the real spawn_worker → raises → recovers
+        kinds_text = [(m["kind"], m["text"]) for m in store.get_thread(task["id"])]
+        assert any(k == "worker_finished" and "failed to start" in t for k, t in kinds_text)
+        assert orchestrator._get_queue().qsize() >= 1   # an event was queued to re-decide

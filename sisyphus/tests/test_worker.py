@@ -222,3 +222,12 @@ class TestSpawnDecider:
         from core.worker import spawn_decider
         task = store.create_task("x", repo="sisyphus")
         assert await spawn_decider(task["id"], "nope", "thread") is None
+
+
+def test_decider_prompt_pins_the_agent_roster(db_path):
+    from core.worker import _build_decider_prompt
+    from core.agents import get_agent
+    p = _build_decider_prompt(get_agent("orchestrator"), "the thread",
+                              ["explorer", "engineer", "reviewer"])
+    assert "explorer, engineer, reviewer" in p
+    assert "MUST be one of" in p   # tells the model not to invent agent names
