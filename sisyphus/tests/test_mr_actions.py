@@ -92,3 +92,19 @@ class TestRoutes:
         mr, real, bare = _mr(db_path, tmp_path)
         TestClient(app).post(f"/api/mr/{mr['id']}/close")
         assert mergerequests.get_mr(mr["id"])["status"] == "closed"
+
+
+class TestBarePreservedForOpenMR:
+    def test_cleanup_keeps_bare_while_mr_open_then_reclaims(self, db_path, tmp_path, monkeypatch):
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+        from core.worker import cleanup_task
+        task = store.create_task("t", repo="r")
+        bare = tmp_path / "repos" / f"{task['id']}_r"
+        bare.mkdir(parents=True)
+        m = mergerequests.create_mr(task_id=task["id"], repo="r", source_branch="s",
+                                    target_branch="main", bare_path=str(bare))
+        cleanup_task(task["id"])            # open MR → bare must survive
+        assert bare.exists()
+        mergerequests.set_status(m["id"], "closed")
+        cleanup_task(task["id"])            # resolved → bare reclaimed
+        assert not bare.exists()

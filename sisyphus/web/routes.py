@@ -447,6 +447,8 @@ async def mr_merge(request: Request, mr_id: str):
         mergerequests.mark_merged(mr_id, res["sha"])
         store.post_message(mr["task_id"], "system", kind="note",
                            text=f"Merged {mr['source_branch']} into {res['target']} ({res['sha'][:8]}) in {mr['source_path']}")
+        from core.worker import cleanup_task
+        cleanup_task(mr["task_id"])   # MR resolved — reclaim the per-task bare clone
         mr = mergerequests.get_mr(mr_id)
         ctx = _mr_view_ctx(request, mr)
         ctx["flash"] = f"Merged into {res['target']} as {res['sha'][:8]} — reversible with git reset --hard @{{1}}"
@@ -462,6 +464,8 @@ async def mr_close(request: Request, mr_id: str):
     if not mr:
         return Response(status_code=404)
     mergerequests.set_status(mr_id, "closed")
+    from core.worker import cleanup_task
+    cleanup_task(mr["task_id"])   # MR resolved — reclaim the per-task bare clone
     return _tmpl().TemplateResponse("mr_modal.html", _mr_view_ctx(request, mergerequests.get_mr(mr_id)))
 
 @router.get("/api/tasks/{task_id}/detail", response_class=HTMLResponse)

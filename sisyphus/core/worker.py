@@ -66,10 +66,14 @@ def cleanup_task(task_id: str, deep: bool = False) -> None:
     ws = os.environ.get("WORKSPACE_ROOT", "/workspace")
     patterns = [
         f"{ws}/repos/worktrees/{task_id}_*",   # per-role worktrees
-        f"{ws}/repos/{task_id}_*",             # per-task bare clone
         f"{ws}/scratch/{task_id}*",            # repo-less + orchestrator scratch dirs
         f"{ws}/runs/{task_id}",                # run logs
     ]
+    # The per-task bare clone holds the branch a local Merge Request lands/merges
+    # from — keep it while an MR is still open (unless this is a full delete).
+    from . import mergerequests
+    if deep or not mergerequests.open_mr_exists(task_id):
+        patterns.append(f"{ws}/repos/{task_id}_*")   # per-task bare clone
     if deep:
         patterns.append(f"{ws}/tasks/{task_id}")   # attachments + saved patches
     for pattern in patterns:
