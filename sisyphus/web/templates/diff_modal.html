@@ -1,0 +1,12 @@
+<div class="modal-backdrop" onclick="if(event.target===this)this.remove()">
+    <div class="modal modal--wide" onclick="event.stopPropagation()">
+        <div class="modal__head" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+            <h2 class="mono" style="font-size:14px">📎 {{ filename }}</h2>
+            <button class="btn btn--ghost btn--sm" onclick="this.closest('.modal-backdrop').remove()">Close</button>
+        </div>
+        <div class="modal__body">
+            <div class="diffstat"><span style="color:var(--good)">+{{ adds }}</span> · <span style="color:var(--bad)">−{{ dels }}</span></div>
+            <div class="diff">{% for cls, ln in lines %}<span class="dl {{ cls }}">{{ ln }}</span>{% endfor %}</div>
+        </div>
+    </div>
+</div>

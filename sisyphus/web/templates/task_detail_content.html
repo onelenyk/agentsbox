@@ -26,7 +26,7 @@
             {% if result.change.url %}
             <a href="{{ result.change.url }}" target="_blank" class="btn btn--primary btn--sm">View change ↗</a>
             {% elif result.change.attachment %}
-            <a href="/api/v1/tasks/{{ task.id }}/attachments/{{ result.change.attachment }}" target="_blank" class="btn btn--ghost btn--sm">📎 View diff ({{ result.change.attachment }})</a>
+            <button type="button" class="btn btn--ghost btn--sm" hx-get="/api/tasks/{{ task.id }}/diff/{{ result.change.attachment }}" hx-target="#modal-container" hx-swap="innerHTML">📎 View diff</button>
             {% endif %}
             <div class="result__commits" style="margin-top:8px">{{ result.change.text }}</div>
         </div>
@@ -60,7 +60,7 @@
             </div>
             <div class="msg__body">{{ m.text }}</div>
             {% if m.attachment %}
-            <div class="msg__att">📎 <a href="/api/v1/tasks/{{ task.id }}/attachments/{{ m.attachment }}" target="_blank">{{ m.attachment }}</a></div>
+            <div class="msg__att">📎 <a href="#" hx-get="/api/tasks/{{ task.id }}/diff/{{ m.attachment }}" hx-target="#modal-container" hx-swap="innerHTML" onclick="return false">{{ m.attachment }}</a></div>
             {% endif %}
         </div>
         {% else %}
