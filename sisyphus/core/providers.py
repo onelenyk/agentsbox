@@ -95,7 +95,7 @@ def publish_change(session: dict, title: str, description: str) -> dict:
     branch = git_ops.task_branch(task_id)
 
     if platform == "local":
-        return _publish_local(task_id, bare, base, branch, title)
+        return _publish_local(task_id, bare, base, branch, title, task["repo"], source)
     if platform == "gitlab":
         return _publish_gitlab(bare, source, branch, base, title, description)
     if platform == "github":
@@ -103,17 +103,25 @@ def publish_change(session: dict, title: str, description: str) -> dict:
     return {"error": f"no publisher for platform {platform!r} — change is committed on {branch}"}
 
 
-def _publish_local(task_id: str, bare: str, base: str, branch: str, title: str) -> dict:
+def _publish_local(task_id: str, bare: str, base: str, branch: str, title: str,
+                   repo_name: str = "", source: str = "") -> dict:
     """Local repo, no forge: the reviewable change IS the diff. Save the full
-    patch durably and hand back a files-changed summary for the thread. Read-only
-    to the user's repo — nothing is pushed back."""
+    patch durably, register a local Merge Request, and hand back a files-changed
+    summary for the thread. Read-only to the user's repo — nothing is pushed back
+    (the MR's Land/Merge actions do that explicitly, on demand)."""
     patch = git_ops.diff_patch(bare, base, branch)
     if not patch.strip():
         return {"error": "no changes between the task branch and the base — nothing to open"}
     stat = git_ops.diff_stat(bare, base, branch).strip()
     patch_path = attachments.save_text(task_id, "change.patch", patch)
+
+    from . import mergerequests
+    mr = mergerequests.create_mr(
+        task_id=task_id, repo=repo_name, source_branch=branch, target_branch=base,
+        title=title, bare_path=bare, base_branch=base, source_path=source,
+    )
     return {"ok": True, "platform": "local", "branch": branch, "stat": stat,
-            "patch_file": "change.patch", "patch_path": patch_path}
+            "patch_file": "change.patch", "patch_path": patch_path, "mr_id": mr["id"]}
 
 
 def _publish_gitlab(bare, source, branch, base_branch, title, description) -> dict:
