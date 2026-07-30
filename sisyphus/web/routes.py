@@ -8,6 +8,7 @@ from fastapi.templating import Jinja2Templates
 
 from core.db import init_db
 from core.config import get_config
+from core import mergerequests
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -346,18 +347,14 @@ async def task_page(request: Request, task_id: str):
         "result": store.result_view(task_id),
         "children": store.list_children(task_id),
         "parent": store.get_task(task["parent_id"]) if task.get("parent_id") else None,
+        "mr": mergerequests.latest_for_task(task_id),
     })
 
-@router.get("/api/tasks/{task_id}/diff/{filename}", response_class=HTMLResponse)
-async def task_diff_modal(request: Request, task_id: str, filename: str):
-    """Render a task attachment (a diff patch / any text) in a dialog, with diff
-    syntax colouring — so the change opens in-app, not a separate browser tab."""
-    from core import attachments
-    text = attachments.read(task_id, filename)
-    if text is None:
-        return HTMLResponse('<div class="modal-backdrop" onclick="this.remove()"><div class="modal" onclick="event.stopPropagation()"><div class="modal__body"><div class="empty">Attachment not found.</div></div></div></div>')
-    lines, stat = [], None
-    for ln in text.splitlines():
+def _classify_diff(text: str):
+    """Split a unified diff into (class, line) pairs + add/del counts, for
+    colourised rendering. Shared by the diff dialog and the MR view."""
+    lines = []
+    for ln in (text or "").splitlines():
         if ln.startswith("+") and not ln.startswith("+++"):
             cls = "add"
         elif ln.startswith("-") and not ln.startswith("---"):
@@ -371,10 +368,101 @@ async def task_diff_modal(request: Request, task_id: str, filename: str):
         lines.append((cls, ln))
     adds = sum(1 for c, _ in lines if c == "add")
     dels = sum(1 for c, _ in lines if c == "del")
+    return lines, adds, dels
+
+
+@router.get("/api/tasks/{task_id}/diff/{filename}", response_class=HTMLResponse)
+async def task_diff_modal(request: Request, task_id: str, filename: str):
+    """Render a task attachment (a diff patch / any text) in a dialog, with diff
+    syntax colouring — so the change opens in-app, not a separate browser tab."""
+    from core import attachments
+    text = attachments.read(task_id, filename)
+    if text is None:
+        return HTMLResponse('<div class="modal-backdrop" onclick="this.remove()"><div class="modal" onclick="event.stopPropagation()"><div class="modal__body"><div class="empty">Attachment not found.</div></div></div></div>')
+    lines, adds, dels = _classify_diff(text)
     return _tmpl().TemplateResponse("diff_modal.html", {
         "request": request, "filename": filename, "lines": lines,
         "adds": adds, "dels": dels,
     })
+
+
+# ── Local Merge Requests ────────────────────────────────────────────────
+
+def _mr_view_ctx(request, mr):
+    """Build the MR-view context: branches, mergeability, and the colourised diff."""
+    from core import attachments, mergerequests
+    branches = mergerequests.list_branches(mr["source_path"])
+    merge = mergerequests.check_mergeability(
+        mr["bare_path"], mr["source_path"], mr["source_branch"], mr["target_branch"])
+    patch = attachments.read(mr["task_id"], "change.patch") or ""
+    lines, adds, dels = _classify_diff(patch)
+    return {"request": request, "mr": mr, "branches": branches, "merge": merge,
+            "lines": lines, "adds": adds, "dels": dels}
+
+@router.get("/api/mr/{mr_id}/view", response_class=HTMLResponse)
+async def mr_view(request: Request, mr_id: str):
+    from core import mergerequests
+    mr = mergerequests.get_mr(mr_id)
+    if not mr:
+        return HTMLResponse('<div class="modal-backdrop" onclick="this.remove()"><div class="modal"><div class="modal__body"><div class="empty">Merge request not found.</div></div></div></div>')
+    return _tmpl().TemplateResponse("mr_modal.html", _mr_view_ctx(request, mr))
+
+@router.post("/api/mr/{mr_id}/target", response_class=HTMLResponse)
+async def mr_set_target(request: Request, mr_id: str, target: str = Form(...)):
+    from core import mergerequests
+    mr = mergerequests.set_target(mr_id, target)
+    return _tmpl().TemplateResponse("mr_modal.html", _mr_view_ctx(request, mr))
+
+@router.post("/api/mr/{mr_id}/land", response_class=HTMLResponse)
+async def mr_land(request: Request, mr_id: str):
+    from core import mergerequests, store
+    from fastapi.responses import Response
+    mr = mergerequests.get_mr(mr_id)
+    if not mr:
+        return Response(status_code=404)
+    res = mergerequests.land_branch(mr)
+    if res.get("ok"):
+        store.post_message(mr["task_id"], "system", kind="note",
+                           text=f"Landed branch {mr['source_branch']} into {mr['source_path']}")
+        mr = mergerequests.get_mr(mr_id)
+        ctx = _mr_view_ctx(request, mr)
+        ctx["flash"] = f"Landed {mr['source_branch']} — review it in your repo (git checkout {mr['source_branch']})"
+    else:
+        ctx = _mr_view_ctx(request, mr)
+        ctx["error"] = res.get("error", "land failed")
+    return _tmpl().TemplateResponse("mr_modal.html", ctx)
+
+@router.post("/api/mr/{mr_id}/merge", response_class=HTMLResponse)
+async def mr_merge(request: Request, mr_id: str):
+    from core import mergerequests, store
+    from fastapi.responses import Response
+    mr = mergerequests.get_mr(mr_id)
+    if not mr:
+        return Response(status_code=404)
+    if mr["status"] != "open":
+        ctx = _mr_view_ctx(request, mr); ctx["error"] = f"MR is already {mr['status']}"
+        return _tmpl().TemplateResponse("mr_modal.html", ctx)
+    res = mergerequests.merge_branch(mr, mr["target_branch"])
+    if res.get("ok"):
+        mergerequests.mark_merged(mr_id, res["sha"])
+        store.post_message(mr["task_id"], "system", kind="note",
+                           text=f"Merged {mr['source_branch']} into {res['target']} ({res['sha'][:8]}) in {mr['source_path']}")
+        mr = mergerequests.get_mr(mr_id)
+        ctx = _mr_view_ctx(request, mr)
+        ctx["flash"] = f"Merged into {res['target']} as {res['sha'][:8]} — reversible with git reset --hard @{{1}}"
+    else:
+        ctx = _mr_view_ctx(request, mr); ctx["error"] = res.get("error", "merge failed")
+    return _tmpl().TemplateResponse("mr_modal.html", ctx)
+
+@router.post("/api/mr/{mr_id}/close", response_class=HTMLResponse)
+async def mr_close(request: Request, mr_id: str):
+    from core import mergerequests
+    from fastapi.responses import Response
+    mr = mergerequests.get_mr(mr_id)
+    if not mr:
+        return Response(status_code=404)
+    mergerequests.set_status(mr_id, "closed")
+    return _tmpl().TemplateResponse("mr_modal.html", _mr_view_ctx(request, mergerequests.get_mr(mr_id)))
 
 @router.get("/api/tasks/{task_id}/detail", response_class=HTMLResponse)
 async def task_detail_view(request: Request, task_id: str):
@@ -388,6 +476,7 @@ async def task_detail_view(request: Request, task_id: str):
         "result": store.result_view(task_id),
         "children": store.list_children(task_id),
         "parent": store.get_task(task["parent_id"]) if task.get("parent_id") else None,
+        "mr": mergerequests.latest_for_task(task_id),
     })
 
 @router.post("/api/tasks/{task_id}/messages")

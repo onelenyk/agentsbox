@@ -26,6 +26,9 @@
             {% if result.change.url %}
             <a href="{{ result.change.url }}" target="_blank" class="btn btn--primary btn--sm">View change ↗</a>
             {% elif result.change.attachment %}
+            {% if mr %}
+            <button type="button" class="btn btn--primary btn--sm" hx-get="/api/mr/{{ mr.id }}/view" hx-target="#modal-container" hx-swap="innerHTML">⇄ Merge request{% if mr.status != 'open' %} ({{ mr.status }}){% endif %}</button>
+            {% endif %}
             <button type="button" class="btn btn--ghost btn--sm" hx-get="/api/tasks/{{ task.id }}/diff/{{ result.change.attachment }}" hx-target="#modal-container" hx-swap="innerHTML">📎 View diff</button>
             {% endif %}
             <div class="result__commits" style="margin-top:8px">{{ result.change.text }}</div>
