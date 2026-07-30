@@ -10,6 +10,9 @@ The engineer's work already lives on `source_branch` (sisyphus/<task_id>) in the
 per-task bare clone (`bare_path`); `source_path` is the user's real repo that the
 Land/Merge actions touch.
 """
+import shutil
+import subprocess
+import tempfile
 from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import uuid4
@@ -17,6 +20,101 @@ from uuid import uuid4
 from .db import get_conn
 
 MR_STATUSES = ("open", "merged", "closed")
+
+
+def _run(args):
+    return subprocess.run(args, capture_output=True, text=True)
+
+
+# ── Git actions on the user's real local repo (choose target / check / land) ──
+
+
+def list_branches(real_repo: str) -> List[str]:
+    """Branch names in the user's real repo — the choices for the merge target."""
+    if not real_repo:
+        return []
+    r = _run(["git", "-C", real_repo, "branch", "--format=%(refname:short)"])
+    return [b.strip() for b in r.stdout.splitlines() if b.strip()] if r.returncode == 0 else []
+
+
+def check_mergeability(bare_path: str, real_repo: str, source: str, target: str) -> dict:
+    """Dry-run merging *source* into *target*, entirely in a throwaway worktree of
+    the bare clone — never touches the user's repo. Returns
+    {ok, mergeable, conflicts[]} or {ok: False, error}."""
+    if not (bare_path and real_repo):
+        return {"ok": False, "error": "missing repo paths"}
+    tmpref = f"refs/mrcheck/{target}"
+    wt = tempfile.mkdtemp(prefix="sisyphus-mrcheck-")
+    try:
+        f = _run(["git", "-C", bare_path, "fetch", real_repo, f"{target}:{tmpref}"])
+        if f.returncode != 0:
+            return {"ok": False, "error": f"cannot read target '{target}': {f.stderr.strip()[:120]}"}
+        _run(["git", "-C", bare_path, "worktree", "add", "--detach", wt, tmpref])
+        m = _run(["git", "-C", wt, "merge", "--no-commit", "--no-ff", source])
+        conflicts = []
+        if m.returncode != 0:
+            d = _run(["git", "-C", wt, "diff", "--name-only", "--diff-filter=U"])
+            conflicts = [c for c in d.stdout.splitlines() if c.strip()]
+        _run(["git", "-C", wt, "merge", "--abort"])
+        return {"ok": True, "mergeable": m.returncode == 0, "conflicts": conflicts}
+    finally:
+        _run(["git", "-C", bare_path, "worktree", "remove", "--force", wt])
+        _run(["git", "-C", bare_path, "update-ref", "-d", tmpref])
+        shutil.rmtree(wt, ignore_errors=True)
+
+
+def land_branch(mr: dict) -> dict:
+    """Fetch the MR's source branch from the bare clone into the user's real repo,
+    so they can review/merge with their own tools. Non-destructive — adds a branch
+    ref, never touches the working tree."""
+    src = mr["source_branch"]
+    r = _run(["git", "-C", mr["source_path"], "fetch", mr["bare_path"], f"{src}:{src}"])
+    if r.returncode != 0:
+        return {"ok": False, "error": r.stderr.strip()[:160]}
+    return {"ok": True, "branch": src, "repo": mr["source_path"]}
+
+
+def merge_branch(mr: dict, target: str) -> dict:
+    """Merge the MR's source into *target* in the user's real repo, producing a
+    merge commit. Guarded and reversible: refuses to merge over uncommitted work
+    on the current branch; when the target isn't checked out, merges via a
+    temporary worktree so the user's working tree is never disturbed; aborts on
+    conflict. Never forces, never deletes. Returns {ok, sha, target} or error."""
+    real, src, bare = mr["source_path"], mr["source_branch"], mr["bare_path"]
+    msg = f"Merge {src} into {target} (Sisyphus MR {mr['id']})"
+
+    f = _run(["git", "-C", real, "fetch", bare, f"{src}:{src}"])
+    if f.returncode != 0:
+        return {"ok": False, "error": f"fetch failed: {f.stderr.strip()[:120]}"}
+
+    cur = _run(["git", "-C", real, "symbolic-ref", "--quiet", "--short", "HEAD"]).stdout.strip()
+
+    if target == cur:
+        if _run(["git", "-C", real, "status", "--porcelain"]).stdout.strip():
+            return {"ok": False, "error": f"'{target}' is checked out with uncommitted changes — commit or stash first"}
+        m = _run(["git", "-C", real, "merge", "--no-ff", "-m", msg, src])
+        if m.returncode != 0:
+            _run(["git", "-C", real, "merge", "--abort"])
+            return {"ok": False, "error": "merge conflict — resolve manually"}
+        sha = _run(["git", "-C", real, "rev-parse", "HEAD"]).stdout.strip()
+        return {"ok": True, "sha": sha, "target": target}
+
+    # target not checked out — merge in a throwaway worktree on that branch, so
+    # the user's working tree is untouched. Updates the real branch ref.
+    wt = tempfile.mkdtemp(prefix="sisyphus-merge-")
+    try:
+        a = _run(["git", "-C", real, "worktree", "add", wt, target])
+        if a.returncode != 0:
+            return {"ok": False, "error": f"cannot check out '{target}': {a.stderr.strip()[:120]}"}
+        m = _run(["git", "-C", wt, "merge", "--no-ff", "-m", msg, src])
+        if m.returncode != 0:
+            _run(["git", "-C", wt, "merge", "--abort"])
+            return {"ok": False, "error": "merge conflict — resolve manually"}
+        sha = _run(["git", "-C", wt, "rev-parse", "HEAD"]).stdout.strip()
+        return {"ok": True, "sha": sha, "target": target}
+    finally:
+        _run(["git", "-C", real, "worktree", "remove", "--force", wt])
+        shutil.rmtree(wt, ignore_errors=True)
 
 
 def _now() -> str:
