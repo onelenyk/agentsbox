@@ -291,8 +291,27 @@ def test_task_detail_shows_result_card_with_diff_link(db_path):
     response = client.get(f"/api/tasks/{task['id']}/detail")
     assert "Result" in response.text
     assert "done and dusted" in response.text
-    assert f"/api/v1/tasks/{task['id']}/attachments/change.patch" in response.text
+    # the diff opens in an in-app dialog (htmx), not a separate tab
+    assert f"/api/tasks/{task['id']}/diff/change.patch" in response.text
     assert "abc12345" in response.text
+
+
+def test_diff_modal_colourises_patch(db_path):
+    from core import store, attachments
+    task = _make_task(goal="ship")
+    attachments.save_text(task["id"], "change.patch",
+                          "diff --git a/x b/x\n@@ -0,0 +1,2 @@\n+added line\n-removed line\n context")
+    r = _make_client().get(f"/api/tasks/{task['id']}/diff/change.patch")
+    assert r.status_code == 200
+    assert "modal--wide" in r.text and "class=\"diff\"" in r.text
+    assert "dl add" in r.text and "dl del" in r.text and "dl hunk" in r.text
+
+
+def test_diff_modal_missing_attachment(db_path):
+    task = _make_task(goal="x")
+    r = _make_client().get(f"/api/tasks/{task['id']}/diff/nope.patch")
+    assert r.status_code == 200
+    assert "not found" in r.text.lower()
 
 
 def test_agents_page_and_list(db_path):

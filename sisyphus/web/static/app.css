@@ -317,6 +317,22 @@ body::before {
 .modal__body { padding: 16px 20px; display: flex; flex-direction: column; gap: 15px; }
 .modal__actions { display: flex; justify-content: flex-end; gap: 8px; padding: 4px 20px 20px; }
 
+.modal--wide { max-width: 840px; }
+
+/* diff viewer (in-dialog) */
+.diff {
+  font-family: var(--mono); font-size: 12px; line-height: 1.5;
+  background: var(--inset); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 0; overflow-x: auto; max-height: 62vh; overflow-y: auto;
+}
+.diff .dl { display: block; white-space: pre; padding: 0 14px; min-height: 1.45em; }
+.diff .add  { background: rgba(70,209,127,.10); color: #8ee6ad; }
+.diff .del  { background: rgba(245,84,77,.11);  color: #f6968f; }
+.diff .hunk { color: var(--accent-hi); background: var(--accent-bg); }
+.diff .meta { color: var(--muted); }
+.diff .ctx  { color: var(--text-2); }
+.diffstat { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-bottom: 10px; }
+
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field > label { font-size: 12px; font-weight: 600; color: var(--text-2); }
 .field .hint { font-size: 11px; color: var(--muted); }

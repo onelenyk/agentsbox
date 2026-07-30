@@ -346,6 +346,34 @@ async def task_page(request: Request, task_id: str):
         "parent": store.get_task(task["parent_id"]) if task.get("parent_id") else None,
     })
 
+@router.get("/api/tasks/{task_id}/diff/{filename}", response_class=HTMLResponse)
+async def task_diff_modal(request: Request, task_id: str, filename: str):
+    """Render a task attachment (a diff patch / any text) in a dialog, with diff
+    syntax colouring — so the change opens in-app, not a separate browser tab."""
+    from core import attachments
+    text = attachments.read(task_id, filename)
+    if text is None:
+        return HTMLResponse('<div class="modal-backdrop" onclick="this.remove()"><div class="modal" onclick="event.stopPropagation()"><div class="modal__body"><div class="empty">Attachment not found.</div></div></div></div>')
+    lines, stat = [], None
+    for ln in text.splitlines():
+        if ln.startswith("+") and not ln.startswith("+++"):
+            cls = "add"
+        elif ln.startswith("-") and not ln.startswith("---"):
+            cls = "del"
+        elif ln.startswith("@@"):
+            cls = "hunk"
+        elif ln.startswith(("diff --git", "index ", "+++ ", "--- ", "new file", "deleted file", "old mode", "new mode", "similarity", "rename ")):
+            cls = "meta"
+        else:
+            cls = "ctx"
+        lines.append((cls, ln))
+    adds = sum(1 for c, _ in lines if c == "add")
+    dels = sum(1 for c, _ in lines if c == "del")
+    return _tmpl().TemplateResponse("diff_modal.html", {
+        "request": request, "filename": filename, "lines": lines,
+        "adds": adds, "dels": dels,
+    })
+
 @router.get("/api/tasks/{task_id}/detail", response_class=HTMLResponse)
 async def task_detail_view(request: Request, task_id: str):
     from core import store
