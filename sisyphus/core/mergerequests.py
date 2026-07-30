@@ -178,6 +178,17 @@ def get_mr(mr_id: str) -> Optional[dict]:
     return _dict(row)
 
 
+def open_mr_exists(task_id: str) -> bool:
+    """True if the task has an unresolved local MR — the per-task bare clone must
+    survive cleanup so the MR can still be landed/merged."""
+    conn = get_conn()
+    n = conn.execute(
+        "SELECT COUNT(*) FROM merge_requests WHERE task_id = ? AND status = 'open'",
+        (task_id,)).fetchone()[0]
+    conn.close()
+    return n > 0
+
+
 def latest_for_task(task_id: str) -> Optional[dict]:
     conn = get_conn()
     row = conn.execute(
