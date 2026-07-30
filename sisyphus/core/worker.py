@@ -298,17 +298,22 @@ async def spawn_worker(
         emit(task_id, "worker_finished")
 
 
-def _build_decider_prompt(agent: dict, thread_text: str) -> str:
+def _build_decider_prompt(agent: dict, thread_text: str, roster: list) -> str:
     """Prompt for the orchestrator agent: read the thread, call exactly one
-    decision tool. The persona (decision doctrine) comes from the agent row."""
+    decision tool. The persona (decision doctrine) comes from the agent row;
+    *roster* is the exact set of worker agents it may spawn (so it can't invent
+    an agent name that doesn't exist — a real hallucination we hit in testing)."""
     prefix = f"{_MCP_SERVER_NAME}_"
     tools = ", ".join(prefix + t for t in agent["tools"] if t.startswith("decide_"))
+    names = ", ".join(roster) or "explorer, engineer, reviewer"
     return (
         "# How this run ends — read this first\n"
         "You are an orchestrator. Read the task thread below and choose EXACTLY "
         f"ONE next action by CALLING one of these tools: {tools}. Call it as a "
         "real tool invocation (like `read` or `bash`), not as text describing it. "
         "Make exactly one call, then stop. A plain-text reply does nothing.\n\n"
+        f"When you call decide_spawn_worker, the `agent` argument MUST be one of "
+        f"these EXACT names — do not invent any other: {names}.\n\n"
         f"{agent['persona']}\n\n"
         f"## Task thread\n{thread_text}\n"
     )
@@ -336,7 +341,8 @@ async def spawn_decider(task_id: str, agent_name: str, thread_text: str,
     token = sessions.mint(task_id, agent_name, worktree=scratch)
     _write_opencode_config(scratch, token)
 
-    prompt = _build_decider_prompt(agent, thread_text)
+    roster = [a["name"] for a in agents.list_agents(kind="worker") if a.get("enabled", 1)]
+    prompt = _build_decider_prompt(agent, thread_text, roster)
     output_dir = f"{ws}/runs/{task_id}/resources/orchestrator"
     os.makedirs(output_dir, exist_ok=True)
 

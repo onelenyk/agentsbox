@@ -166,7 +166,7 @@ def _pass_count(task_id: str) -> int:
 # Substrings core.worker.py's crash/timeout fallback message always contains
 # — see spawn_worker's "ended without reporting a result" post. A run isolated
 # from a broken model/runner still surfaces as "agent_no_result" via launcher.
-_WORKER_FAILURE_MARKERS = ("ended without reporting", "agent_no_result")
+_WORKER_FAILURE_MARKERS = ("ended without reporting", "agent_no_result", "failed to start")
 MAX_CONSECUTIVE_WORKER_FAILURES = 3  # catch a broken runner/config in ~3 tries, not 25
 
 
@@ -379,7 +379,7 @@ async def _handle_single_agent(task: dict) -> tuple:
     if not any(m["kind"] == "worker_started" for m in thread):
         store.set_status(task_id, "active")
         bg = asyncio.create_task(
-            spawn_worker(task_id, task["agent"], task["goal"], repo_name=task.get("repo"))
+            _spawn_worker_safe(task_id, task["agent"], task["goal"], task.get("repo"))
         )
         return Decision(action="spawn_worker", role=task["agent"],
                         why=f"single-agent task — running {task['agent']}"), bg
@@ -397,13 +397,27 @@ async def _handle_single_agent(task: dict) -> tuple:
                     why="single-agent failure"), None
 
 
+async def _spawn_worker_safe(task_id: str, role: str, instruction: str, repo_name):
+    """Run a worker, but never let a startup failure (an unknown/hallucinated
+    agent name, a clone error, …) vanish into a lost background task and leave
+    the task stalled 'active'. Any exception before the worker reports is turned
+    into a worker_finished + event, so the orchestrator re-decides."""
+    try:
+        await spawn_worker(task_id, role, instruction, repo_name=repo_name)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("spawn_worker failed for task %s (role=%s)", task_id, role)
+        store.post_message(task_id, "system", kind="worker_finished",
+                           text=f"{role} failed to start: {exc}")
+        emit(task_id, "worker_finished")
+
+
 async def _execute(task_id: str, decision: Decision):
     if decision.action == "spawn_worker":
         store.set_status(task_id, "active")
         task = store.get_task(task_id)
         return asyncio.create_task(
-            spawn_worker(task_id, decision.role, decision.instruction or "",
-                        repo_name=task.get("repo") if task else None)
+            _spawn_worker_safe(task_id, decision.role, decision.instruction or "",
+                               task.get("repo") if task else None)
         )
     if decision.action == "spawn_task":
         # Fan out: one child task per repo, each running the normal loop. The
