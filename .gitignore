@@ -1,2 +1,6 @@
 .playwright-mcp/
 .sisyphus/
+# Local sandbox repos for real-world testing (kept out of the main tree)
+/testrepo/
+/testrepo2/
+/testrepo-bug/
