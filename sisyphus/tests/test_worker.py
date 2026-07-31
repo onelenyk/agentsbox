@@ -231,3 +231,25 @@ def test_decider_prompt_pins_the_agent_roster(db_path):
                               ["explorer", "engineer", "reviewer"])
     assert "explorer, engineer, reviewer" in p
     assert "MUST be one of" in p   # tells the model not to invent agent names
+
+
+class TestDeciderRetry:
+    @pytest.mark.asyncio
+    async def test_retries_until_a_decision_is_recorded(self, db_path, tmp_path, monkeypatch):
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+        from core.worker import spawn_decider
+        task = store.create_task("x", repo="sisyphus")
+        calls = {"n": 0}
+
+        async def flaky(*a, **k):
+            calls["n"] += 1
+            if calls["n"] >= 2:   # the agent only calls a decide tool on attempt 2
+                for s in list(sessions._SESSIONS.values()):
+                    if s["task_id"] == task["id"]:
+                        s["decision"] = {"action": "note", "why": "ok"}
+            return AgentResult(status="completed", summary="ok")
+
+        with patch("core.worker.launch_agent", AsyncMock(side_effect=flaky)):
+            dec = await spawn_decider(task["id"], "orchestrator", "thread")
+        assert dec == {"action": "note", "why": "ok"}
+        assert calls["n"] == 2   # retried once

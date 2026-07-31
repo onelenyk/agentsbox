@@ -148,6 +148,15 @@ def _record(session, decision: dict):
 def _decide_spawn_worker(session, agent="", instruction="", why="", **_):
     if not agent.strip():
         return {"error": "agent required (the worker agent to run)"}
+    # Validate against the real roster so a hallucinated name (e.g. a weak model
+    # inventing 'code') is rejected here — the orchestrator agent sees the error
+    # and re-picks a valid agent in the same session, instead of it becoming a
+    # failed spawn later.
+    from core import agents
+    a = agents.get_agent(agent)
+    if not a or a["kind"] != "worker":
+        names = ", ".join(x["name"] for x in agents.list_agents(kind="worker"))
+        return {"error": f"unknown agent '{agent}'. Call decide_spawn_worker again with exactly one of: {names}"}
     return _record(session, {"action": "spawn_worker", "role": agent,
                              "instruction": instruction, "why": why})
 

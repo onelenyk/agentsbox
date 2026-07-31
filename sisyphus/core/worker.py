@@ -49,6 +49,10 @@ _WORKER_AGENT = "sisyphus-worker"
 # nothing else on this machine uses avoids it entirely.
 _MCP_SERVER_NAME = "sisyphus_agent"
 
+# How many times to (re)run the orchestrator agent for one decision before
+# giving up — a weak model occasionally ends its turn without calling a tool.
+DECIDER_ATTEMPTS = 2
+
 
 def cleanup_task(task_id: str, deep: bool = False) -> None:
     """Reclaim a finished task's disk: its git worktrees, per-task bare clone,
@@ -350,17 +354,23 @@ async def spawn_decider(task_id: str, agent_name: str, thread_text: str,
     output_dir = f"{ws}/runs/{task_id}/resources/orchestrator"
     os.makedirs(output_dir, exist_ok=True)
 
-    agent_def = {"name": agent_name, "opencode_config": {}}
-    result = await launch_agent(
-        agent_def, prompt, scratch, output_dir,
-        timeout=timeout, idle_timeout=idle_timeout, step_id=f"{task_id}-orchestrator",
-        runner_name=runner_name, agent=_WORKER_AGENT,
-    )
-
+    # A weaker/cheaper model sometimes finishes its turn without calling a
+    # decision tool (no decision recorded). Give it up to DECIDER_ATTEMPTS tries
+    # before giving up (→ ask_human) — cheaper than parking the task on a human.
     from .usage import record_run
-    record_run(task_id, agent_name, result.model, result.usage, result.duration_ms)
+    agent_def = {"name": agent_name, "opencode_config": {}}
+    decision = None
+    for attempt in range(DECIDER_ATTEMPTS):
+        result = await launch_agent(
+            agent_def, prompt, scratch, output_dir,
+            timeout=timeout, idle_timeout=idle_timeout, step_id=f"{task_id}-orchestrator",
+            runner_name=runner_name, agent=_WORKER_AGENT,
+        )
+        record_run(task_id, agent_name, result.model, result.usage, result.duration_ms)
+        session = sessions.resolve(token)
+        decision = session.get("decision") if session else None
+        if decision:
+            break
 
-    session = sessions.resolve(token)
-    decision = session.get("decision") if session else None
     sessions.revoke(token)
     return decision
