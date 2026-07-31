@@ -80,3 +80,21 @@ def test_commit_all_excludes_daemon_files(repo, tmp_path):
     assert "real.py" in patch
     assert "opencode.json" not in patch
     assert ".opencode" not in patch
+
+
+def test_commit_all_excludes_build_junk(repo, tmp_path):
+    """An agent that runs the code leaves __pycache__/*.pyc — keep it out of the
+    commit even when the target repo has no .gitignore."""
+    branch = git_ops.ensure_task_branch(str(repo), "task-junk", "main")
+    wt = _attached_worktree(tmp_path, repo, branch)
+    (wt / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    (wt / "__pycache__").mkdir()
+    (wt / "__pycache__" / "calc.cpython-314.pyc").write_bytes(b"\x00\x01junk")
+    (wt / ".DS_Store").write_bytes(b"\x00")
+
+    git_ops.commit_all(str(wt), "work")
+    patch = git_ops.diff_patch(str(repo), "main", branch)
+    assert "calc.py" in patch
+    assert "__pycache__" not in patch
+    assert ".pyc" not in patch
+    assert ".DS_Store" not in patch

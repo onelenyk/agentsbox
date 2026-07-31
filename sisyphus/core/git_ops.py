@@ -9,13 +9,22 @@ import subprocess
 
 TASK_BRANCH_PREFIX = "sisyphus/"
 
-# Daemon-generated files that must never end up in a task's commits: the
-# generated opencode config and opencode's own session state written into the
-# worktree cwd. Excluded via git pathspec magic at add time.
+# Files that must never end up in a task's commits, excluded via git pathspec
+# magic at add time: the daemon's generated opencode config + session state, and
+# common build/OS junk an agent can create by running the code (e.g. it runs the
+# tests and __pycache__ appears). Keeps engineer commits clean without relying on
+# the target repo having a .gitignore.
+# Long-form :(exclude) pathspecs (the :! short form mis-parses a leading "_" as
+# magic). git's default matching lets "*" span "/", so "*.pyc" / "*__pycache__*"
+# catch nested paths too.
 _COMMIT_EXCLUDES = [
-    ":!opencode.json",
-    ":!.opencode", ":!.opencode/**",
-    ":!.sisyphus", ":!.sisyphus/**",
+    ":(exclude)opencode.json",
+    ":(exclude).opencode", ":(exclude).opencode/**",
+    ":(exclude).sisyphus", ":(exclude).sisyphus/**",
+    ":(exclude)*.pyc",
+    ":(exclude)*__pycache__*",
+    ":(exclude)*.DS_Store",
+    ":(exclude)*.pytest_cache*",
 ]
 
 
