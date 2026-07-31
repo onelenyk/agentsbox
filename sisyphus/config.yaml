@@ -1,10 +1,8 @@
+api:
+  allow_localhost: true
+  token: ${SISYPHUS_API_TOKEN}
 default_model: deepseek
 default_timeout: 300
-api:
-  # Shared bearer token guarding /api/v1. Empty/unset = auth disabled.
-  token: ${SISYPHUS_API_TOKEN}
-  # Skip the token check for loopback clients (the local MCP client / dev).
-  allow_localhost: true
 github:
   base_url: ${GITHUB_BASE_URL}
   token: ${GITHUB_TOKEN}
@@ -24,6 +22,15 @@ repos:
 - branch: main
   name: sisyphus
   source: /Users/lenyk/workproject/agentsbox
+- branch: main
+  name: testrepo
+  source: /Users/lenyk/workproject/agentsbox/testrepo
+- branch: main
+  name: testrepo2
+  source: /Users/lenyk/workproject/agentsbox/testrepo2
+- branch: main
+  name: testrepo-bug
+  source: /Users/lenyk/workproject/agentsbox/testrepo-bug
 scheduler:
   jobs:
   - minutes: 60
