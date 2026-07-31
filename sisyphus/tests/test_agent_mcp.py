@@ -286,3 +286,14 @@ def test_worker_cannot_call_decision_tools(db_path):
     out = _call(_client(), token, "decide_complete", {"why": "x"})
     assert out["result"]["isError"] is True   # not in the engineer's allowlist
     assert "not permitted" in json.loads(out["result"]["content"][0]["text"])["error"]
+
+
+def test_decide_spawn_worker_rejects_unknown_agent(db_path):
+    """A hallucinated agent name is rejected in-tool so the orchestrator can
+    re-pick (regression: v4-flash inventing 'code')."""
+    task_id, token = _session(db_path, "orchestrator")
+    out = _call(_client(), token, "decide_spawn_worker", {"agent": "code", "instruction": "x"})
+    assert out["result"]["isError"] is True
+    err = json.loads(out["result"]["content"][0]["text"])["error"]
+    assert "unknown agent 'code'" in err and "engineer" in err
+    assert sessions.resolve(token).get("decision") is None   # not recorded
