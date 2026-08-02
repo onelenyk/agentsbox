@@ -71,7 +71,7 @@
         {% endfor %}
     </div>
 
-    <form class="composer" hx-post="/api/tasks/{{ task.id }}/messages" hx-swap="none" onsubmit="setTimeout(() => this.reset(), 0)">
+    <form id="reply-composer" hx-preserve="true" class="composer" hx-post="/api/tasks/{{ task.id }}/messages" hx-swap="none" onsubmit="setTimeout(() => this.reset(), 0)">
         <textarea name="text" required rows="2" placeholder="Reply…"></textarea>
         <button type="submit" class="btn btn--primary" style="margin-top:8px">Reply</button>
     </form>
