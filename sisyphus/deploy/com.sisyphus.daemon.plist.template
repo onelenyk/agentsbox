@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.sisyphus.daemon</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON__</string>
+        <string>-m</string>
+        <string>uvicorn</string>
+        <string>web.app:app</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>7677</string>
+    </array>
+
+    <!-- Repo root: uvicorn imports web.app from here, and .env is read from here. -->
+    <key>WorkingDirectory</key>
+    <string>__WORKDIR__</string>
+
+    <!-- Start at login and keep it running; restart only on a crash (non-zero
+         exit), not after a clean `daemon stop`. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>__LOGDIR__/daemon.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOGDIR__/daemon.err.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
