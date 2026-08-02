@@ -32,12 +32,14 @@ async def startup():
     from core.usage import init_usage_table
     from core.mergerequests import init_mr_table
     from core.autopilot import init_autopilot_table
+    from core.copilot_store import init_copilot_tables
     init_db()
     init_runners_table()  # daemon is self-sufficient: seed the runners table
     init_agents_table()   # and the agents (personas + tool allowlists)
     init_usage_table()    # and the per-run token/cost ledger
     init_mr_table()       # and the local merge-request ledger
     init_autopilot_table()  # and the autopilot automations
+    init_copilot_tables()   # and the copilot chat sessions
 
     import web.agent_mcp as agent_mcp
     from core import orchestrator
@@ -615,31 +617,76 @@ async def tasks_ai_parse(text: str = Form(...), template: str = Form("")):
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"error": str(exc)}, status_code=503)
 
+def _copilot_panel(request, session):
+    from core.copilot_store import get_messages
+    return _tmpl().TemplateResponse("copilot_panel.html",
+        {"request": request, "session": session, "messages": get_messages(session["id"])})
+
+@router.get("/api/board/copilot", response_class=HTMLResponse)
+async def copilot_load(request: Request):
+    """The dock loads this on open — the latest session's messages (persisted)."""
+    from core.copilot_store import latest_or_create
+    return _copilot_panel(request, latest_or_create())
+
+@router.get("/api/board/copilot/sessions", response_class=HTMLResponse)
+async def copilot_sessions(request: Request):
+    from core.copilot_store import list_sessions
+    return _tmpl().TemplateResponse("copilot_sessions.html",
+        {"request": request, "sessions": list_sessions()})
+
+@router.post("/api/board/copilot/new", response_class=HTMLResponse)
+async def copilot_new(request: Request):
+    from core.copilot_store import create_session
+    return _copilot_panel(request, create_session())
+
+@router.get("/api/board/copilot/{sid}", response_class=HTMLResponse)
+async def copilot_open_session(request: Request, sid: str):
+    from core.copilot_store import get_session, latest_or_create
+    return _copilot_panel(request, get_session(sid) or latest_or_create())
+
+@router.post("/api/board/copilot/{sid}/delete", response_class=HTMLResponse)
+async def copilot_delete_session(request: Request, sid: str):
+    from core.copilot_store import delete_session, latest_or_create
+    delete_session(sid)
+    return _copilot_panel(request, latest_or_create())
+
 @router.post("/api/board/chat")
 async def board_chat(request: Request):
-    """Board Copilot — one chat turn. Returns {reply, action?}; a proposed action
-    is validated but NOT executed until the user confirms via /api/board/act."""
+    """One copilot turn, persisted to a session. Returns {reply, action?, session_id};
+    a proposed action is validated but executed only on confirm via /api/board/act."""
     from fastapi.responses import JSONResponse
-    from core import copilot
+    from core import copilot, copilot_store
     body = await request.json()
     message = (body.get("message") or "").strip()
     if not message:
         return JSONResponse({"error": "empty"}, status_code=422)
+    sid = body.get("session_id")
+    if not sid or not copilot_store.get_session(sid):
+        sid = copilot_store.latest_or_create()["id"]
+    history = [{"role": m["role"], "text": m["text"]} for m in copilot_store.get_messages(sid)]
+    copilot_store.add_message(sid, "user", message)
     try:
-        return copilot.chat(message, body.get("history") or [])
+        result = copilot.chat(message, history)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"error": str(exc)}, status_code=503)
+        return JSONResponse({"error": str(exc), "session_id": sid}, status_code=503)
+    copilot_store.add_message(sid, "assistant", result.get("reply", ""))
+    result["session_id"] = sid
+    return result
 
 @router.post("/api/board/act")
 async def board_act(request: Request):
-    """Execute a user-confirmed copilot action."""
+    """Execute a user-confirmed copilot action; record the result in the session."""
     from fastapi.responses import JSONResponse
-    from core import copilot
+    from core import copilot, copilot_store
     body = await request.json()
     try:
-        return {"result": copilot.execute_action(body.get("action") or {})}
+        res = copilot.execute_action(body.get("action") or {})
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"error": str(exc)}, status_code=422)
+    sid = body.get("session_id")
+    if sid and copilot_store.get_session(sid):
+        copilot_store.add_message(sid, "system", res)
+    return {"result": res}
 
 @router.get("/tasks/{task_id}", response_class=HTMLResponse)
 async def task_page(request: Request, task_id: str):

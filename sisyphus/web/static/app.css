@@ -584,3 +584,14 @@ select { cursor: pointer; appearance: none;
 .cp-action-btns { display: flex; gap: 8px; }
 .cp-input { display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--border); align-items: flex-end; }
 .cp-input textarea { flex: 1; resize: none; }
+
+/* ── Copilot: sessions + system messages ─────────────────────────────── */
+.cp-sys { align-self: center; background: transparent; color: var(--muted); border: none; font-size: 11.5px; font-style: italic; padding: 1px 0; }
+.cp-sessions-panel { display: none; border-bottom: 1px solid var(--border); max-height: 42vh; overflow-y: auto; background: var(--inset); }
+.cp-sessions-panel.open { display: block; }
+.cp-session-row { display: flex; align-items: center; border-bottom: 1px solid var(--border); }
+.cp-session-open { flex: 1; min-width: 0; text-align: left; background: transparent; border: none; color: var(--text-2); font: inherit; font-size: 12.5px; padding: 9px 12px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.cp-session-open:hover { background: var(--hover); color: var(--text); }
+.cp-session-time { color: var(--muted); font-size: 10px; font-family: var(--mono); flex: none; }
+.cp-session-del { background: transparent; border: none; color: var(--muted); cursor: pointer; padding: 8px 11px; font-size: 12px; }
+.cp-session-del:hover { color: var(--bad); }
