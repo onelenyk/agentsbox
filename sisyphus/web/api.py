@@ -339,29 +339,42 @@ async def delete_task(task_id: str):
 
 @api.post("/webhooks/{platform}")
 async def receive_webhook(platform: str, request: Request):
-    """Ingest a forge event (CI result, review, merge) and wake the owning task.
-    Maps the payload's MR/PR URL to a task, records an [external] message, and
-    re-opens a terminal/waiting task so the orchestrator reacts on the next pass."""
-    from core import store, webhooks
+    """Ingest a forge event. Two independent reactions, both best-effort:
+    (1) MR lifecycle — map the payload's MR/PR URL to an existing task and
+    re-open it; (2) autopilot triggers — fire webhook autopilots that match this
+    platform + event, creating new tasks."""
+    from core import autopilot, store, webhooks
     from core.orchestrator import emit
 
     try:
         payload = await request.json()
     except Exception:
         payload = {}
-    parsed = webhooks.parse(platform, payload)
-    if not parsed:
-        return {"ok": True, "ignored": True}
-    mr_url, summary = parsed
-    task = store.find_task_by_mr(mr_url)
-    if not task:
-        return {"ok": True, "matched": False}
 
-    store.post_message(task["id"], "system", kind="external", text=summary)
-    if task["status"] in ("done", "failed", "waiting"):
-        store.set_status(task["id"], "active")   # re-open so the loop re-engages
-    emit(task["id"], "external")
-    return {"ok": True, "task_id": task["id"]}
+    result = {"ok": True}
+
+    # (1) MR lifecycle → wake the owning task
+    parsed = webhooks.parse(platform, payload)
+    if parsed:
+        mr_url, summary = parsed
+        task = store.find_task_by_mr(mr_url)
+        if task:
+            store.post_message(task["id"], "system", kind="external", text=summary)
+            if task["status"] in ("done", "failed", "waiting"):
+                store.set_status(task["id"], "active")
+            emit(task["id"], "external")
+            result["task_id"] = task["id"]
+        else:
+            result["matched"] = False
+    else:
+        result["ignored"] = True
+
+    # (2) Autopilot webhook triggers → create new tasks
+    fired = autopilot.fire_webhook_autopilots(platform, payload)
+    if fired:
+        result["autopilots_fired"] = fired
+
+    return result
 
 
 # ── Autopilots ──────────────────────────────────────────────────────────
