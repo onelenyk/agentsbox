@@ -10,6 +10,8 @@ max_concurrent_workers: 2
 task_budget_usd: 5.0
 # Daily $ cap across all tasks (0 = disabled).
 daily_budget_usd: 0
+# How often the autopilot loop checks for due scheduled automations.
+autopilot_tick_seconds: 30
 github:
   base_url: ${GITHUB_BASE_URL}
   token: ${GITHUB_TOKEN}
@@ -38,8 +40,3 @@ repos:
 - branch: main
   name: testrepo-bug
   source: /Users/lenyk/workproject/agentsbox/testrepo-bug
-scheduler:
-  jobs:
-  - minutes: 60
-    name: orphan-cleanup
-    trigger: interval

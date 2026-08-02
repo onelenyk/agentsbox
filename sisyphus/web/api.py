@@ -364,6 +364,102 @@ async def receive_webhook(platform: str, request: Request):
     return {"ok": True, "task_id": task["id"]}
 
 
+# ── Autopilots ──────────────────────────────────────────────────────────
+
+
+class CreateAutopilot(BaseModel):
+    name: str
+    description: str = ""
+    trigger_type: str = "schedule"   # schedule | webhook | manual
+    cron: str = ""
+    interval_seconds: int = 0
+    webhook_platform: str = ""
+    webhook_event: str = ""
+    goal_template: str = ""
+    repo: str = ""
+    agent: str = ""
+    enabled: int = 1
+    skip_if_running: int = 1
+
+
+class UpdateAutopilot(BaseModel):
+    name: str = None
+    description: str = None
+    trigger_type: str = None
+    cron: str = None
+    interval_seconds: int = None
+    webhook_platform: str = None
+    webhook_event: str = None
+    goal_template: str = None
+    repo: str = None
+    agent: str = None
+    enabled: int = None
+    skip_if_running: int = None
+
+
+@api.get("/autopilots")
+async def list_autopilots_ep():
+    from core.autopilot import list_autopilots
+    return {"autopilots": list_autopilots()}
+
+
+@api.post("/autopilots")
+async def create_autopilot_ep(body: CreateAutopilot):
+    from core.autopilot import create_autopilot
+    if not body.name.strip():
+        raise HTTPException(status_code=422, detail="name is required")
+    return {"autopilot": create_autopilot(**body.model_dump())}
+
+
+def _require_autopilot(ap_id: str):
+    from core.autopilot import get_autopilot
+    ap = get_autopilot(ap_id)
+    if not ap:
+        raise HTTPException(status_code=404, detail=f"autopilot not found: {ap_id}")
+    return ap
+
+
+@api.get("/autopilots/{ap_id}")
+async def get_autopilot_ep(ap_id: str):
+    return {"autopilot": _require_autopilot(ap_id)}
+
+
+@api.patch("/autopilots/{ap_id}")
+async def update_autopilot_ep(ap_id: str, body: UpdateAutopilot):
+    from core.autopilot import update_autopilot
+    _require_autopilot(ap_id)
+    return {"autopilot": update_autopilot(ap_id, **body.model_dump(exclude_none=True))}
+
+
+@api.delete("/autopilots/{ap_id}")
+async def delete_autopilot_ep(ap_id: str):
+    from core.autopilot import delete_autopilot
+    _require_autopilot(ap_id)
+    return {"success": delete_autopilot(ap_id), "id": ap_id}
+
+
+@api.post("/autopilots/{ap_id}/run")
+async def run_autopilot_ep(ap_id: str):
+    from core.autopilot import fire
+    ap = _require_autopilot(ap_id)
+    task_id = fire(ap)
+    return {"fired": task_id is not None, "task_id": task_id}
+
+
+@api.post("/autopilots/{ap_id}/pause")
+async def pause_autopilot_ep(ap_id: str):
+    from core.autopilot import set_enabled
+    _require_autopilot(ap_id)
+    return {"autopilot": set_enabled(ap_id, False)}
+
+
+@api.post("/autopilots/{ap_id}/resume")
+async def resume_autopilot_ep(ap_id: str):
+    from core.autopilot import set_enabled
+    _require_autopilot(ap_id)
+    return {"autopilot": set_enabled(ap_id, True)}
+
+
 # ── Orchestrator control ────────────────────────────────────────────────
 
 

@@ -31,11 +31,13 @@ async def startup():
     from core.agents import init_agents_table
     from core.usage import init_usage_table
     from core.mergerequests import init_mr_table
+    from core.autopilot import init_autopilot_table
     init_db()
     init_runners_table()  # daemon is self-sufficient: seed the runners table
     init_agents_table()   # and the agents (personas + tool allowlists)
     init_usage_table()    # and the per-run token/cost ledger
     init_mr_table()       # and the local merge-request ledger
+    init_autopilot_table()  # and the autopilot automations
 
     import web.agent_mcp as agent_mcp
     from core import orchestrator
@@ -52,6 +54,9 @@ async def startup():
         logger.warning("preflight: NOT ready to run work — %s", pf["reason"])
 
     asyncio.create_task(orchestrator.dispatch_forever())
+
+    from core import autopilot
+    asyncio.create_task(autopilot.run_forever())
 
 @router.get("/", response_class=HTMLResponse)
 async def root():
