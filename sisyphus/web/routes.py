@@ -66,6 +66,27 @@ async def dashboard_view(request: Request):
     from core.stats import dashboard
     return _tmpl().TemplateResponse("dashboard_view.html", {"request": request, "d": dashboard()})
 
+@router.get("/api/notifications/poll")
+async def notifications_poll():
+    """Recent task state changes worth a browser notification: tasks that just
+    finished (done/failed) or now need input (waiting). Bounded to the last 15
+    minutes so the payload stays small; the client dedupes by key."""
+    from datetime import datetime, timedelta, timezone
+    from core import store
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat()
+    items = []
+    for status in ("waiting", "done", "failed"):
+        for t in store.list_tasks(status=status):
+            if t.get("updated_at", "") >= cutoff:
+                items.append({
+                    "key": f"{t['id']}:{status}:{t.get('updated_at', '')}",
+                    "task_id": t["id"],
+                    "status": status,
+                    "goal": t["goal"],
+                })
+    return {"items": items}
+
 @router.get("/runtime", response_class=HTMLResponse)
 async def runtime_page(request: Request):
     import os

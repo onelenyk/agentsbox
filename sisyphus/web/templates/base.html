@@ -26,6 +26,7 @@
             </nav>
             <div class="sys">
                 <div class="line"><span id="daemon-led" class="led live"></span> daemon <span id="daemon-val" class="val">live</span></div>
+                <div class="line" style="cursor:pointer" onclick="enableNotifications()" title="Browser notifications for finished / waiting tasks"><span id="notif-led" class="led idle"></span> alerts <span id="notif-val" class="val">off</span></div>
                 <div class="line"><span class="led amber"></span> ui <span class="val">v2.0</span></div>
             </div>
         </aside>
@@ -72,6 +73,45 @@
         }
         heartbeat();
         setInterval(heartbeat, 10000);
+
+        // Browser notifications for tasks that finished or now need input.
+        function refreshNotifUI() {
+            var led = document.getElementById("notif-led");
+            var val = document.getElementById("notif-val");
+            if (!("Notification" in window)) { if (val) val.textContent = "n/a"; return; }
+            var p = Notification.permission;
+            if (led) led.className = "led " + (p === "granted" ? "live" : (p === "denied" ? "dead" : "idle"));
+            if (val) val.textContent = p === "granted" ? "on" : (p === "denied" ? "blocked" : "off");
+        }
+        function enableNotifications() {
+            if (!("Notification" in window)) return;
+            Notification.requestPermission().then(refreshNotifUI);
+        }
+        var _notifSeen = null;  // null until the first poll seeds it (no notify on load)
+        function showTaskNotification(i) {
+            if (!("Notification" in window) || Notification.permission !== "granted") return;
+            var verb = i.status === "waiting" ? "needs your input"
+                     : (i.status === "done" ? "completed" : "failed");
+            var n = new Notification("Sisyphus — task " + verb, { body: i.goal, tag: i.task_id });
+            n.onclick = function () { window.focus(); window.location.href = "/tasks/" + i.task_id; };
+        }
+        function notifyPoll() {
+            fetch("/api/notifications/poll", { cache: "no-store" })
+                .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+                .then(function (d) {
+                    if (_notifSeen === null) {
+                        _notifSeen = new Set(d.items.map(function (i) { return i.key; }));
+                        return;  // seed only — don't announce pre-existing state
+                    }
+                    d.items.forEach(function (i) {
+                        if (!_notifSeen.has(i.key)) { _notifSeen.add(i.key); showTaskNotification(i); }
+                    });
+                })
+                .catch(function () {});
+        }
+        refreshNotifUI();
+        notifyPoll();
+        setInterval(notifyPoll, 10000);
     </script>
 </body>
 </html>
