@@ -38,11 +38,9 @@ def _prompt(text, template, repo_names, agent_names):
     )
 
 
-def parse_task(text, template="", repos=None, agents=None, timeout=60) -> dict:
-    repos, agents = repos or [], agents or []
-    repo_names = [r["name"] for r in repos]
-    agent_names = [a["name"] for a in agents]
-
+def run_prompt(prompt: str, timeout: int = 60) -> str:
+    """One-shot local AI call through the default runner (opencode), forced to the
+    runner's cheap/fast model. Returns the model's stdout text. No new model HTTP."""
     from core.runner_detect import resolve
     from core.runners import get_default_runner
 
@@ -58,14 +56,21 @@ def parse_task(text, template="", repos=None, agents=None, timeout=60) -> dict:
     if runner.get("base_url"):
         env["OPENROUTER_BASE_URL"] = runner["base_url"]
 
-    # Force the runner's (cheap/fast) model — opencode's default agent otherwise
-    # picks a slower model and the call takes ~5x longer.
+    # Force the runner's model — opencode's default agent otherwise picks a slower
+    # model and the call takes ~5x longer.
     model_args = ["--model", runner["model"]] if runner.get("model") else []
-    prompt = _prompt(text, template, repo_names, agent_names)
-    with tempfile.TemporaryDirectory(prefix="sisyphus-aiparse-") as d:
+    with tempfile.TemporaryDirectory(prefix="sisyphus-ai-") as d:
         proc = subprocess.run([binary, "run", *model_args, prompt], capture_output=True,
                               text=True, timeout=timeout, cwd=d, env=env)
-    return _parse_out(proc.stdout or "", repo_names, agent_names)
+    return proc.stdout or ""
+
+
+def parse_task(text, template="", repos=None, agents=None, timeout=60) -> dict:
+    repos, agents = repos or [], agents or []
+    repo_names = [r["name"] for r in repos]
+    agent_names = [a["name"] for a in agents]
+    out = run_prompt(_prompt(text, template, repo_names, agent_names), timeout=timeout)
+    return _parse_out(out, repo_names, agent_names)
 
 
 def _find_json(out: str):
