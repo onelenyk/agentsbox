@@ -13,6 +13,8 @@ from pathlib import Path
 
 import click
 
+from core.env import load_env
+load_env()
 os.environ.setdefault(
     "WORKSPACE_ROOT", str(Path(__file__).resolve().parent / "workspace")
 )
@@ -133,6 +135,90 @@ def runners_health(runner_id):
                     click.echo(f"     {result['error']}")
 
     asyncio.run(_check())
+
+
+@cli.group()
+def daemon():
+    """Control the daemon (manual, or launchd-supervised)."""
+
+
+@daemon.command("status")
+def daemon_status():
+    """Show whether the daemon is running and supervised."""
+    from core import daemon_ctl as d
+
+    s = d.status()
+    click.echo(f"daemon:     {'live' if s['running'] else 'down'}"
+               + (f" (v{s['version']})" if s["version"] else ""))
+    click.echo(f"supervised: {'yes (launchd)' if s['supervised'] else 'no'}")
+    click.echo(f"url:        {s['url']}")
+
+
+@daemon.command("install")
+def daemon_install():
+    """Install & load the launchd LaunchAgent (start at login, restart on crash)."""
+    from core import daemon_ctl as d
+
+    res = d.install()
+    if res["ok"]:
+        click.echo(f"Installed and loaded: {res['plist']}")
+        click.echo("The daemon now starts at login and restarts on crash.")
+        click.echo("Reminder: put your OPENROUTER_API_KEY in .env (launchd has no shell env).")
+    else:
+        click.echo(f"launchctl load failed: {res['err']}", err=True)
+
+
+@daemon.command("uninstall")
+def daemon_uninstall():
+    """Unload & remove the launchd LaunchAgent."""
+    from core import daemon_ctl as d
+
+    click.echo("Removed the LaunchAgent." if d.uninstall()["removed"]
+               else "No LaunchAgent installed.")
+
+
+@daemon.command("start")
+def daemon_start():
+    """Start the daemon (via launchd if installed, else spawn uvicorn)."""
+    from core import daemon_ctl as d
+
+    res = d.start()
+    if res.get("already_running"):
+        click.echo("Already running.")
+    else:
+        click.echo(f"Started ({res['via']}).")
+
+
+@daemon.command("stop")
+def daemon_stop():
+    """Stop the daemon."""
+    from core import daemon_ctl as d
+
+    d.stop()
+    click.echo("Stopped.")
+
+
+@daemon.command("restart")
+def daemon_restart():
+    """Restart the daemon (to pick up new code)."""
+    from core import daemon_ctl as d
+
+    d.restart()
+    click.echo("Restarted." if d.is_running() else "Restart issued (still starting…).")
+
+
+@daemon.command("logs")
+@click.option("-f", "--follow", is_flag=True, help="Follow the log (tail -f).")
+def daemon_logs(follow):
+    """Tail the daemon log."""
+    import subprocess
+    from core import daemon_ctl as d
+
+    log = d.LOG_DIR / "daemon.err.log"
+    if not log.exists():
+        click.echo(f"No log yet at {log}")
+        return
+    subprocess.run(["tail"] + (["-f"] if follow else ["-n", "200"]) + [str(log)])
 
 
 if __name__ == "__main__":

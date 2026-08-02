@@ -4,6 +4,10 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
+
+# Load .env before anything reads the environment (config, DB path, secrets).
+from core.env import load_env
+load_env()
 os.environ.setdefault("WORKSPACE_ROOT", str(_REPO_ROOT / "workspace"))
 
 from fastapi import FastAPI
