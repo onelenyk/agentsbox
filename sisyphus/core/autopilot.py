@@ -230,6 +230,40 @@ def fire(ap: dict, context: Optional[dict] = None) -> Optional[str]:
     return task["id"]
 
 
+# ── webhook triggers ────────────────────────────────────────────────────
+
+def event_key(platform: str, payload: dict) -> str:
+    """A short string identifying the event, for the optional webhook_event
+    filter. github: action; gitlab: object_kind; jira: webhookEvent."""
+    payload = payload or {}
+    if platform == "github":
+        return str(payload.get("action") or "")
+    if platform == "gitlab":
+        return str(payload.get("object_kind") or "")
+    if platform == "jira":
+        return str(payload.get("webhookEvent") or "")
+    return ""
+
+
+def fire_webhook_autopilots(platform: str, payload: dict) -> list:
+    """Fire every enabled webhook autopilot matching this platform + event
+    filter, rendering the goal template against the payload. Returns the fires."""
+    key = event_key(platform, payload).lower()
+    fired = []
+    for ap in list_autopilots(enabled=True):
+        if ap.get("trigger_type") != "webhook":
+            continue
+        if ap.get("webhook_platform") and ap["webhook_platform"] != platform:
+            continue
+        filt = (ap.get("webhook_event") or "").strip().lower()
+        if filt and filt not in key:
+            continue
+        tid = fire(ap, context=payload or {})
+        if tid:
+            fired.append({"autopilot": ap["id"], "task_id": tid})
+    return fired
+
+
 # ── tick loop ───────────────────────────────────────────────────────────
 
 def reconcile_next_runs() -> None:

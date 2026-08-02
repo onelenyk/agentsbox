@@ -115,6 +115,50 @@ def test_tick_ignores_disabled_and_future(db_path, monkeypatch):
     assert ap.get_autopilot(future["id"])["run_count"] == 0
 
 
+# ── webhook triggers ───────────────────────────────────────────────────
+
+def test_event_key(db_path):
+    assert ap.event_key("github", {"action": "opened"}) == "opened"
+    assert ap.event_key("gitlab", {"object_kind": "merge_request"}) == "merge_request"
+    assert ap.event_key("jira", {"webhookEvent": "jira:issue_created"}) == "jira:issue_created"
+    assert ap.event_key("bitbucket", {"x": 1}) == ""
+
+
+def test_webhook_autopilot_fires_and_renders(db_path, monkeypatch):
+    _emit_recorder(monkeypatch)
+    ap.create_autopilot(name="Jira intake", trigger_type="webhook",
+                        webhook_platform="jira", webhook_event="issue_created",
+                        goal_template="Analyze {{ issue.key }}: {{ issue.fields.summary }}")
+    payload = {"webhookEvent": "jira:issue_created",
+               "issue": {"key": "SLN-42", "fields": {"summary": "Offline bug"}}}
+    fired = ap.fire_webhook_autopilots("jira", payload)
+    assert len(fired) == 1
+    t = store.get_task(fired[0]["task_id"])
+    assert t["goal"] == "Analyze SLN-42: Offline bug"
+
+
+def test_webhook_autopilot_respects_filters(db_path, monkeypatch):
+    _emit_recorder(monkeypatch)
+    ap.create_autopilot(name="only opened", trigger_type="webhook",
+                        webhook_platform="github", webhook_event="opened",
+                        goal_template="pr {{ action }}")
+    # wrong event -> no fire
+    assert ap.fire_webhook_autopilots("github", {"action": "closed"}) == []
+    # wrong platform -> no fire
+    assert ap.fire_webhook_autopilots("gitlab", {"object_kind": "merge_request"}) == []
+    # matching -> fires
+    assert len(ap.fire_webhook_autopilots("github", {"action": "opened"})) == 1
+
+
+def test_webhook_ignores_schedule_and_disabled(db_path, monkeypatch):
+    _emit_recorder(monkeypatch)
+    ap.create_autopilot(name="sched", trigger_type="schedule", interval_seconds=60,
+                        goal_template="x")
+    ap.create_autopilot(name="off", trigger_type="webhook", webhook_platform="jira",
+                        goal_template="x", enabled=0)
+    assert ap.fire_webhook_autopilots("jira", {"webhookEvent": "jira:issue_created"}) == []
+
+
 def test_reconcile_skips_missed(db_path):
     a = ap.create_autopilot(name="Nightly", trigger_type="schedule", cron="0 3 * * *")
     ap._set_next_run(a["id"], "2000-01-01T00:00:00+00:00")  # a long-missed fire
