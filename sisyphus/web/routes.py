@@ -142,7 +142,42 @@ async def repos_page(request: Request):
 @router.get("/api/repos/list", response_class=HTMLResponse)
 async def repos_list(request: Request):
     from core.repos import list_repos
-    return _tmpl().TemplateResponse("repos_list.html", {"request": request, "repos": list_repos()})
+    from core import store
+    repos = list_repos()
+    tasks = [t for t in store.list_tasks() if not t.get("parent_id")]
+    for r in repos:  # annotate each repo with its task progress (Projects-style)
+        rt = [t for t in tasks if t.get("repo") == r["name"]]
+        r["task_total"] = len(rt)
+        r["task_done"] = sum(1 for t in rt if t["status"] == "done")
+    return _tmpl().TemplateResponse("repos_list.html", {"request": request, "repos": repos})
+
+@router.get("/repos/{name}", response_class=HTMLResponse)
+async def repo_detail_page(request: Request, name: str):
+    from core.repos import get_repo, REPOS_DIR
+    from core import repo_context, store
+    repo = get_repo(name)
+    if not repo:
+        return HTMLResponse('<div class="empty">Repository not found</div>', status_code=404)
+    bare = REPOS_DIR / name
+    repo["cloned"] = bare.exists() and (bare / "HEAD").exists()
+    source = repo.get("source", "")
+    tasks = [t for t in store.list_tasks() if t.get("repo") == name and not t.get("parent_id")]
+    return _tmpl().TemplateResponse("repos_detail.html", {
+        "request": request, "active_page": "repos", "repo": repo,
+        "resources": repo_context.resources(source),
+        "summary": repo_context.summary(source),
+        "tasks": tasks,
+        "done": sum(1 for t in tasks if t["status"] == "done"),
+    })
+
+@router.get("/api/repos/{name}/resource", response_class=HTMLResponse)
+async def repo_resource_view(request: Request, name: str, path: str):
+    from core.repos import get_repo
+    from core import repo_context
+    repo = get_repo(name)
+    content = repo_context.read_resource(repo["source"], path) if repo else None
+    return _tmpl().TemplateResponse("repo_resource_modal.html",
+        {"request": request, "name": name, "path": path, "content": content})
 
 @router.get("/api/repos/new-form", response_class=HTMLResponse)
 async def repos_new_form(request: Request):

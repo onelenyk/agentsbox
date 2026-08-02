@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}{{ repo.name }} — Sisyphus{% endblock %}
+{% block content %}
+<div class="page-head">
+    <h1 class="row" style="gap:8px"><a href="/repos" class="muted" style="font-size:15px;font-weight:500">Repos</a><span class="muted">/</span><span style="font-size:15px">{{ repo.name }}</span></h1>
+</div>
+
+<div class="task-detail">
+  <div class="panel task-main">
+    <div class="panel__head">
+        <h2>⎇ {{ repo.name }}</h2>
+        {% if repo.cloned %}<span class="status status--done">cloned</span>{% else %}<span class="status status--waiting">pending</span>{% endif %}
+    </div>
+    <div class="term wrap">{{ repo.source }}</div>
+
+    <div class="section-title">Tasks <span class="chip">{{ done }}/{{ tasks|length }} done</span></div>
+    {% for t in tasks %}
+    <a class="subtask" href="/tasks/{{ t.id }}">
+        <span class="goal">{{ t.goal }}</span>
+        <span class="status status--{{ t.status }}">{{ t.status }}</span>
+    </a>
+    {% else %}
+    <div class="empty">No tasks for this repo yet.</div>
+    {% endfor %}
+
+    <div class="section-title">Agent context <span class="chip">what the AI reads</span></div>
+    {% if resources %}
+    <div class="reslist">
+        {% for res in resources %}
+        <div class="resitem">
+            <span class="resicon">{{ '📁' if res.kind == 'dir' else '📄' }}</span>
+            <div class="resmeta">
+                <span class="mono">{{ res.path }}</span>
+                <span class="ressub">{{ res.label }}{% if res.kind == 'file' %} · {{ (res.size / 1024)|round(1) }} KB{% else %} · {{ res.count }} file{{ 's' if res.count != 1 else '' }}{% endif %}</span>
+            </div>
+            {% if res.kind == 'file' %}
+            <button class="btn btn--ghost btn--sm" hx-get="/api/repos/{{ repo.name }}/resource?path={{ res.path|urlencode }}" hx-target="#modal-container" hx-swap="innerHTML">View</button>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty">No agent-instruction files found (AGENTS.md, CLAUDE.md, .cursorrules, README…). Agents will work from the code alone.</div>
+    {% endif %}
+  </div>
+
+  <aside class="task-rail">
+    <div class="rail-sec">
+        <div class="rail-h">Properties</div>
+        <div class="prop"><span class="k">Status</span>{% if repo.cloned %}<span class="status status--done">cloned</span>{% else %}<span class="status status--waiting">pending</span>{% endif %}</div>
+        <div class="prop"><span class="k">Branch</span><span class="v mono">⎇ {{ repo.branch }}</span></div>
+        <div class="prop"><span class="k">Tasks</span><span class="v">{{ done }}/{{ tasks|length }}</span></div>
+        <div class="prop"><span class="k">Context files</span><span class="v">{{ resources|length }}</span></div>
+    </div>
+    {% if summary.exists %}
+    <div class="rail-sec">
+        <div class="rail-h">Codebase</div>
+        <div class="prop"><span class="k">Files</span><span class="v mono">{{ '{:,}'.format(summary.files) }}{{ '+' if summary.capped else '' }}</span></div>
+        {% for ext, n in summary.langs %}<div class="prop"><span class="k mono">{{ ext }}</span><span class="v mono">{{ n }}</span></div>{% endfor %}
+    </div>
+    {% endif %}
+    <div class="rail-sec">
+        <div class="rail-h">Actions</div>
+        <div class="acts" style="flex-wrap:wrap;gap:6px">
+            <button class="btn btn--ghost btn--sm" hx-post="/api/repos/{{ repo.name }}/update" hx-swap="none">Fetch</button>
+            <button class="btn btn--ghost btn--sm" hx-get="/api/repos/{{ repo.name }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
+        </div>
+    </div>
+  </aside>
+</div>
+{% endblock %}

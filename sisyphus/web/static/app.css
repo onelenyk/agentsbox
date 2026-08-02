@@ -554,3 +554,13 @@ select { cursor: pointer; appearance: none;
 .rail-sec .prop .k { color: var(--muted); }
 .rail-sec .prop .v { color: var(--text-2); text-align: right; word-break: break-word; }
 @media (max-width: 900px) { .task-detail { grid-template-columns: 1fr; } .task-rail { position: static; } }
+
+/* ── Repo detail: agent-context resource list ────────────────────────── */
+.reslist { display: flex; flex-direction: column; gap: 8px; }
+.resitem { display: flex; align-items: center; gap: 11px; padding: 10px 13px; background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--r); transition: border-color .12s; }
+.resitem:hover { border-color: var(--border-2); }
+.resicon { font-size: 16px; flex: none; }
+.resmeta { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.resmeta .mono { font-size: 12.5px; color: var(--text); }
+.ressub { font-size: 11px; color: var(--muted); }
+.resitem .btn { flex: none; }
