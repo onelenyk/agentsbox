@@ -7,10 +7,93 @@
         <div class="sub">Autonomous work, coordinated on one thread per task.</div>
     </div>
     <div class="actions">
+        <button class="btn btn--ghost" onclick="cpToggle()">💬 Copilot</button>
         <button class="btn btn--primary" hx-get="/api/tasks/new-form" hx-target="#modal-container">+ New Task</button>
     </div>
 </div>
 <div id="tasks-list" hx-get="/api/tasks/list" hx-trigger="load, taskCreated from:body, taskUpdated from:body" hx-swap="innerHTML">
     <div class="empty">Loading…</div>
 </div>
+
+<aside id="copilot" class="copilot">
+    <div class="cp-head"><span>💬 Board Copilot</span>
+        <button class="btn btn--ghost btn--sm" onclick="cpToggle()">✕</button></div>
+    <div id="cp-log" class="cp-log">
+        <div class="cp-msg cp-bot">Ask about the board — “what's stuck?”, “summarize today”, or tell me “create a task to add tests to testrepo”. I'll confirm before acting.</div>
+    </div>
+    <form class="cp-input" onsubmit="cpSend(event)">
+        <textarea id="cp-text" rows="2" placeholder="Ask or tell the copilot…"
+                  onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();cpSend(event);}"></textarea>
+        <button type="submit" class="btn btn--primary btn--sm" id="cp-send">Send</button>
+    </form>
+</aside>
+
+<script>
+    const cpHistory = [];
+    function cpToggle() {
+        document.getElementById('copilot').classList.toggle('open');
+        document.getElementById('cp-text').focus();
+    }
+    function cpAppend(role, text) {
+        const log = document.getElementById('cp-log');
+        const el = document.createElement('div');
+        el.className = 'cp-msg ' + (role === 'user' ? 'cp-user' : 'cp-bot');
+        el.textContent = text;
+        log.appendChild(el); log.scrollTop = log.scrollHeight;
+        return el;
+    }
+    async function cpSend(e) {
+        if (e) e.preventDefault();
+        const ta = document.getElementById('cp-text');
+        const msg = ta.value.trim(); if (!msg) return;
+        ta.value = ''; cpAppend('user', msg); cpHistory.push({ role: 'user', text: msg });
+        const btn = document.getElementById('cp-send'); btn.disabled = true;
+        const thinking = cpAppend('bot', '…thinking');
+        try {
+            const r = await fetch('/api/board/chat', {
+                method: 'POST', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ message: msg, history: cpHistory })
+            });
+            const d = await r.json();
+            thinking.remove();
+            const reply = d.reply || d.error || '(no reply)';
+            cpAppend('bot', reply); cpHistory.push({ role: 'bot', text: reply });
+            if (d.action) cpRenderAction(d.action);
+        } catch (err) { thinking.textContent = '(copilot unavailable)'; }
+        btn.disabled = false;
+    }
+    function cpActionDesc(a) {
+        if (a.type === 'create_task') return '➕ Create task: ' + (a.goal || '').slice(0, 140)
+            + (a.repo ? ('  · repo ' + a.repo) : '') + (a.agent ? ('  · ' + a.agent) : '');
+        if (a.type === 'reply_task') return '💬 Reply to ' + a.task_id + ': "' + (a.text || '').slice(0, 120) + '"';
+        if (a.type === 'pause_autopilot') return '⏸ Pause autopilot ' + a.id;
+        if (a.type === 'resume_autopilot') return '▶ Resume autopilot ' + a.id;
+        return JSON.stringify(a);
+    }
+    function cpRenderAction(action) {
+        const log = document.getElementById('cp-log');
+        const card = document.createElement('div'); card.className = 'cp-action';
+        const desc = document.createElement('div'); desc.className = 'cp-action-desc';
+        desc.textContent = cpActionDesc(action); card.appendChild(desc);
+        const row = document.createElement('div'); row.className = 'cp-action-btns';
+        const yes = document.createElement('button'); yes.className = 'btn btn--primary btn--sm'; yes.textContent = 'Confirm';
+        const no = document.createElement('button'); no.className = 'btn btn--ghost btn--sm'; no.textContent = 'Cancel';
+        yes.onclick = async () => {
+            yes.disabled = true; no.disabled = true;
+            try {
+                const r = await fetch('/api/board/act', {
+                    method: 'POST', headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ action })
+                });
+                const d = await r.json();
+                card.remove();
+                cpAppend('bot', d.result || d.error || 'done');
+                if (window.htmx) htmx.trigger('#tasks-list', 'load');
+            } catch (e) { cpAppend('bot', '(action failed)'); }
+        };
+        no.onclick = () => { card.remove(); cpAppend('bot', 'Cancelled.'); };
+        row.appendChild(yes); row.appendChild(no); card.appendChild(row);
+        log.appendChild(card); log.scrollTop = log.scrollHeight;
+    }
+</script>
 {% endblock %}

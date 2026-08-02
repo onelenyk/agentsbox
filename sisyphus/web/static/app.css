@@ -570,3 +570,17 @@ select { cursor: pointer; appearance: none;
 .chip-btn { font: inherit; font-size: 12px; font-weight: 550; padding: 5px 11px; border-radius: var(--r-pill); border: 1px solid var(--border-2); background: var(--panel-2); color: var(--text-2); cursor: pointer; transition: color .12s, background .12s, border-color .12s; }
 .chip-btn:hover { color: var(--text); background: var(--hover); }
 .chip-btn.is-on { color: var(--accent-hi); background: var(--accent-bg); border-color: var(--accent-bd); }
+
+/* ── Board Copilot dock ──────────────────────────────────────────────── */
+.copilot { position: fixed; top: 0; right: 0; width: 372px; max-width: 100%; height: 100vh; background: var(--panel); border-left: 1px solid var(--border); display: flex; flex-direction: column; z-index: 60; transform: translateX(100%); transition: transform .18s ease; box-shadow: -10px 0 30px rgba(0,0,0,.4); }
+.copilot.open { transform: translateX(0); }
+.cp-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 14px; }
+.cp-log { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.cp-msg { font-size: 13px; line-height: 1.5; padding: 9px 12px; border-radius: 10px; max-width: 92%; white-space: pre-wrap; word-break: break-word; }
+.cp-user { align-self: flex-end; background: var(--accent-bg); color: var(--text); border: 1px solid var(--accent-bd); }
+.cp-bot { align-self: flex-start; background: var(--panel-2); color: var(--text-2); border: 1px solid var(--border); }
+.cp-action { align-self: stretch; background: var(--panel-2); border: 1px solid var(--accent-bd); border-radius: 10px; padding: 11px 12px; display: flex; flex-direction: column; gap: 9px; }
+.cp-action-desc { font-size: 12.5px; color: var(--text); }
+.cp-action-btns { display: flex; gap: 8px; }
+.cp-input { display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--border); align-items: flex-end; }
+.cp-input textarea { flex: 1; resize: none; }

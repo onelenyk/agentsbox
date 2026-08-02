@@ -615,6 +615,32 @@ async def tasks_ai_parse(text: str = Form(...), template: str = Form("")):
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"error": str(exc)}, status_code=503)
 
+@router.post("/api/board/chat")
+async def board_chat(request: Request):
+    """Board Copilot — one chat turn. Returns {reply, action?}; a proposed action
+    is validated but NOT executed until the user confirms via /api/board/act."""
+    from fastapi.responses import JSONResponse
+    from core import copilot
+    body = await request.json()
+    message = (body.get("message") or "").strip()
+    if not message:
+        return JSONResponse({"error": "empty"}, status_code=422)
+    try:
+        return copilot.chat(message, body.get("history") or [])
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"error": str(exc)}, status_code=503)
+
+@router.post("/api/board/act")
+async def board_act(request: Request):
+    """Execute a user-confirmed copilot action."""
+    from fastapi.responses import JSONResponse
+    from core import copilot
+    body = await request.json()
+    try:
+        return {"result": copilot.execute_action(body.get("action") or {})}
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"error": str(exc)}, status_code=422)
+
 @router.get("/tasks/{task_id}", response_class=HTMLResponse)
 async def task_page(request: Request, task_id: str):
     from core import store
