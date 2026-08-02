@@ -1,4 +1,5 @@
-<div class="panel">
+<div class="task-detail">
+  <div class="panel task-main">
     {% if parent %}
     <div class="breadcrumb">↑ Part of <a href="/tasks/{{ parent.id }}">{{ parent.goal }}</a></div>
     {% endif %}
@@ -12,10 +13,6 @@
                     hx-swap="none">Delete</button>
         </div>
     </div>
-
-    {% if task.repo %}<div class="kv"><span class="k">Repo</span><span class="v">{{ task.repo }}</span></div>{% endif %}
-    <div class="kv"><span class="k">Handled by</span><span class="v">{{ task.agent ~ ' (solo)' if task.agent else 'orchestrator' }}</span></div>
-    <div class="kv"><span class="k">Created</span><span class="v mono">{{ task.created_at[:19] }}</span></div>
 
     {% if result and (result.summary or result.change or result.commits) %}
     <div class="result">
@@ -78,4 +75,32 @@
         <textarea name="text" required rows="2" placeholder="Reply…"></textarea>
         <button type="submit" class="btn btn--primary" style="margin-top:8px">Reply</button>
     </form>
+  </div>
+
+  <aside class="task-rail">
+    <div class="rail-sec">
+        <div class="rail-h">Properties</div>
+        <div class="prop"><span class="k">Status</span><span class="status status--{{ task.status }}">{{ task.status }}</span></div>
+        <div class="prop"><span class="k">Repo</span><span class="v">{{ task.repo or '—' }}</span></div>
+        <div class="prop"><span class="k">Handled by</span><span class="v">{{ task.agent ~ ' (solo)' if task.agent else 'orchestrator' }}</span></div>
+        <div class="prop"><span class="k">Created</span><span class="v mono">{{ task.created_at[:16] }}</span></div>
+        {% if parent %}<div class="prop"><span class="k">Parent</span><a class="v" href="/tasks/{{ parent.id }}">{{ parent.id }}</a></div>{% endif %}
+    </div>
+
+    {% if mr %}
+    <div class="rail-sec">
+        <div class="rail-h">Merge request</div>
+        <button type="button" class="btn btn--ghost btn--sm" style="width:100%;justify-content:center"
+                hx-get="/api/mr/{{ mr.id }}/view" hx-target="#modal-container" hx-swap="innerHTML">⇄ {{ mr.source_branch }} → {{ mr.target_branch }} ({{ mr.status }})</button>
+    </div>
+    {% endif %}
+
+    <div class="rail-sec">
+        <div class="rail-h">Usage</div>
+        <div class="prop"><span class="k">Cost</span><span class="v mono" style="color:var(--accent-hi)">${{ '%.4f'|format(usage.cost) }}</span></div>
+        <div class="prop"><span class="k">Tokens</span><span class="v mono">{{ '{:,}'.format(usage.tokens) }}</span></div>
+        <div class="prop"><span class="k">Runs</span><span class="v mono">{{ usage.runs }}</span></div>
+        {% if usage.cache_read %}<div class="prop"><span class="k">Cached</span><span class="v mono">{{ '{:,}'.format(usage.cache_read) }}</span></div>{% endif %}
+    </div>
+  </aside>
 </div>

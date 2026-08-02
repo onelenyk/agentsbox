@@ -571,6 +571,7 @@ async def task_page(request: Request, task_id: str):
     task = store.get_task(task_id)
     if not task:
         return HTMLResponse('<div class="detail-panel"><p style="color:#f85149">Task not found</p></div>', status_code=404)
+    from core import usage
     return _tmpl().TemplateResponse("task_detail.html", {
         "request": request, "active_page": "tasks",
         "task": task, "messages": store.get_thread(task_id),
@@ -578,6 +579,7 @@ async def task_page(request: Request, task_id: str):
         "children": store.list_children(task_id),
         "parent": store.get_task(task["parent_id"]) if task.get("parent_id") else None,
         "mr": mergerequests.latest_for_task(task_id),
+        "usage": usage.task_usage(task_id),
     })
 
 def _classify_diff(text: str):
@@ -705,12 +707,14 @@ async def task_detail_view(request: Request, task_id: str):
     task = store.get_task(task_id)
     if not task:
         return HTMLResponse('<div class="detail-panel"><p style="color:#f85149">Task not found</p></div>')
+    from core import usage
     return _tmpl().TemplateResponse("task_detail_content.html", {
         "request": request, "task": task, "messages": store.get_thread(task_id),
         "result": store.result_view(task_id),
         "children": store.list_children(task_id),
         "parent": store.get_task(task["parent_id"]) if task.get("parent_id") else None,
         "mr": mergerequests.latest_for_task(task_id),
+        "usage": usage.task_usage(task_id),
     })
 
 @router.post("/api/tasks/{task_id}/messages")
