@@ -256,10 +256,21 @@ body::before {
 .subtask .goal { font-size: 13px; color: var(--text); }
 
 /* thread */
-.thread { display: flex; flex-direction: column; }
-.msg { padding: 11px 0; border-top: 1px solid var(--border); }
-.msg:first-child { border-top: none; }
-.msg__head { display: flex; align-items: center; gap: 9px; margin-bottom: 5px; }
+.thread { display: flex; flex-direction: column; gap: 9px; }
+.msg {
+  padding: 11px 13px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--border-2);
+  border-radius: var(--r);
+  transition: border-color .12s, background .12s;
+}
+.msg:hover { border-color: var(--border-2); background: var(--hover); }
+.msg--orchestrator { border-left-color: var(--violet); }
+.msg--human        { border-left-color: var(--accent); }
+.msg--worker       { border-left-color: var(--good); }
+.msg--external     { border-left-color: var(--warn); }
+.msg__head { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
 .msg__who { font-size: 12.5px; font-weight: 600; color: var(--text); }
 .msg__who .msg__kind { color: var(--muted); font-weight: 400; font-family: var(--mono); }
 .msg__time { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; margin-left: auto; }

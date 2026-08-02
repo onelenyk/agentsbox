@@ -55,7 +55,7 @@
         {% for m in messages %}
         {% set tone = 'external' if m.kind == 'external' else ('human' if m.author == 'human' else ('orchestrator' if m.author == 'orchestrator' else 'worker')) %}
         {% set icon = '🔔' if m.kind == 'external' else icons.get(m.author, '⚙️') %}
-        <div class="msg">
+        <div class="msg msg--{{ tone }}">
             <div class="msg__head">
                 <span class="av av--{{ tone }}" title="{{ m.author }}">{{ icon }}</span>
                 <span class="msg__who">{{ m.author }}<span class="msg__kind">/{{ m.kind }}</span></span>
