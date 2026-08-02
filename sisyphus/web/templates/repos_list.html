@@ -5,14 +5,15 @@
         <div class="ecard__head">
             <div class="ecard__glyph green">⎇</div>
             <div>
-                <div class="ecard__name">{{ r.name }}</div>
-                <div class="ecard__sub">⎇ {{ r.branch }}</div>
+                <div class="ecard__name"><a href="/repos/{{ r.name }}">{{ r.name }}</a></div>
+                <div class="ecard__sub">⎇ {{ r.branch }}{% if r.task_total %} · {{ r.task_done }}/{{ r.task_total }} tasks{% endif %}</div>
             </div>
             {% if r.cloned %}<span class="status status--done right">cloned</span>{% else %}<span class="status status--waiting right">pending</span>{% endif %}
         </div>
-        <div class="term wrap">{{ r.source }}</div>
+        <a href="/repos/{{ r.name }}" class="term wrap" style="display:block;color:var(--text-2)">{{ r.source }}</a>
         <div class="ecard__foot">
-            <div class="acts" style="margin-left:0">
+            <a class="btn btn--ghost btn--sm" href="/repos/{{ r.name }}">Open</a>
+            <div class="acts" style="margin-left:auto">
                 <button class="btn btn--ghost btn--sm" hx-get="/api/repos/{{ r.name }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
                 <button class="btn btn--ghost btn--sm" hx-post="/api/repos/{{ r.name }}/update" hx-swap="none">Fetch</button>
                 <button class="btn btn--danger btn--sm" hx-delete="/api/repos/{{ r.name }}" hx-confirm="Delete {{ r.name }}?" hx-swap="none" hx-on:after-request="htmx.trigger('#repos-list', 'load')">Delete</button>
