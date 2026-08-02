@@ -599,6 +599,22 @@ async def tasks_create(goal: str = Form(...), repo: str = Form(""), agent: str =
     resp.headers["HX-Trigger"] = "taskCreated"
     return resp
 
+@router.post("/api/tasks/ai-parse")
+async def tasks_ai_parse(text: str = Form(...), template: str = Form("")):
+    """Turn rough words (+ template) into {goal, repo, agent} via a quick local
+    AI run. Returns JSON for the New Task form to fill in."""
+    from fastapi.responses import JSONResponse
+    from core import ai_assist
+    from core.repos import list_repos
+    from core.agents import list_agents
+
+    if not text.strip():
+        return JSONResponse({"error": "empty"}, status_code=422)
+    try:
+        return ai_assist.parse_task(text, template, list_repos(), list_agents(kind="worker"))
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"error": str(exc)}, status_code=503)
+
 @router.get("/tasks/{task_id}", response_class=HTMLResponse)
 async def task_page(request: Request, task_id: str):
     from core import store
