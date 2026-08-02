@@ -530,3 +530,5 @@ select { cursor: pointer; appearance: none;
 @media (max-width: 520px) {
   .board { grid-template-columns: 1fr; }
 }
+
+.ecard.is-off { opacity: .5; }

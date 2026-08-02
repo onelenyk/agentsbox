@@ -262,6 +262,87 @@ async def backups_delete(request: Request, name: str):
         error=None if ok else f"Could not delete {name}",
     )
 
+@router.get("/autopilots", response_class=HTMLResponse)
+async def autopilots_page(request: Request):
+    return _tmpl().TemplateResponse("autopilots.html", {"request": request, "active_page": "autopilots"})
+
+def _autopilots_list_response(request, flash=None, error=None):
+    from core.autopilot import list_autopilots
+    return _tmpl().TemplateResponse(
+        "autopilots_list.html",
+        {"request": request, "autopilots": list_autopilots(), "flash": flash, "error": error},
+    )
+
+@router.get("/api/autopilots/list", response_class=HTMLResponse)
+async def autopilots_list_view(request: Request):
+    return _autopilots_list_response(request)
+
+@router.get("/api/autopilots/new-form", response_class=HTMLResponse)
+async def autopilots_new_form(request: Request):
+    from core.repos import list_repos
+    from core.agents import list_agents
+    return _tmpl().TemplateResponse("autopilots_form.html",
+        {"request": request, "ap": None, "repos": list_repos(), "agents": list_agents(kind="worker")})
+
+@router.get("/api/autopilots/{ap_id}/edit-form", response_class=HTMLResponse)
+async def autopilots_edit_form(request: Request, ap_id: str):
+    from core.autopilot import get_autopilot
+    from core.repos import list_repos
+    from core.agents import list_agents
+    return _tmpl().TemplateResponse("autopilots_form.html",
+        {"request": request, "ap": get_autopilot(ap_id), "repos": list_repos(), "agents": list_agents(kind="worker")})
+
+def _ap_form_fields(name, description, trigger_type, cron, interval_seconds,
+                    webhook_platform, webhook_event, goal_template, repo, agent, skip_if_running):
+    return dict(name=name, description=description, trigger_type=trigger_type, cron=cron,
+                interval_seconds=int(interval_seconds or 0), webhook_platform=webhook_platform,
+                webhook_event=webhook_event, goal_template=goal_template, repo=repo,
+                agent=agent, skip_if_running=1 if skip_if_running else 0)
+
+@router.post("/api/autopilots", response_class=HTMLResponse)
+async def autopilots_create(request: Request, name: str = Form(...), description: str = Form(""),
+        trigger_type: str = Form("schedule"), cron: str = Form(""), interval_seconds: str = Form("0"),
+        webhook_platform: str = Form(""), webhook_event: str = Form(""), goal_template: str = Form(""),
+        repo: str = Form(""), agent: str = Form(""), skip_if_running: str = Form("")):
+    from core.autopilot import create_autopilot
+    create_autopilot(**_ap_form_fields(name, description, trigger_type, cron, interval_seconds,
+        webhook_platform, webhook_event, goal_template, repo, agent, skip_if_running))
+    return _autopilots_list_response(request, flash=f"Created “{name}”")
+
+@router.post("/api/autopilots/{ap_id}", response_class=HTMLResponse)
+async def autopilots_update(request: Request, ap_id: str, name: str = Form(...), description: str = Form(""),
+        trigger_type: str = Form("schedule"), cron: str = Form(""), interval_seconds: str = Form("0"),
+        webhook_platform: str = Form(""), webhook_event: str = Form(""), goal_template: str = Form(""),
+        repo: str = Form(""), agent: str = Form(""), skip_if_running: str = Form("")):
+    from core.autopilot import update_autopilot
+    update_autopilot(ap_id, **_ap_form_fields(name, description, trigger_type, cron, interval_seconds,
+        webhook_platform, webhook_event, goal_template, repo, agent, skip_if_running))
+    return _autopilots_list_response(request, flash=f"Saved “{name}”")
+
+@router.post("/api/autopilots/{ap_id}/run", response_class=HTMLResponse)
+async def autopilots_run(request: Request, ap_id: str):
+    from core.autopilot import get_autopilot, fire
+    ap = get_autopilot(ap_id)
+    if not ap:
+        return _autopilots_list_response(request, error="autopilot not found")
+    tid = fire(ap)
+    return _autopilots_list_response(request,
+        flash=(f"Fired → task {tid}" if tid else "Skipped — previous run still running"))
+
+@router.post("/api/autopilots/{ap_id}/toggle", response_class=HTMLResponse)
+async def autopilots_toggle(request: Request, ap_id: str):
+    from core.autopilot import get_autopilot, set_enabled
+    ap = get_autopilot(ap_id)
+    if ap:
+        set_enabled(ap_id, not ap["enabled"])
+    return _autopilots_list_response(request)
+
+@router.post("/api/autopilots/{ap_id}/delete", response_class=HTMLResponse)
+async def autopilots_delete(request: Request, ap_id: str):
+    from core.autopilot import delete_autopilot
+    delete_autopilot(ap_id)
+    return _autopilots_list_response(request)
+
 @router.get("/runners", response_class=HTMLResponse)
 async def runners_page(request: Request):
     return _tmpl().TemplateResponse("runners.html", {"request": request, "active_page": "runners"})

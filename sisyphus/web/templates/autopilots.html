@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Autopilot — Sisyphus{% endblock %}
+{% block content %}
+<div class="page-head">
+    <div>
+        <h1>Autopilot</h1>
+        <div class="sub">Automations that fire on a schedule and create a task — work that happens on its own.</div>
+    </div>
+    <div class="actions">
+        <button class="btn btn--primary" hx-get="/api/autopilots/new-form" hx-target="body" hx-swap="beforeend">+ New Autopilot</button>
+    </div>
+</div>
+<div id="autopilots-list" hx-get="/api/autopilots/list" hx-trigger="load, autopilotsUpdated from:body" hx-swap="innerHTML">
+    <div class="empty">Loading…</div>
+</div>
+{% endblock %}

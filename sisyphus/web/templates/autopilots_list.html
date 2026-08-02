@@ -1,0 +1,44 @@
+{% if flash %}<div class="mr-flash ok">✓ {{ flash }}</div>{% endif %}
+{% if error %}<div class="mr-flash err">✗ {{ error }}</div>{% endif %}
+{% if autopilots %}
+<div class="card-grid">
+    {% for a in autopilots %}
+    <div class="ecard{{ ' is-off' if not a.enabled else '' }}">
+        <div class="ecard__head">
+            <div class="ecard__glyph">⚡</div>
+            <div>
+                <div class="ecard__name">{{ a.name }}</div>
+                <div class="ecard__sub">
+                    {% if a.trigger_type == 'schedule' %}
+                        {% if a.cron %}⏰ {{ a.cron }}
+                        {% elif a.interval_seconds %}⏱ every {% if a.interval_seconds % 3600 == 0 %}{{ a.interval_seconds // 3600 }}h{% elif a.interval_seconds % 60 == 0 %}{{ a.interval_seconds // 60 }}m{% else %}{{ a.interval_seconds }}s{% endif %}
+                        {% else %}⏰ schedule{% endif %}
+                    {% elif a.trigger_type == 'webhook' %}🔔 {{ a.webhook_platform }}{% if a.webhook_event %} · {{ a.webhook_event }}{% endif %}
+                    {% else %}▶ manual{% endif %}
+                </div>
+            </div>
+            <span class="badge {{ 'badge--accent' if a.enabled else '' }} right">{{ 'active' if a.enabled else 'paused' }}</span>
+        </div>
+        {% if a.description %}<div class="ecard__persona">{{ a.description }}</div>{% endif %}
+        <div class="kv"><span class="k">Assignee</span><span class="v">{{ a.agent or 'orchestrator' }}</span></div>
+        <div class="kv"><span class="k">Last run</span><span class="v mono">{{ a.last_run[:16] if a.last_run else '—' }}</span></div>
+        <div class="kv"><span class="k">Next run</span><span class="v mono">{{ a.next_run[:16] if (a.enabled and a.next_run) else '—' }}</span></div>
+        <div class="ecard__foot">
+            <span class="ecard__sub mono">{{ a.run_count }} run{{ 's' if a.run_count != 1 else '' }}</span>
+            <div class="acts">
+                <button class="btn btn--ghost btn--sm" hx-post="/api/autopilots/{{ a.id }}/run"
+                        hx-target="#autopilots-list" hx-swap="innerHTML">▶ Run now</button>
+                <button class="btn btn--ghost btn--sm" hx-post="/api/autopilots/{{ a.id }}/toggle"
+                        hx-target="#autopilots-list" hx-swap="innerHTML">{{ 'Pause' if a.enabled else 'Resume' }}</button>
+                <button class="btn btn--ghost btn--sm" hx-get="/api/autopilots/{{ a.id }}/edit-form"
+                        hx-target="body" hx-swap="beforeend">Edit</button>
+                <button class="btn btn--danger btn--sm" hx-post="/api/autopilots/{{ a.id }}/delete"
+                        hx-confirm="Delete autopilot {{ a.name }}?" hx-target="#autopilots-list" hx-swap="innerHTML">Delete</button>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty">No autopilots yet. Create one to run work on a schedule.</div>
+{% endif %}
