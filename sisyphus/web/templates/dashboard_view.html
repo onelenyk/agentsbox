@@ -1,4 +1,5 @@
 {% set ov = d.ov %}{% set t = ov.tasks %}{% set u = ov.usage %}{% set a = ov.activity %}
+{% set icons = {'orchestrator':'🧭','engineer':'🔧','reviewer':'🔍','explorer':'🔭','planner':'🗺️','human':'🧑'} %}
 <div class="kpis">
     <div class="kpi kpi--live"><div class="l">Active</div><div class="v">{{ t.by_status.get('active', 0) }}</div><div class="d">{{ t.by_status.get('waiting', 0) }} waiting</div></div>
     <div class="kpi"><div class="l">Done</div><div class="v">{{ t.done }}</div><div class="d">{{ t.completion_rate ~ '% completion' if t.completion_rate is not none else '—' }}</div></div>
@@ -12,8 +13,9 @@
             <div class="panel__h"><span class="led {{ 'live' if d.active else 'idle' }}"></span><span class="t">Agents at work</span><span class="c">{{ d.active|selectattr('running')|list|length }} running</span></div>
             <div class="panel__b">
                 {% for x in d.active %}
+                {% set xtone = 'orchestrator' if x.role == 'orchestrator' else 'worker' %}
                 <a class="live-row" href="/tasks/{{ x.id }}">
-                    <div class="who"><span class="led {{ 'live' if x.running else 'idle' }}"></span><span class="role">{{ x.role }}</span></div>
+                    <div class="who"><span class="av av--sm av--{{ xtone }}" title="{{ x.role }}">{{ icons.get(x.role, '⚙️') }}</span><span class="led {{ 'live' if x.running else 'idle' }}"></span><span class="role">{{ x.role }}</span></div>
                     <div class="goal">{{ x.goal }} <small>· {{ x.repo or 'no repo' }}</small></div>
                     <div class="meta">{{ 'running' if x.running else x.state }}</div>
                 </a>
@@ -67,7 +69,8 @@
             <div class="feed">
                 {% for m in d.recent %}
                 {% set tone = 'external' if m.kind == 'external' else ('human' if m.author == 'human' else ('orchestrator' if m.author == 'orchestrator' else 'worker')) %}
-                <div class="ev"><span class="tag tag--{{ tone }}">{{ m.author[:4] }}</span><span class="txt">{{ m.text[:80] }}</span></div>
+                {% set icon = '🔔' if m.kind == 'external' else icons.get(m.author, '⚙️') %}
+                <div class="ev"><span class="av av--{{ tone }}" title="{{ m.author }}">{{ icon }}</span><span class="txt">{{ m.text[:80] }}</span></div>
                 {% else %}
                 <div class="empty">No activity yet.</div>
                 {% endfor %}

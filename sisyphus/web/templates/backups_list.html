@@ -1,0 +1,31 @@
+{% if flash %}<div class="mr-flash ok">✓ {{ flash }}</div>{% endif %}
+{% if error %}<div class="mr-flash err">✗ {{ error }}</div>{% endif %}
+{% if backups %}
+<div class="card-grid">
+    {% for b in backups %}
+    <div class="ecard">
+        <div class="ecard__head">
+            <div class="ecard__glyph">⧉</div>
+            <div>
+                <div class="ecard__name mono">{{ b.created_at }}</div>
+                <div class="ecard__sub">{{ b.size_h }}{% if b.label %} · {{ b.label }}{% endif %}</div>
+            </div>
+        </div>
+        <div class="ecard__foot">
+            <span class="ecard__sub mono">{{ b.name }}</span>
+            <div class="acts">
+                <button class="btn btn--ghost btn--sm"
+                        hx-post="/api/backups/{{ b.name }}/restore" hx-target="#backups-list" hx-swap="innerHTML"
+                        hx-confirm="Restore from this backup ({{ b.created_at }})? It overwrites the current database. A safety copy of the current state is saved first, so you can undo.">Restore</button>
+                <button class="btn btn--danger btn--sm"
+                        hx-post="/api/backups/{{ b.name }}/delete" hx-target="#backups-list" hx-swap="innerHTML"
+                        hx-confirm="Delete {{ b.name }}?">Delete</button>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+<div class="sub" style="margin-top:14px">Keeping the {{ retention }} most recent snapshots — older ones are pruned when you create a new backup.</div>
+{% else %}
+<div class="empty">No backups yet. Click “Create backup” to make your first snapshot.</div>
+{% endif %}

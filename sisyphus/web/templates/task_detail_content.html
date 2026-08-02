@@ -53,12 +53,15 @@
     {% endif %}
 
     <div class="section-title">Thread</div>
+    {% set icons = {'orchestrator':'🧭','engineer':'🔧','reviewer':'🔍','explorer':'🔭','planner':'🗺️','human':'🧑'} %}
     <div class="thread">
         {% for m in messages %}
         {% set tone = 'external' if m.kind == 'external' else ('human' if m.author == 'human' else ('orchestrator' if m.author == 'orchestrator' else 'worker')) %}
+        {% set icon = '🔔' if m.kind == 'external' else icons.get(m.author, '⚙️') %}
         <div class="msg">
             <div class="msg__head">
-                <span class="tag tag--{{ tone }}">{% if m.kind == 'external' %}🔔 {% endif %}{{ m.author }}/{{ m.kind }}</span>
+                <span class="av av--{{ tone }}" title="{{ m.author }}">{{ icon }}</span>
+                <span class="msg__who">{{ m.author }}<span class="msg__kind">/{{ m.kind }}</span></span>
                 <span class="msg__time">{{ m.created_at[:19] }}</span>
             </div>
             <div class="msg__body">{{ m.text }}</div>

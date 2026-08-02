@@ -26,7 +26,7 @@
         <div class="result__label" style="margin-top:20px">Activity</div>
         <div class="bars" style="margin-top:10px">
             {% for cap, val in [('Orchestrator passes', a.orchestrator_passes), ('Approvals', a.approvals), ('Changes requested', a.changes_requested), ('Human replies', a.human_replies)] %}
-            <div class="bar-row"><span class="cap">{{ cap }}</span><span></span><span class="val">{{ val }}</span></div>
+            <div class="statline"><span class="cap">{{ cap }}</span><span class="val">{{ val }}</span></div>
             {% endfor %}
         </div>
     </div>

@@ -121,6 +121,7 @@ body::before {
 .led.live { background: var(--good); animation: led-pulse 1.8s infinite; }
 .led.amber { background: var(--accent); }
 .led.idle { background: var(--muted); }
+.led.dead { background: var(--bad); animation: none; }
 @keyframes led-pulse { 0% { box-shadow: 0 0 0 0 rgba(70,209,127,.5); } 70% { box-shadow: 0 0 0 6px rgba(70,209,127,0); } 100% { box-shadow: 0 0 0 0 rgba(70,209,127,0); } }
 @media (prefers-reduced-motion: reduce) { .led.live { animation: none; } }
 .page-head {
@@ -258,8 +259,10 @@ body::before {
 .thread { display: flex; flex-direction: column; }
 .msg { padding: 11px 0; border-top: 1px solid var(--border); }
 .msg:first-child { border-top: none; }
-.msg__head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px; }
-.msg__time { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.msg__head { display: flex; align-items: center; gap: 9px; margin-bottom: 5px; }
+.msg__who { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.msg__who .msg__kind { color: var(--muted); font-weight: 400; font-family: var(--mono); }
+.msg__time { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; margin-left: auto; }
 .msg__body { font-size: 13px; color: var(--text-2); white-space: pre-wrap; word-break: break-word; }
 .msg__att { margin-top: 6px; font-size: 12px; }
 
@@ -404,8 +407,20 @@ select { cursor: pointer; appearance: none;
 .q-row .id { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 
 .feed { display: flex; flex-direction: column; }
-.ev { display: flex; gap: 10px; padding: 9px 12px; border-top: 1px solid var(--border); }
+.ev { display: flex; align-items: flex-start; gap: 10px; padding: 9px 12px; border-top: 1px solid var(--border); }
 .ev:first-child { border-top: none; }
+.av {
+  flex: none;
+  width: 38px; height: 38px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 20px; line-height: 1; background: var(--panel-2);
+}
+.av--sm { width: 30px; height: 30px; font-size: 16px; }
+.ev .av { align-self: flex-start; }
+.av--orchestrator { background: var(--violet-bg); }
+.av--human        { background: var(--accent-bg); }
+.av--worker       { background: var(--good-bg); }
+.av--external     { background: var(--warn-bg); }
 .ev .txt { font-size: 12.5px; color: var(--text-2); }
 .ev .txt small { color: var(--muted); font-family: var(--mono); }
 
@@ -439,11 +454,15 @@ select { cursor: pointer; appearance: none;
 .bar-fill.good { background: var(--good); }
 .bar-row .val { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
-.spark { display: flex; align-items: flex-end; gap: 3px; height: 64px; }
-.spark .col { flex: 1; background: var(--accent-bg); border-radius: 3px 3px 0 0; min-height: 2px; position: relative; }
+.spark { display: flex; align-items: flex-end; justify-content: center; gap: 3px; height: 64px; }
+.spark .col { flex: 1 1 0; max-width: 56px; background: var(--accent-bg); border-radius: 3px 3px 0 0; min-height: 2px; position: relative; }
 .spark .col > span { position: absolute; inset: 0; top: auto; height: var(--h, 0%); background: var(--accent); border-radius: 3px 3px 0 0; }
-.spark-labels { display: flex; gap: 3px; margin-top: 5px; }
-.spark-labels span { flex: 1; text-align: center; font-size: 9px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.spark-labels { display: flex; justify-content: center; gap: 3px; margin-top: 5px; }
+.spark-labels span { flex: 1 1 0; max-width: 56px; text-align: center; font-size: 9px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.statline { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 12px; }
+.statline .cap { color: var(--text-2); }
+.statline .val { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* ── Entity cards (agents / runtimes / repos) ────────────────────────── */
 .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 12px; }
