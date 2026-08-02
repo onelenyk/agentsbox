@@ -154,10 +154,11 @@ def update_autopilot(ap_id: str, **fields) -> Optional[dict]:
                      (*updates.values(), _now(), ap_id))
         conn.commit()
         conn.close()
-    # a schedule change moves the next fire time
+    # a schedule change moves the next fire time; a non-schedule clears it
     ap = get_autopilot(ap_id)
-    if ap and is_schedule(ap):
-        _set_next_run(ap_id, compute_next_run(ap, datetime.now(timezone.utc)))
+    if ap:
+        nxt = compute_next_run(ap, datetime.now(timezone.utc)) if is_schedule(ap) else None
+        _set_next_run(ap_id, nxt)
     return get_autopilot(ap_id)
 
 
