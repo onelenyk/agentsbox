@@ -532,3 +532,14 @@ select { cursor: pointer; appearance: none;
 }
 
 .ecard.is-off { opacity: .5; }
+
+/* ── Task detail: content + Properties/Usage rail ────────────────────── */
+.task-detail { display: grid; grid-template-columns: 1fr 272px; gap: 18px; align-items: start; }
+.task-main { min-width: 0; }
+.task-rail { display: flex; flex-direction: column; gap: 14px; position: sticky; top: 20px; }
+.rail-sec { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 13px 15px; }
+.rail-h { font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+.rail-sec .prop { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 5px 0; font-size: 12.5px; }
+.rail-sec .prop .k { color: var(--muted); }
+.rail-sec .prop .v { color: var(--text-2); text-align: right; word-break: break-word; }
+@media (max-width: 900px) { .task-detail { grid-template-columns: 1fr; } .task-rail { position: static; } }

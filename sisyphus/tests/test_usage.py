@@ -50,6 +50,19 @@ class TestRecordAndAggregate:
         assert round(t["cost"], 3) == 0.015
         assert t["tokens"] == (100 + 20 + 5) + (50 + 10 + 2)
 
+    def test_task_usage_rollup(self, db_path):
+        from core.usage import task_usage
+        init_usage_table()
+        record_run("t-a", "engineer", "m", parse_usage(_step(0.03, 100, 20, 5, cache_read=500)), 0)
+        record_run("t-a", "reviewer", "m", parse_usage(_step(0.02, 40, 10, 0)), 0)
+        record_run("t-b", "engineer", "m", parse_usage(_step(0.99, 999, 99, 9)), 0)
+        u = task_usage("t-a")
+        assert u["runs"] == 2
+        assert round(u["cost"], 3) == 0.05
+        assert u["tokens"] == (100 + 20 + 5) + (40 + 10 + 0)
+        assert u["cache_read"] == 500
+        assert task_usage("t-b")["runs"] == 1  # isolated per task
+
     def test_empty_run_not_recorded(self, db_path):
         init_usage_table()
         record_run("task-1", "engineer", "m", parse_usage(""), 0)   # no steps → skipped

@@ -124,6 +124,20 @@ def task_cost(task_id: str) -> float:
     return float(row["c"])
 
 
+def task_usage(task_id: str) -> dict:
+    """Per-task token/cost/run rollup — for the task-detail Usage panel."""
+    conn = get_conn()
+    row = conn.execute(
+        """SELECT COALESCE(SUM(cost),0) cost, COALESCE(SUM(total_tokens),0) tokens,
+                  COALESCE(SUM(input_tokens),0) input, COALESCE(SUM(output_tokens),0) output,
+                  COALESCE(SUM(cache_read),0) cache_read, COUNT(*) runs
+           FROM usage WHERE task_id = ?""",
+        (task_id,),
+    ).fetchone()
+    conn.close()
+    return dict(row)
+
+
 def today_cost() -> float:
     """Total $ spent today (UTC) across all runs — for the daily budget guard."""
     from datetime import datetime, timezone
