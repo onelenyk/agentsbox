@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Sisyphus{% endblock %}</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230a0c10'/><text x='16' y='23' font-size='21' text-anchor='middle' fill='%234c8dff'>⚡</text></svg>">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230a0a0c'/><text x='16' y='23' font-size='21' text-anchor='middle' fill='%23f5a623'>⚡</text></svg>">
     <link rel="stylesheet" href="/static/app.css">
-    <script src="https://unpkg.com/htmx.org@1.9.10" integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5xLSi8nO7UC" crossorigin="anonymous"></script>
+    <script src="/static/htmx.min.js"></script>
 </head>
 <body>
     <div class="app">
@@ -22,9 +22,10 @@
                 <a href="/runners" class="{{ 'active' if active_page == 'runners' else '' }}"><span class="ic">▸</span> Runtimes</a>
                 <a href="/repos" class="{{ 'active' if active_page == 'repos' else '' }}"><span class="ic">⌥</span> Repos</a>
                 <a href="/runtime" class="{{ 'active' if active_page == 'runtime' else '' }}"><span class="ic">⚙</span> Runtime</a>
+                <a href="/backups" class="{{ 'active' if active_page == 'backups' else '' }}"><span class="ic">⧉</span> Backups</a>
             </nav>
             <div class="sys">
-                <div class="line"><span class="led live"></span> daemon <span class="val">live</span></div>
+                <div class="line"><span id="daemon-led" class="led live"></span> daemon <span id="daemon-val" class="val">live</span></div>
                 <div class="line"><span class="led amber"></span> ui <span class="val">v2.0</span></div>
             </div>
         </aside>
@@ -54,6 +55,21 @@
         b.addEventListener("htmx:afterRequest", function (e) {
             if (e.detail.failed) flash("Error: " + (e.detail.xhr.statusText || "request failed"), "err");
         });
+
+        // Daemon heartbeat — reflect real reachability in the sidebar LED.
+        function setDaemon(ok) {
+            var l = document.getElementById("daemon-led");
+            var v = document.getElementById("daemon-val");
+            if (l) l.className = "led " + (ok ? "live" : "dead");
+            if (v) v.textContent = ok ? "live" : "down";
+        }
+        function heartbeat() {
+            fetch("/api/v1/health", { cache: "no-store" })
+                .then(function (r) { setDaemon(r.ok); })
+                .catch(function () { setDaemon(false); });
+        }
+        heartbeat();
+        setInterval(heartbeat, 10000);
     </script>
 </body>
 </html>

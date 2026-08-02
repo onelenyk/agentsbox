@@ -10,7 +10,7 @@
             </div>
             <span class="badge {{ 'badge--accent' if a.kind == 'orchestrator' else '' }} right">{{ a.kind }}</span>
         </div>
-        {% if a.persona %}<div class="ecard__persona">{{ a.persona }}</div>{% endif %}
+        {% if a.persona %}<div class="ecard__persona" title="{{ a.persona }}">{{ a.persona }}</div>{% endif %}
         <div class="tool-chips">
             {% for t in a.tools %}<span class="tc">{{ t }}</span>{% endfor %}
         </div>

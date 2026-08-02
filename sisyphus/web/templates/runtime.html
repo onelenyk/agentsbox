@@ -4,14 +4,14 @@
 <div class="page-head"><div><h1>Runtime</h1><div class="sub">Daemon configuration (read-only).</div></div></div>
 <div class="panel">
     <div class="result__label">Configuration</div>
-    <pre class="mono" style="font-size:12px;white-space:pre-wrap;color:var(--text-2);line-height:1.7;margin-top:6px">workspace_root:   {{ config.workspace_root or '/workspace' }}
-default_model:    {{ config.default_model or 'deepseek' }}
-default_timeout:  {{ config.default_timeout or 300 }}
+    <pre class="mono" style="font-size:12px;white-space:pre-wrap;color:var(--text-2);line-height:1.7;margin-top:6px">workspace_root:   {{ workspace_root }}
+default_runtime:  {% if default_runner %}{{ default_runner.name }}{% if default_runner.model %} · {{ default_runner.model }}{% endif %}{% else %}(none configured){% endif %}
+default_timeout:  {{ config.default_timeout or 300 }}s
 max_review_loops: {{ config.max_review_loops or 3 }}
 log_level:        {{ config.log_level or 'info' }}
-
-jira.base_url:       {{ config.jira.base_url or '(set in .env)' }}
-gitlab.base_url:     {{ config.gitlab.base_url or '(set in .env)' }}
-openrouter.base_url: {{ config.openrouter.base_url or 'https://openrouter.ai/api/v1' }}</pre>
+{% if integrations %}
+{% for name, url in integrations.items() %}{{ '%-11s'|format(name ~ '.base_url') }}: {{ url }}
+{% endfor %}{% else %}
+integrations:     none configured{% endif %}</pre>
 </div>
 {% endblock %}

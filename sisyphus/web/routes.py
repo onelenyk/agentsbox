@@ -51,8 +51,46 @@ async def dashboard_view(request: Request):
 
 @router.get("/runtime", response_class=HTMLResponse)
 async def runtime_page(request: Request):
+    import os
+    from core.runners import list_runners
+
     cfg = get_config()
-    return _tmpl().TemplateResponse("runtime.html", {"request": request, "active_page": "runtime", "config": cfg})
+
+    # Actual workspace root the daemon is running with (set via env in app.py),
+    # not the bare config default which is misleading.
+    workspace_root = os.environ.get("WORKSPACE_ROOT") or cfg.get("workspace_root") or "(unset)"
+
+    # The default runner is what actually drives agents now (raw LLM HTTP was
+    # removed), so surface it instead of the stale seed-only default_model.
+    default_runner = None
+    for r in list_runners():
+        if r.get("is_default"):
+            default_runner = r
+            break
+
+    # Only show integration base URLs that are actually configured — unresolved
+    # ${ENV} placeholders are noise.
+    def _clean(v):
+        v = (v or "").strip()
+        return v if v and not v.startswith("${") else None
+
+    integrations = {}
+    for key in ("jira", "gitlab", "github"):
+        url = _clean((cfg.get(key) or {}).get("base_url"))
+        if url:
+            integrations[key] = url
+
+    return _tmpl().TemplateResponse(
+        "runtime.html",
+        {
+            "request": request,
+            "active_page": "runtime",
+            "config": cfg,
+            "workspace_root": workspace_root,
+            "default_runner": default_runner,
+            "integrations": integrations,
+        },
+    )
 
 @router.get("/repos", response_class=HTMLResponse)
 async def repos_page(request: Request):
@@ -128,6 +166,58 @@ async def repos_update(name: str):
     return resp
 
 # ── Runner CRUD ────────────────────────────────────────────────────────
+
+@router.get("/backups", response_class=HTMLResponse)
+async def backups_page(request: Request):
+    return _tmpl().TemplateResponse("backups.html", {"request": request, "active_page": "backups"})
+
+@router.get("/api/backups/list", response_class=HTMLResponse)
+async def backups_list_view(request: Request):
+    from core import backup
+    return _tmpl().TemplateResponse(
+        "backups_list.html",
+        {"request": request, "backups": backup.list_backups(), "retention": backup.RETENTION},
+    )
+
+def _backups_list_response(request, flash=None, error=None):
+    from core import backup
+    resp = _tmpl().TemplateResponse(
+        "backups_list.html",
+        {"request": request, "backups": backup.list_backups(),
+         "retention": backup.RETENTION, "flash": flash, "error": error},
+    )
+    return resp
+
+@router.post("/api/backups/create", response_class=HTMLResponse)
+async def backups_create(request: Request):
+    from core import backup
+    try:
+        info = backup.snapshot(label="manual")
+        return _backups_list_response(request, flash=f"Backup created — {info['name']} ({info['size_h']})")
+    except Exception as exc:  # noqa: BLE001
+        return _backups_list_response(request, error=f"Backup failed: {exc}")
+
+@router.post("/api/backups/{name}/restore", response_class=HTMLResponse)
+async def backups_restore(request: Request, name: str):
+    from core import backup
+    try:
+        res = backup.restore(name)
+        return _backups_list_response(
+            request,
+            flash=f"Restored from {res['restored']}. A safety copy of the previous state was saved as {res['safety']}.",
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _backups_list_response(request, error=f"Restore failed: {exc}")
+
+@router.post("/api/backups/{name}/delete", response_class=HTMLResponse)
+async def backups_delete(request: Request, name: str):
+    from core import backup
+    ok = backup.delete_backup(name)
+    return _backups_list_response(
+        request,
+        flash=f"Deleted {name}" if ok else None,
+        error=None if ok else f"Could not delete {name}",
+    )
 
 @router.get("/runners", response_class=HTMLResponse)
 async def runners_page(request: Request):
