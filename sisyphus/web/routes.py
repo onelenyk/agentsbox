@@ -34,6 +34,14 @@ async def startup():
     reconciled = orchestrator.reconcile_on_boot()
     if reconciled:
         logger.info("orchestrator: resumed %d task(s) orphaned by restart", reconciled)
+
+    from core import preflight
+    pf = preflight.check()
+    if pf["ok"]:
+        logger.info("preflight: ready (runner=%s)", pf["runner"])
+    else:
+        logger.warning("preflight: NOT ready to run work — %s", pf["reason"])
+
     asyncio.create_task(orchestrator.dispatch_forever())
 
 @router.get("/", response_class=HTMLResponse)
@@ -231,6 +239,22 @@ async def runners_list_view(request: Request):
 @router.get("/api/runners/new-form", response_class=HTMLResponse)
 async def runners_new_form(request: Request):
     return _tmpl().TemplateResponse("runners_new.html", {"request": request})
+
+@router.get("/api/runners/detect", response_class=HTMLResponse)
+async def runners_detect_view(request: Request):
+    from core.runner_detect import detect, resolve
+    from core.runners import list_runners
+    configured = list_runners()
+    configured_bins = {r["binary"] for r in configured}
+    detected = detect()
+    for d in detected:
+        d["configured"] = d["binary"] in configured_bins
+    conf = [{"name": r["name"], "binary": r["binary"], "resolved": resolve(r["binary"])}
+            for r in configured]
+    return _tmpl().TemplateResponse(
+        "runners_detect.html",
+        {"request": request, "detected": detected, "configured": conf},
+    )
 
 @router.post("/api/runners")
 async def runners_add(name: str = Form(...), binary: str = Form(...), type: str = Form("opencode"),

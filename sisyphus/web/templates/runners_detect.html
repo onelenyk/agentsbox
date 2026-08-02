@@ -1,0 +1,43 @@
+<div class="modal-backdrop" onclick="if(event.target===this)this.remove()">
+    <div class="modal modal--wide" onclick="event.stopPropagation()">
+        <div class="modal__head" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+            <h2 style="font-size:15px">Detected runtimes</h2>
+            <button type="button" class="btn btn--ghost btn--sm" onclick="this.closest('.modal-backdrop').remove()">Close</button>
+        </div>
+        <div class="modal__body">
+            <div class="result__label">Found on this machine</div>
+            {% if detected %}
+            <div class="bars" style="margin-top:8px">
+                {% for d in detected %}
+                <div class="statline">
+                    <span class="cap">{{ d.name }} <span class="muted mono">{{ d.path }}</span></span>
+                    {% if d.configured %}
+                    <span class="val" style="color:var(--good)">configured</span>
+                    {% else %}
+                    <button class="btn btn--ghost btn--sm" hx-post="/api/runners"
+                            hx-vals='{"name": "{{ d.name }}", "binary": "{{ d.binary }}", "type": "{{ d.type }}", "api_key_env": "OPENROUTER_API_KEY"}'
+                            hx-swap="none">+ Add as runtime</button>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="empty">No known runner binaries found on PATH or common install dirs.</div>
+            {% endif %}
+
+            <div class="result__label" style="margin-top:18px">Configured runtimes — resolves to</div>
+            <div class="bars" style="margin-top:8px">
+                {% for r in configured %}
+                <div class="statline">
+                    <span class="cap">{{ r.name }} <span class="muted mono">{{ r.binary }}</span></span>
+                    {% if r.resolved %}
+                    <span class="val mono" style="color:var(--good)">{{ r.resolved }}</span>
+                    {% else %}
+                    <span class="val" style="color:var(--bad)">NOT FOUND</span>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>

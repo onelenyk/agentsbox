@@ -137,6 +137,25 @@ def runners_health(runner_id):
     asyncio.run(_check())
 
 
+@runners.command("detect")
+def runners_detect():
+    """Auto-detect installed runner binaries (PATH + common install dirs)."""
+    from core.runner_detect import detect, resolve
+    from core.runners import list_runners
+
+    found = detect()
+    if found:
+        click.echo("Detected on this machine:")
+        for f in found:
+            click.echo(f"  {f['name']:<12} {f['path']}")
+    else:
+        click.echo("No known runner binaries found.")
+    click.echo("\nConfigured runtimes:")
+    for r in list_runners():
+        p = resolve(r["binary"])
+        click.echo(f"  {r['name']:<22} {p or 'NOT FOUND: ' + r['binary']}")
+
+
 @cli.group()
 def daemon():
     """Control the daemon (manual, or launchd-supervised)."""

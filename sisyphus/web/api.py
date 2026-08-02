@@ -12,7 +12,20 @@ api = APIRouter(prefix="/api/v1")
 
 @api.get("/health")
 async def health():
-    return {"ok": True, "version": "2.0"}
+    """Liveness (ok) plus readiness: db reachable and the default runner's binary
+    resolves. degraded=True means the process is up but can't run work."""
+    from core import preflight
+
+    pf = preflight.check()
+    return {
+        "ok": True,
+        "version": "2.0",
+        "ready": pf["ok"],
+        "degraded": not pf["ok"],
+        "db": pf["db"],
+        "runner": pf["runner"],
+        "reason": pf["reason"] or None,
+    }
 
 
 # ── Repos ──────────────────────────────────────────────────────────────

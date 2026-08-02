@@ -62,9 +62,25 @@ def _get_queue() -> "asyncio.Queue[Event]":
 
 
 def reset_queue() -> None:
-    """Test helper — drop the queue so a fresh one binds to the current loop."""
-    global _queue
+    """Test helper — drop the queue/semaphore so fresh ones bind to the current loop."""
+    global _queue, _worker_sem
     _queue = None
+    _worker_sem = None
+
+
+# Global cap on concurrently-running worker subprocesses. Per-task double-spawn
+# is already prevented by _worker_in_flight; this bounds total parallelism so a
+# fan-out (or many tasks) can't launch unbounded opencode processes at once.
+_worker_sem: Optional["asyncio.Semaphore"] = None
+
+
+def _get_worker_sem() -> "asyncio.Semaphore":
+    global _worker_sem
+    if _worker_sem is None:
+        from .config import get_config
+        n = int(get_config("max_concurrent_workers", 2) or 2)
+        _worker_sem = asyncio.Semaphore(max(1, n))
+    return _worker_sem
 
 
 def emit(task_id: str, event_type: str) -> None:
@@ -161,6 +177,25 @@ async def _decide(task: dict, thread_text: str) -> Decision:
 
 def _pass_count(task_id: str) -> int:
     return sum(1 for m in store.get_thread(task_id) if m["author"] == "orchestrator")
+
+
+def _budget_exceeded(task_id: str) -> Optional[str]:
+    """A human-readable reason if this task (or today) has hit its $ cap, else
+    None. Caps come from config; 0/unset disables that cap."""
+    from .config import get_config
+    from . import usage
+
+    tb = float(get_config("task_budget_usd", 0) or 0)
+    if tb > 0:
+        c = usage.task_cost(task_id)
+        if c >= tb:
+            return f"task budget reached: ${c:.4f} spent of a ${tb:.2f} cap."
+    db = float(get_config("daily_budget_usd", 0) or 0)
+    if db > 0:
+        c = usage.today_cost()
+        if c >= db:
+            return f"daily budget reached: ${c:.4f} spent today of a ${db:.2f} cap."
+    return None
 
 
 # Substrings core.worker.py's crash/timeout fallback message always contains
@@ -308,6 +343,19 @@ async def handle_event(
     if _children_pending(task_id):
         return Decision(action="noop", why="waiting on child tasks"), None
 
+    # Budget guard: stop spending on a task (or for the day) once a configured
+    # cap is hit — park it as waiting so a human decides. A human reply bypasses
+    # the check for that one pass, so replying means "continue".
+    if event_type != "human_replied":
+        over = _budget_exceeded(task_id)
+        if over:
+            store.post_message(task_id, "orchestrator", kind="note",
+                               text=f"[ask_human] budget guard — {over}")
+            store.post_message(task_id, "orchestrator", kind="question",
+                               text=f"{over} Reply to continue, or leave it parked.")
+            store.set_status(task_id, "waiting")
+            return Decision(action="ask_human", question=over, why="budget guard"), None
+
     # Single-agent mode: a task with a pinned agent skips the orchestrator
     # entirely — that one agent handles it solo, and its result completes the
     # task (no dispatch, no reviewer).
@@ -403,7 +451,11 @@ async def _spawn_worker_safe(task_id: str, role: str, instruction: str, repo_nam
     the task stalled 'active'. Any exception before the worker reports is turned
     into a worker_finished + event, so the orchestrator re-decides."""
     try:
-        await spawn_worker(task_id, role, instruction, repo_name=repo_name)
+        # Bound total concurrency: wait for a free slot before launching the
+        # subprocess. worker_started is only posted once inside spawn_worker, so
+        # a task queued here stays correctly "not in flight" until it actually runs.
+        async with _get_worker_sem():
+            await spawn_worker(task_id, role, instruction, repo_name=repo_name)
     except Exception as exc:  # noqa: BLE001
         logger.exception("spawn_worker failed for task %s (role=%s)", task_id, role)
         store.post_message(task_id, "system", kind="worker_finished",
