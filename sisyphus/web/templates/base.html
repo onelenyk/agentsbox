@@ -56,17 +56,19 @@
             if (e.detail.failed) flash("Error: " + (e.detail.xhr.statusText || "request failed"), "err");
         });
 
-        // Daemon heartbeat — reflect real reachability in the sidebar LED.
-        function setDaemon(ok) {
+        // Daemon heartbeat — reflect real reachability + readiness in the LED.
+        function setDaemon(state) {
             var l = document.getElementById("daemon-led");
             var v = document.getElementById("daemon-val");
-            if (l) l.className = "led " + (ok ? "live" : "dead");
-            if (v) v.textContent = ok ? "live" : "down";
+            var cls = state === "live" ? "live" : (state === "degraded" ? "amber" : "dead");
+            if (l) l.className = "led " + cls;
+            if (v) v.textContent = state;
         }
         function heartbeat() {
             fetch("/api/v1/health", { cache: "no-store" })
-                .then(function (r) { setDaemon(r.ok); })
-                .catch(function () { setDaemon(false); });
+                .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+                .then(function (j) { setDaemon(j.degraded ? "degraded" : "live"); })
+                .catch(function () { setDaemon("down"); });
         }
         heartbeat();
         setInterval(heartbeat, 10000);

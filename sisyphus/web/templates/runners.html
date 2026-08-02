@@ -7,6 +7,7 @@
         <div class="sub">Local CLI backends that run agents (opencode, claude-cli, …).</div>
     </div>
     <div class="actions">
+        <button class="btn btn--ghost" hx-get="/api/runners/detect" hx-target="#modal-container" hx-swap="innerHTML">⌖ Detect</button>
         <button class="btn btn--primary" hx-get="/api/runners/new-form" hx-target="body" hx-swap="beforeend">+ Add Runtime</button>
     </div>
 </div>

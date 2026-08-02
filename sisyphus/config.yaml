@@ -3,6 +3,13 @@ api:
   token: ${SISYPHUS_API_TOKEN}
 default_model: deepseek
 default_timeout: 300
+# Max worker subprocesses running at once (bounds fan-out resource use).
+max_concurrent_workers: 2
+# Per-task $ cap — park the task for a human once hit (0 = disabled). A normal
+# task costs ~$0.14, so 5.0 only trips on a genuine runaway.
+task_budget_usd: 5.0
+# Daily $ cap across all tasks (0 = disabled).
+daily_budget_usd: 0
 github:
   base_url: ${GITHUB_BASE_URL}
   token: ${GITHUB_TOKEN}

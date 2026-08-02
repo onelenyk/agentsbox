@@ -199,7 +199,10 @@ async def launch_agent(
     if not runner:
         runner = {"binary": "opencode", "model": "", "api_key_env": "", "base_url": "", "extra_args": "[]"}
 
-    binary = runner["binary"]
+    # Resolve to an absolute path so the launch works under a minimal PATH
+    # (e.g. a launchd-supervised daemon), falling back to the bare name.
+    from .runner_detect import resolve as _resolve_binary
+    binary = _resolve_binary(runner["binary"]) or runner["binary"]
     extra_args = json.loads(runner.get("extra_args", "[]") or "[]")
 
     start_time = time.monotonic()

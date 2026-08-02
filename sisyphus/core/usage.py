@@ -114,6 +114,29 @@ def by_agent() -> list:
     return [dict(r) for r in rows]
 
 
+def task_cost(task_id: str) -> float:
+    """Total $ spent on a single task's runs — for the per-task budget guard."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT COALESCE(SUM(cost),0) c FROM usage WHERE task_id = ?", (task_id,)
+    ).fetchone()
+    conn.close()
+    return float(row["c"])
+
+
+def today_cost() -> float:
+    """Total $ spent today (UTC) across all runs — for the daily budget guard."""
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT COALESCE(SUM(cost),0) c FROM usage WHERE substr(created_at,1,10) = ?",
+        (today,),
+    ).fetchone()
+    conn.close()
+    return float(row["c"])
+
+
 def by_day(days: int = 14) -> list:
     conn = get_conn()
     rows = conn.execute(
