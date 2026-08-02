@@ -16,10 +16,20 @@
 </div>
 
 <aside id="copilot" class="copilot">
-    <div class="cp-head"><span>💬 Board Copilot</span>
-        <button class="btn btn--ghost btn--sm" onclick="cpToggle()">✕</button></div>
-    <div id="cp-log" class="cp-log">
-        <div class="cp-msg cp-bot">Ask about the board — “what's stuck?”, “summarize today”, or tell me “create a task to add tests to testrepo”. I'll confirm before acting.</div>
+    <div class="cp-head">
+        <span class="cp-title">💬 Board Copilot</span>
+        <div class="row" style="gap:4px">
+            <button class="btn btn--ghost btn--sm" title="Chats" onclick="cpToggleSessions()">☰</button>
+            <button class="btn btn--ghost btn--sm" title="New chat"
+                    hx-post="/api/board/copilot/new" hx-target="#cp-body" hx-swap="innerHTML"
+                    onclick="cpCloseSessions()">＋</button>
+            <button class="btn btn--ghost btn--sm" onclick="cpToggle()">✕</button>
+        </div>
+    </div>
+    <div id="cp-sessions-panel" class="cp-sessions-panel"
+         hx-get="/api/board/copilot/sessions" hx-trigger="cpSessionsOpen" hx-swap="innerHTML"></div>
+    <div id="cp-body" hx-get="/api/board/copilot" hx-trigger="load" hx-swap="innerHTML">
+        <div id="cp-log" class="cp-log"><div class="cp-msg cp-bot">Loading…</div></div>
     </div>
     <form class="cp-input" onsubmit="cpSend(event)">
         <textarea id="cp-text" rows="2" placeholder="Ask or tell the copilot…"
@@ -29,15 +39,24 @@
 </aside>
 
 <script>
-    const cpHistory = [];
     function cpToggle() {
         document.getElementById('copilot').classList.toggle('open');
         document.getElementById('cp-text').focus();
     }
+    function cpToggleSessions() {
+        const p = document.getElementById('cp-sessions-panel');
+        p.classList.toggle('open');
+        if (p.classList.contains('open') && window.htmx) htmx.trigger(p, 'cpSessionsOpen');
+    }
+    function cpCloseSessions() { document.getElementById('cp-sessions-panel').classList.remove('open'); }
+    function cpLog() { return document.getElementById('cp-log'); }
+    function cpSession() { const l = cpLog(); return l ? l.dataset.session : ''; }
+    function cpAfterLoad() { const l = cpLog(); if (l) l.scrollTop = l.scrollHeight; }
+
     function cpAppend(role, text) {
-        const log = document.getElementById('cp-log');
+        const log = cpLog(); if (!log) return null;
         const el = document.createElement('div');
-        el.className = 'cp-msg ' + (role === 'user' ? 'cp-user' : 'cp-bot');
+        el.className = 'cp-msg cp-' + role;
         el.textContent = text;
         log.appendChild(el); log.scrollTop = log.scrollHeight;
         return el;
@@ -46,20 +65,20 @@
         if (e) e.preventDefault();
         const ta = document.getElementById('cp-text');
         const msg = ta.value.trim(); if (!msg) return;
-        ta.value = ''; cpAppend('user', msg); cpHistory.push({ role: 'user', text: msg });
+        ta.value = ''; cpAppend('user', msg);
         const btn = document.getElementById('cp-send'); btn.disabled = true;
         const thinking = cpAppend('bot', '…thinking');
         try {
             const r = await fetch('/api/board/chat', {
                 method: 'POST', headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ message: msg, history: cpHistory })
+                body: JSON.stringify({ message: msg, session_id: cpSession() })
             });
             const d = await r.json();
-            thinking.remove();
-            const reply = d.reply || d.error || '(no reply)';
-            cpAppend('bot', reply); cpHistory.push({ role: 'bot', text: reply });
+            if (thinking) thinking.remove();
+            if (d.session_id && cpLog()) cpLog().dataset.session = d.session_id;
+            cpAppend('bot', d.reply || d.error || '(no reply)');
             if (d.action) cpRenderAction(d.action);
-        } catch (err) { thinking.textContent = '(copilot unavailable)'; }
+        } catch (err) { if (thinking) thinking.textContent = '(copilot unavailable)'; }
         btn.disabled = false;
     }
     function cpActionDesc(a) {
@@ -71,7 +90,7 @@
         return JSON.stringify(a);
     }
     function cpRenderAction(action) {
-        const log = document.getElementById('cp-log');
+        const log = cpLog(); if (!log) return;
         const card = document.createElement('div'); card.className = 'cp-action';
         const desc = document.createElement('div'); desc.className = 'cp-action-desc';
         desc.textContent = cpActionDesc(action); card.appendChild(desc);
@@ -83,15 +102,14 @@
             try {
                 const r = await fetch('/api/board/act', {
                     method: 'POST', headers: { 'content-type': 'application/json' },
-                    body: JSON.stringify({ action })
+                    body: JSON.stringify({ action, session_id: cpSession() })
                 });
                 const d = await r.json();
-                card.remove();
-                cpAppend('bot', d.result || d.error || 'done');
+                card.remove(); cpAppend('sys', d.result || d.error || 'done');
                 if (window.htmx) htmx.trigger('#tasks-list', 'load');
-            } catch (e) { cpAppend('bot', '(action failed)'); }
+            } catch (e) { cpAppend('sys', '(action failed)'); }
         };
-        no.onclick = () => { card.remove(); cpAppend('bot', 'Cancelled.'); };
+        no.onclick = () => { card.remove(); cpAppend('sys', 'Cancelled.'); };
         row.appendChild(yes); row.appendChild(no); card.appendChild(row);
         log.appendChild(card); log.scrollTop = log.scrollHeight;
     }
