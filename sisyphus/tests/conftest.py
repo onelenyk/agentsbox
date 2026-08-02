@@ -34,9 +34,11 @@ def db_path(tmp_path):
     from core.agents import init_agents_table
     from core.usage import init_usage_table
     from core.mergerequests import init_mr_table
+    from core.autopilot import init_autopilot_table
     init_runners_table()
     init_agents_table()
     init_usage_table()
     init_mr_table()
+    init_autopilot_table()
 
     yield str(db)
