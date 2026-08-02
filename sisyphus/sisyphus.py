@@ -233,11 +233,47 @@ def daemon_logs(follow):
     import subprocess
     from core import daemon_ctl as d
 
-    log = d.LOG_DIR / "daemon.err.log"
+    log = d.LOG_DIR / "sisyphus.log"           # app log (rotating)
     if not log.exists():
-        click.echo(f"No log yet at {log}")
+        log = d.LOG_DIR / "daemon.err.log"      # fallback: uvicorn stderr
+    if not log.exists():
+        click.echo(f"No log yet in {d.LOG_DIR}")
         return
     subprocess.run(["tail"] + (["-f"] if follow else ["-n", "200"]) + [str(log)])
+
+
+@cli.group()
+def dev():
+    """Developer utilities."""
+
+
+@dev.command("install-hooks")
+def dev_install_hooks():
+    """Install a git pre-push hook that runs the test suite before every push."""
+    import stat
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    here = Path(__file__).resolve().parent  # sisyphus/
+    r = subprocess.run(["git", "rev-parse", "--absolute-git-dir"],
+                       cwd=str(here), capture_output=True, text=True)
+    if r.returncode != 0:
+        click.echo("Not inside a git repository.", err=True)
+        return
+    hooks = Path(r.stdout.strip()) / "hooks"
+    hooks.mkdir(parents=True, exist_ok=True)
+    hook = hooks / "pre-push"
+    hook.write_text(
+        "#!/bin/sh\n"
+        "# Sisyphus pre-push hook — block the push if the test suite fails.\n"
+        f'cd "{here}" || exit 1\n'
+        'echo "pre-push: running pytest…"\n'
+        f'exec "{sys.executable}" -m pytest -q\n'
+    )
+    hook.chmod(hook.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    click.echo(f"Installed pre-push hook: {hook}")
+    click.echo("Pushes now run tests first (bypass once with: git push --no-verify).")
 
 
 if __name__ == "__main__":

@@ -10,6 +10,9 @@ from core.env import load_env
 load_env()
 os.environ.setdefault("WORKSPACE_ROOT", str(_REPO_ROOT / "workspace"))
 
+from core.logging_setup import setup_logging
+setup_logging()
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from web.routes import router

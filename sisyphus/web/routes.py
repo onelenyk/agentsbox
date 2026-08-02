@@ -16,8 +16,17 @@ logger = logging.getLogger(__name__)
 def _tmpl():
     return Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
+_started = False
+
+
 @router.on_event("startup")
 async def startup():
+    global _started
+    if _started:
+        logger.warning("startup() fired again — skipping (avoids a duplicate dispatch loop)")
+        return
+    _started = True
+
     from core.runners import init_runners_table
     from core.agents import init_agents_table
     from core.usage import init_usage_table
