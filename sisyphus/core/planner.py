@@ -60,6 +60,16 @@ def init_planner_tables() -> None:
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_planitem_plan ON plan_items(plan_id)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS plan_messages (
+            id         TEXT PRIMARY KEY,
+            plan_id    TEXT NOT NULL,
+            role       TEXT NOT NULL,
+            text       TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_planmsg_plan ON plan_messages(plan_id)")
     conn.commit()
     conn.close()
 
@@ -116,10 +126,31 @@ def update_plan(pid: str, **fields) -> Optional[dict]:
 def delete_plan(pid: str) -> bool:
     conn = get_conn()
     conn.execute("DELETE FROM plan_items WHERE plan_id = ?", (pid,))
+    conn.execute("DELETE FROM plan_messages WHERE plan_id = ?", (pid,))
     cur = conn.execute("DELETE FROM plans WHERE id = ?", (pid,))
     conn.commit()
     conn.close()
     return cur.rowcount > 0
+
+
+# ── co-plan conversation ────────────────────────────────────────────────
+
+def add_message(plan_id: str, role: str, text: str) -> str:
+    mid = f"pm-{uuid4().hex[:8]}"
+    conn = get_conn()
+    conn.execute("INSERT INTO plan_messages (id, plan_id, role, text, created_at) VALUES (?,?,?,?,?)",
+                 (mid, plan_id, role, text, _now()))
+    conn.commit()
+    conn.close()
+    return mid
+
+
+def list_messages(plan_id: str, limit: int = 60) -> List[dict]:
+    conn = get_conn()
+    rows = conn.execute("SELECT * FROM plan_messages WHERE plan_id = ? ORDER BY created_at ASC LIMIT ?",
+                        (plan_id, limit)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 # ── plan_items CRUD + DAG ───────────────────────────────────────────────
@@ -245,20 +276,31 @@ def project_context(repo_name: str) -> str:
     return "\n".join(parts)
 
 
-def _plan_prompt(message: str, repo: str, ctx: str, brief: Optional[dict]) -> str:
+def _plan_prompt(message: str, repo: str, ctx: str, brief: Optional[dict],
+                 history: Optional[list] = None) -> str:
     cur = ""
     if brief:
-        cur = ("\nCURRENT PLAN (refine it):\n" + json.dumps(
+        cur = ("\nCURRENT PLAN (evolve it — don't restart from scratch):\n" + json.dumps(
             {"approach": brief.get("approach", ""),
              "steps": [s.get("goal", "") for s in brief.get("steps", [])]})[:1200])
+    convo = ""
+    if history:
+        lines = []
+        for m in history[-8:]:
+            who = "User" if m["role"] == "user" else "You"
+            lines.append(f"{who}: {(m['text'] or '')[:400]}")
+        if lines:
+            convo = "\nCONVERSATION SO FAR:\n" + "\n".join(lines)
     return (
-        "You are a senior engineer planning a software task on a SPECIFIC project. "
-        "Ground the plan in this project — reference real files/modules and follow "
-        "its conventions.\n\n"
-        + (ctx or "(no project context)") + cur +
-        "\n\nUser request: " + message +
+        "You are a senior engineer CO-PLANNING a software task WITH the user on a "
+        "SPECIFIC project — a natural back-and-forth. Ground the plan in this project "
+        "(real files/modules, its conventions) and evolve it as the conversation "
+        "progresses. Talk to the user in \"reply\"; keep the structured plan up to date.\n\n"
+        + (ctx or "(no project context)") + cur + convo +
+        "\n\nLatest user message: " + message +
         "\n\nReturn ONLY one JSON object (no prose, no code fences):\n"
         "{\n"
+        '  "reply": "<a short, warm conversational reply (1-3 sentences): what you changed this turn, or a question back to the user>",\n'
         '  "approach": "<1-3 short paragraphs on the approach>",\n'
         '  "diagram": "<mermaid \'graph TD\' source for the interaction/architecture, or empty>",\n'
         '  "steps": [{"goal": "<clear, self-contained task goal>", "repo": "' + repo + '", "agent": "<engineer|reviewer|explorer or empty>", "after": [<0-based indices of prerequisite steps>]}],\n'
@@ -295,6 +337,13 @@ def start_plan_turn(plan_id: str, message: str) -> None:
         _generating.add(plan_id)
     _errors.pop(plan_id, None)
 
+    # name the plan from the opening message, and record the user turn so the
+    # conversation shows it immediately while the reply generates in the bg.
+    plan = get_plan(plan_id)
+    if plan and (plan.get("title") or "").strip() in ("", "New plan") and not list_messages(plan_id):
+        update_plan(plan_id, title=message.strip()[:48])
+    add_message(plan_id, "user", message)
+
     def _run():
         try:
             plan_turn(plan_id, message, timeout=240)
@@ -315,9 +364,25 @@ def plan_turn(plan_id: str, message: str, timeout: int = 90) -> dict:
     if not plan:
         raise ValueError("plan not found")
     ctx = project_context(plan["repo"]) if plan["repo"] else "(no repo selected — plan generically)"
-    out = ai_assist.run_prompt(_plan_prompt(message, plan["repo"], ctx, plan.get("brief_obj")), timeout=timeout)
-    brief = _clean_brief(_find_json(out), plan["repo"])
+    history = list_messages(plan_id)
+    if history and history[-1]["role"] == "user":
+        history = history[:-1]   # the current turn is passed as `message`
+    out = ai_assist.run_prompt(
+        _plan_prompt(message, plan["repo"], ctx, plan.get("brief_obj"), history), timeout=timeout)
+    parsed = _find_json(out)
+    if not isinstance(parsed, dict):
+        # The model returned prose or errored — don't clobber the canvas with an
+        # empty brief; surface it so the UI can show a retryable error.
+        raise ValueError("The planner didn't return a usable plan this time — try rephrasing or send again.")
+    brief = _clean_brief(parsed, plan["repo"])
+    # keep the previous brief's artifacts if the model somehow returned an empty shell
+    if not (brief["approach"] or brief["diagram"] or brief["steps"] or brief["risks"] or brief["affected"]):
+        prev = plan.get("brief_obj") or {}
+        for k in ("approach", "diagram", "steps", "risks", "affected"):
+            if not brief[k] and prev.get(k):
+                brief[k] = prev[k]
     update_plan(plan_id, brief=json.dumps(brief))
+    add_message(plan_id, "assistant", brief.get("reply") or "Updated the plan on the canvas.")
     return brief
 
 
@@ -338,6 +403,7 @@ def _clean_brief(obj, repo: str) -> dict:
     def _strs(key):
         return [str(x).strip() for x in (obj.get(key) or []) if str(x).strip()]
     return {
+        "reply": str(obj.get("reply", "") or "").strip(),
         "approach": str(obj.get("approach", "") or "").strip(),
         "diagram": str(obj.get("diagram", "") or "").strip(),
         "steps": steps,

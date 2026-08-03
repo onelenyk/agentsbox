@@ -21,8 +21,20 @@
         if (!window.mermaid) return;
         try { mermaid.run({ querySelector: '#plan-body .mermaid:not([data-processed])' }); } catch (e) {}
     }
+    function cpScroll() {
+        var t = document.getElementById('cp-thread');
+        if (t) t.scrollTop = t.scrollHeight;
+    }
+    // Seed the composer from a starter / question chip and focus it.
+    function cpSeed(text) {
+        var i = document.getElementById('cp-input');
+        if (!i) return;
+        i.value = text;
+        i.focus();
+        i.setSelectionRange(i.value.length, i.value.length);
+    }
     document.body.addEventListener('htmx:afterSwap', function (e) {
-        if (e.target && e.target.id === 'plan-body') planRenderMermaid();
+        if (e.target && e.target.id === 'plan-body') { planRenderMermaid(); cpScroll(); }
     });
 </script>
 {% endblock %}
