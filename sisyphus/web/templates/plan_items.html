@@ -1,0 +1,28 @@
+{% if items %}
+{% for it in items %}
+<div class="plan-item plan-item--{{ it.state }}">
+    <span class="pi-num">{{ loop.index }}</span>
+    <div class="pi-main">
+        <div class="pi-goal">{{ it.goal }}</div>
+        <div class="pi-meta">
+            <span class="pi-state pi-state--{{ it.state }}">{{ it.state }}</span>
+            <span class="muted mono">{{ it.repo or 'no repo' }} · {{ it.agent or 'auto' }}</span>
+            {% if it.after_nums %}<span class="muted">after {{ it.after_nums|join(', ') }}</span>{% endif %}
+            {% if it.task_id %}<a href="/tasks/{{ it.task_id }}" class="mono">→ {{ it.task_id }}</a>{% endif %}
+        </div>
+    </div>
+    <div class="acts">
+        {% if it.state == 'ready' %}
+        <button class="btn btn--primary btn--sm" hx-post="/api/plans/{{ plan.id }}/launch/{{ it.id }}"
+                hx-target="#plan-body" hx-swap="innerHTML">▶ Launch</button>
+        {% endif %}
+        {% if it.status == 'draft' %}
+        <button class="btn btn--danger btn--sm" hx-post="/api/plans/{{ plan.id }}/item/{{ it.id }}/delete"
+                hx-target="#plan-body" hx-swap="innerHTML" title="Remove">✕</button>
+        {% endif %}
+    </div>
+</div>
+{% endfor %}
+{% else %}
+<div class="empty">No draft tasks yet. Plan the goal above, then “Convert to plan”.</div>
+{% endif %}
