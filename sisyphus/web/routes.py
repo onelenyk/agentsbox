@@ -709,6 +709,7 @@ def _plan_ctx(request, plan, flash=None, error=None):
     brief = plan.get("brief_obj")
     return {
         "request": request, "plan": plan, "brief": brief, "items": items,
+        "messages": planner.list_messages(plan["id"]),
         "dag": planner.steps_dag_mermaid(brief["steps"]) if brief and brief.get("steps") else "",
         "repos": list_repos(), "plans": planner.list_plans(),
         "has_launched": any(it["status"] == "launched" for it in items),

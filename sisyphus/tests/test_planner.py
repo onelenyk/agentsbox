@@ -65,6 +65,32 @@ def test_plan_turn_saves_brief(db_path, monkeypatch):
     assert planner.get_plan(p["id"])["brief_obj"]["risks"] == ["might break X"]
 
 
+def test_plan_turn_records_conversation(db_path, monkeypatch):
+    p = planner.create_plan("p", repo="testrepo")
+    planner.add_message(p["id"], "user", "add offline mode")   # simulate start_plan_turn
+    monkeypatch.setattr("core.ai_assist.run_prompt", lambda pr, **k: json.dumps({
+        "reply": "Got it — sketched the offline sync flow on the canvas.",
+        "approach": "cache-first", "diagram": "", "steps": [],
+        "risks": [], "questions": [], "affected": [],
+    }))
+    b = planner.plan_turn(p["id"], "add offline mode")
+    assert b["reply"].startswith("Got it")
+    msgs = planner.list_messages(p["id"])
+    assert [m["role"] for m in msgs] == ["user", "assistant"]
+    assert msgs[1]["text"] == b["reply"]
+
+
+def test_plan_turn_unparseable_raises(db_path, monkeypatch):
+    p = planner.create_plan("p", repo="testrepo")
+    planner.update_plan(p["id"], brief=json.dumps({"approach": "keep me", "steps": [],
+        "diagram": "", "risks": [], "questions": [], "affected": []}))
+    monkeypatch.setattr("core.ai_assist.run_prompt", lambda pr, **k: "sorry, I can't help with that")
+    with pytest.raises(ValueError):
+        planner.plan_turn(p["id"], "do something")
+    # existing brief is preserved, not clobbered with an empty shell
+    assert planner.get_plan(p["id"])["brief_obj"]["approach"] == "keep me"
+
+
 def test_convert_to_drafts_maps_deps(db_path, monkeypatch):
     p = planner.create_plan("p", repo="testrepo")
     monkeypatch.setattr("core.ai_assist.run_prompt", lambda pr, **k: json.dumps({
