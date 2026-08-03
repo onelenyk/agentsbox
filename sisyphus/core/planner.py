@@ -302,7 +302,7 @@ def _plan_prompt(message: str, repo: str, ctx: str, brief: Optional[dict],
         "{\n"
         '  "reply": "<a short, warm conversational reply (1-3 sentences): what you changed this turn, or a question back to the user>",\n'
         '  "approach": "<1-3 short paragraphs on the approach>",\n'
-        '  "diagram": "<mermaid \'graph TD\' source for the interaction/architecture, or empty>",\n'
+        '  "diagram": "<mermaid \'graph TD\' source; wrap EVERY node label in double quotes so it parses (e.g. A[\\"Click Save\\"] --> B), or empty>",\n'
         '  "steps": [{"goal": "<clear, self-contained task goal>", "repo": "' + repo + '", "agent": "<engineer|reviewer|explorer or empty>", "after": [<0-based indices of prerequisite steps>]}],\n'
         '  "risks": ["<a concrete potential problem>"],\n'
         '  "questions": ["<an open question to clarify>"],\n'
