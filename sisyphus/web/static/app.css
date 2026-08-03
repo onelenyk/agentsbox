@@ -620,3 +620,10 @@ select { cursor: pointer; appearance: none;
 .pi-state--done     { color: var(--good); background: var(--good-bg); }
 .pi-state--failed   { color: var(--bad); background: var(--bad-bg); }
 .plan-item .acts { flex: none; }
+
+/* ── Planner: indeterminate progress ─────────────────────────────────── */
+.plan-progress { margin: 16px 0 4px; }
+.progress-bar { height: 5px; background: var(--inset); border: 1px solid var(--border); border-radius: var(--r-pill); overflow: hidden; position: relative; }
+.progress-bar span { position: absolute; top: 0; bottom: 0; width: 32%; background: var(--accent); border-radius: var(--r-pill); animation: prog 1.15s ease-in-out infinite; }
+@keyframes prog { 0% { left: -32%; } 100% { left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .progress-bar span { animation: none; width: 100%; left: 0; opacity: .5; } }

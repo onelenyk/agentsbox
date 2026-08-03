@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import threading
 from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import uuid4
@@ -268,6 +269,42 @@ def _plan_prompt(message: str, repo: str, ctx: str, brief: Optional[dict]) -> st
         "Use \"after\" to express dependencies (a step index that must finish first). "
         "Available agents: engineer, reviewer, explorer."
     )
+
+
+# Planning runs in a background thread (opencode is a blocking subprocess and a
+# big-repo plan can take a minute) — the UI shows a progress bar and polls.
+_generating = set()
+_errors = {}
+_lock = threading.Lock()
+
+
+def is_generating(plan_id: str) -> bool:
+    return plan_id in _generating
+
+
+def pop_error(plan_id: str):
+    return _errors.pop(plan_id, None)
+
+
+def start_plan_turn(plan_id: str, message: str) -> None:
+    """Kick off planning in the background. Safe to call once; ignored if a plan
+    is already generating."""
+    with _lock:
+        if plan_id in _generating:
+            return
+        _generating.add(plan_id)
+    _errors.pop(plan_id, None)
+
+    def _run():
+        try:
+            plan_turn(plan_id, message, timeout=240)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("plan_turn failed for %s", plan_id)
+            _errors[plan_id] = str(exc)[:200]
+        finally:
+            _generating.discard(plan_id)
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def plan_turn(plan_id: str, message: str, timeout: int = 90) -> dict:

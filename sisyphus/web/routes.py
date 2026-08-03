@@ -712,7 +712,8 @@ def _plan_ctx(request, plan, flash=None, error=None):
         "dag": planner.steps_dag_mermaid(brief["steps"]) if brief and brief.get("steps") else "",
         "repos": list_repos(), "plans": planner.list_plans(),
         "has_launched": any(it["status"] == "launched" for it in items),
-        "flash": flash, "error": error,
+        "generating": planner.is_generating(plan["id"]),
+        "flash": flash, "error": error or planner.pop_error(plan["id"]),
     }
 
 def _plan_panel(request, plan, **kw):
@@ -741,7 +742,7 @@ async def plans_new(request: Request):
 @router.post("/api/plans/{pid}/repo", response_class=HTMLResponse)
 async def plans_set_repo(request: Request, pid: str, repo: str = Form("")):
     from core import planner
-    planner.update_plan(pid, repo=repo)
+    planner.update_plan(pid, repo=repo, brief="")  # a new project → drop the old brief
     return _plan_panel(request, planner.get_plan(pid))
 
 @router.post("/api/plans/{pid}/plan", response_class=HTMLResponse)
@@ -749,11 +750,8 @@ async def plans_plan_turn(request: Request, pid: str, message: str = Form(...)):
     from core import planner
     if not message.strip():
         return _plan_panel(request, planner.get_plan(pid), error="Describe the task first.")
-    try:
-        planner.plan_turn(pid, message.strip())
-        return _plan_panel(request, planner.get_plan(pid), flash="Plan brief updated.")
-    except Exception as exc:  # noqa: BLE001
-        return _plan_panel(request, planner.get_plan(pid), error=f"Planning failed: {exc}")
+    planner.start_plan_turn(pid, message.strip())   # background; the panel polls
+    return _plan_panel(request, planner.get_plan(pid))
 
 @router.post("/api/plans/{pid}/convert", response_class=HTMLResponse)
 async def plans_convert(request: Request, pid: str):
