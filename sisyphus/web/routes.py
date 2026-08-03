@@ -33,6 +33,7 @@ async def startup():
     from core.mergerequests import init_mr_table
     from core.autopilot import init_autopilot_table
     from core.copilot_store import init_copilot_tables
+    from core.planner import init_planner_tables
     init_db()
     init_runners_table()  # daemon is self-sufficient: seed the runners table
     init_agents_table()   # and the agents (personas + tool allowlists)
@@ -40,6 +41,7 @@ async def startup():
     init_mr_table()       # and the local merge-request ledger
     init_autopilot_table()  # and the autopilot automations
     init_copilot_tables()   # and the copilot chat sessions
+    init_planner_tables()   # and the mission-planner plans/items
 
     import web.agent_mcp as agent_mcp
     from core import orchestrator
@@ -687,6 +689,98 @@ async def board_act(request: Request):
     if sid and copilot_store.get_session(sid):
         copilot_store.add_message(sid, "system", res)
     return {"result": res}
+
+# ── Mission Planner ─────────────────────────────────────────────────────
+
+@router.get("/plans", response_class=HTMLResponse)
+async def plans_page(request: Request):
+    return _tmpl().TemplateResponse("plans.html", {"request": request, "active_page": "plans"})
+
+def _plan_ctx(request, plan, flash=None, error=None):
+    from core import planner
+    from core.repos import list_repos
+    items = planner.list_items(plan["id"])
+    by = {x["id"]: x for x in items}
+    for it in items:
+        it["state"] = planner.item_state(it, by)
+    idx = {it["id"]: i + 1 for i, it in enumerate(items)}
+    for it in items:
+        it["after_nums"] = [idx[a] for a in it["after"] if a in idx]
+    brief = plan.get("brief_obj")
+    return {
+        "request": request, "plan": plan, "brief": brief, "items": items,
+        "dag": planner.steps_dag_mermaid(brief["steps"]) if brief and brief.get("steps") else "",
+        "repos": list_repos(), "plans": planner.list_plans(),
+        "has_launched": any(it["status"] == "launched" for it in items),
+        "flash": flash, "error": error,
+    }
+
+def _plan_panel(request, plan, **kw):
+    return _tmpl().TemplateResponse("plan_panel.html", _plan_ctx(request, plan, **kw))
+
+@router.get("/api/plans/panel", response_class=HTMLResponse)
+async def plans_panel_latest(request: Request):
+    from core import planner
+    return _plan_panel(request, planner.latest_plan() or planner.create_plan())
+
+@router.get("/api/plans/{pid}", response_class=HTMLResponse)
+async def plans_panel(request: Request, pid: str):
+    from core import planner
+    return _plan_panel(request, planner.get_plan(pid) or planner.latest_plan() or planner.create_plan())
+
+@router.get("/api/plans/{pid}/items", response_class=HTMLResponse)
+async def plans_items(request: Request, pid: str):
+    from core import planner
+    return _tmpl().TemplateResponse("plan_items.html", _plan_ctx(request, planner.get_plan(pid) or planner.create_plan()))
+
+@router.post("/api/plans/new", response_class=HTMLResponse)
+async def plans_new(request: Request):
+    from core import planner
+    return _plan_panel(request, planner.create_plan())
+
+@router.post("/api/plans/{pid}/repo", response_class=HTMLResponse)
+async def plans_set_repo(request: Request, pid: str, repo: str = Form("")):
+    from core import planner
+    planner.update_plan(pid, repo=repo)
+    return _plan_panel(request, planner.get_plan(pid))
+
+@router.post("/api/plans/{pid}/plan", response_class=HTMLResponse)
+async def plans_plan_turn(request: Request, pid: str, message: str = Form(...)):
+    from core import planner
+    if not message.strip():
+        return _plan_panel(request, planner.get_plan(pid), error="Describe the task first.")
+    try:
+        planner.plan_turn(pid, message.strip())
+        return _plan_panel(request, planner.get_plan(pid), flash="Plan brief updated.")
+    except Exception as exc:  # noqa: BLE001
+        return _plan_panel(request, planner.get_plan(pid), error=f"Planning failed: {exc}")
+
+@router.post("/api/plans/{pid}/convert", response_class=HTMLResponse)
+async def plans_convert(request: Request, pid: str):
+    from core import planner
+    planner.convert_to_drafts(pid)
+    return _plan_panel(request, planner.get_plan(pid), flash="Converted to draft tasks.")
+
+@router.post("/api/plans/{pid}/launch/{iid}", response_class=HTMLResponse)
+async def plans_launch(request: Request, pid: str, iid: str):
+    from core import planner
+    try:
+        planner.launch_item(iid)
+        return _plan_panel(request, planner.get_plan(pid), flash="Launched.")
+    except Exception as exc:  # noqa: BLE001
+        return _plan_panel(request, planner.get_plan(pid), error=str(exc))
+
+@router.post("/api/plans/{pid}/item/{iid}/delete", response_class=HTMLResponse)
+async def plans_item_delete(request: Request, pid: str, iid: str):
+    from core import planner
+    planner.delete_item(iid)
+    return _plan_panel(request, planner.get_plan(pid))
+
+@router.post("/api/plans/{pid}/delete", response_class=HTMLResponse)
+async def plans_delete(request: Request, pid: str):
+    from core import planner
+    planner.delete_plan(pid)
+    return _plan_panel(request, planner.latest_plan() or planner.create_plan())
 
 @router.get("/tasks/{task_id}", response_class=HTMLResponse)
 async def task_page(request: Request, task_id: str):

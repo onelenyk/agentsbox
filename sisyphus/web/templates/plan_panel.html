@@ -1,0 +1,62 @@
+{% if flash %}<div class="mr-flash ok">✓ {{ flash }}</div>{% endif %}
+{% if error %}<div class="mr-flash err">✗ {{ error }}</div>{% endif %}
+
+{% if plans|length > 1 %}
+<div class="plan-switch">
+    {% for p in plans %}
+    <button class="chip-btn {{ 'is-on' if p.id == plan.id else '' }}"
+            hx-get="/api/plans/{{ p.id }}" hx-target="#plan-body" hx-swap="innerHTML">{{ (p.title or 'plan')[:28] }}</button>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="panel">
+    <div class="panel__head">
+        <h2>{{ plan.title }}</h2>
+        <div class="row" style="flex-shrink:0">
+            <form hx-post="/api/plans/{{ plan.id }}/repo" hx-target="#plan-body" hx-swap="innerHTML" hx-trigger="change" style="display:inline">
+                <select name="repo" style="width:auto;min-width:150px">
+                    <option value="">— no project —</option>
+                    {% for r in repos %}<option value="{{ r.name }}" {{ 'selected' if plan.repo == r.name else '' }}>{{ r.name }}</option>{% endfor %}
+                </select>
+            </form>
+            <button class="btn btn--danger btn--sm" hx-post="/api/plans/{{ plan.id }}/delete"
+                    hx-target="#plan-body" hx-swap="innerHTML" hx-confirm="Delete this plan?">Delete</button>
+        </div>
+    </div>
+
+    <form class="composer" hx-post="/api/plans/{{ plan.id }}/plan" hx-target="#plan-body" hx-swap="innerHTML">
+        <textarea name="message" rows="2" required
+                  placeholder="Describe the big task — the agent plans it against {{ plan.repo or 'the selected project' }} (its files, conventions, README/AGENTS.md)."></textarea>
+        <div class="row" style="margin-top:8px;gap:10px">
+            <button type="submit" class="btn btn--primary btn--sm">{{ '✨ Refine plan' if brief else '✨ Plan it' }}</button>
+            <span class="htmx-indicator muted">✨ planning… (~15s)</span>
+        </div>
+    </form>
+
+    {% if brief %}
+    <div class="brief">
+        {% if brief.approach %}<div class="brief-sec"><div class="rail-h">Approach</div><div class="brief-text">{{ brief.approach }}</div></div>{% endif %}
+        {% if brief.diagram %}<div class="brief-sec"><div class="rail-h">Interaction diagram</div><pre class="mermaid">{{ brief.diagram }}</pre></div>{% endif %}
+        {% if dag %}<div class="brief-sec"><div class="rail-h">Plan · DAG</div><pre class="mermaid">{{ dag }}</pre></div>{% endif %}
+        {% if brief.risks %}<div class="brief-sec"><div class="rail-h">Risks ⚠</div><ul class="brief-list">{% for r in brief.risks %}<li>{{ r }}</li>{% endfor %}</ul></div>{% endif %}
+        {% if brief.questions %}<div class="brief-sec"><div class="rail-h">Open questions</div><ul class="brief-list">{% for q in brief.questions %}<li>{{ q }}</li>{% endfor %}</ul></div>{% endif %}
+        {% if brief.affected %}<div class="brief-sec"><div class="rail-h">Affected</div><div class="brief-text mono">{{ brief.affected|join('  ·  ') }}</div></div>{% endif %}
+        {% if brief.steps %}
+        <div class="row" style="margin-top:12px">
+            <button class="btn btn--primary btn--sm" hx-post="/api/plans/{{ plan.id }}/convert"
+                    hx-target="#plan-body" hx-swap="innerHTML"
+                    hx-confirm="{% if items %}Re-convert? This replaces the current draft tasks.{% else %}Create {{ brief.steps|length }} draft tasks from this plan?{% endif %}">Convert to plan ▸ ({{ brief.steps|length }})</button>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="section-title">Draft tasks
+        {% if items %}<span class="chip">{{ items|selectattr('status','equalto','done')|list|length }}/{{ items|length }} done</span>{% endif %}
+    </div>
+    <div id="plan-items" hx-get="/api/plans/{{ plan.id }}/items"
+         {% if has_launched %}hx-trigger="every 6s"{% endif %} hx-swap="innerHTML">
+        {% include "plan_items.html" %}
+    </div>
+</div>

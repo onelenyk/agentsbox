@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Planner — Sisyphus{% endblock %}
+{% block content %}
+<div class="page-head">
+    <div>
+        <h1>Mission Planner</h1>
+        <div class="sub">Plan a big goal into a project-aware brief, then release it as tasks.</div>
+    </div>
+    <div class="actions">
+        <button class="btn btn--primary" hx-post="/api/plans/new" hx-target="#plan-body" hx-swap="innerHTML">+ New Plan</button>
+    </div>
+</div>
+<div id="plan-body" hx-get="/api/plans/panel" hx-trigger="load" hx-swap="innerHTML">
+    <div class="empty">Loading…</div>
+</div>
+
+<script src="/static/mermaid.min.js"></script>
+<script>
+    if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
+    function planRenderMermaid() {
+        if (!window.mermaid) return;
+        try { mermaid.run({ querySelector: '#plan-body .mermaid:not([data-processed])' }); } catch (e) {}
+    }
+    document.body.addEventListener('htmx:afterSwap', function (e) {
+        if (e.target && e.target.id === 'plan-body') planRenderMermaid();
+    });
+</script>
+{% endblock %}
