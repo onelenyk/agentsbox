@@ -26,15 +26,20 @@
     </div>
 
     <form class="composer" hx-post="/api/plans/{{ plan.id }}/plan" hx-target="#plan-body" hx-swap="innerHTML">
-        <textarea name="message" rows="2" required
+        <textarea name="message" rows="2" required {{ 'disabled' if generating else '' }}
                   placeholder="Describe the big task — the agent plans it against {{ plan.repo or 'the selected project' }} (its files, conventions, README/AGENTS.md)."></textarea>
         <div class="row" style="margin-top:8px;gap:10px">
-            <button type="submit" class="btn btn--primary btn--sm">{{ '✨ Refine plan' if brief else '✨ Plan it' }}</button>
-            <span class="htmx-indicator muted">✨ planning… (~15s)</span>
+            <button type="submit" class="btn btn--primary btn--sm" {{ 'disabled' if generating else '' }}>
+                {{ '✨ Planning…' if generating else ('✨ Refine plan' if brief else '✨ Plan it') }}</button>
         </div>
     </form>
 
-    {% if brief %}
+    {% if generating %}
+    <div class="plan-progress" hx-get="/api/plans/{{ plan.id }}" hx-trigger="every 2s" hx-target="#plan-body" hx-swap="innerHTML">
+        <div class="progress-bar"><span></span></div>
+        <div class="muted" style="font-size:12.5px;margin-top:8px">✨ Planning against {{ plan.repo or 'the project' }}… this can take up to a minute for a large repo.</div>
+    </div>
+    {% elif brief %}
     <div class="brief">
         {% if brief.approach %}<div class="brief-sec"><div class="rail-h">Approach</div><div class="brief-text">{{ brief.approach }}</div></div>{% endif %}
         {% if brief.diagram %}<div class="brief-sec"><div class="rail-h">Interaction diagram</div><pre class="mermaid">{{ brief.diagram }}</pre></div>{% endif %}
