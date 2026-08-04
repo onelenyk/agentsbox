@@ -746,6 +746,18 @@ async def plans_set_repo(request: Request, pid: str, repo: str = Form("")):
     planner.update_plan(pid, repo=repo, brief="")  # a new project → drop the old brief
     return _plan_panel(request, planner.get_plan(pid))
 
+@router.post("/api/plans/{pid}/toggle/{flag}", response_class=HTMLResponse)
+async def plans_toggle(request: Request, pid: str, flag: str):
+    from core import planner
+    if flag not in ("auto_release", "auto_merge"):
+        return _plan_panel(request, planner.get_plan(pid), error="unknown setting")
+    plan = planner.get_plan(pid)
+    new = 0 if (plan or {}).get(flag) else 1
+    planner.update_plan(pid, **{flag: new})
+    label = "Auto-release" if flag == "auto_release" else "Auto-merge"
+    return _plan_panel(request, planner.get_plan(pid),
+                       flash=f"{label} {'on' if new else 'off'}.")
+
 @router.post("/api/plans/{pid}/plan", response_class=HTMLResponse)
 async def plans_plan_turn(request: Request, pid: str, message: str = Form(...)):
     from core import planner

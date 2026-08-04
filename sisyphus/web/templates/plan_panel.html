@@ -108,8 +108,23 @@
         {% endif %}
 
         <div class="cp-drafts">
-            <div class="section-title">Draft tasks
-                {% if items %}<span class="chip">{{ items|selectattr('status','equalto','done')|list|length }}/{{ items|length }} done</span>{% endif %}
+            <div class="cp-drafts-head">
+                <div class="section-title">Draft tasks
+                    {% if items %}<span class="chip">{{ items|selectattr('status','equalto','done')|list|length }}/{{ items|length }} done</span>{% endif %}
+                </div>
+                {% if items %}
+                <div class="cp-autonomy" title="Run the DAG hands-off">
+                    <button class="toggle-chip {{ 'is-on' if plan.auto_release else '' }}"
+                            hx-post="/api/plans/{{ plan.id }}/toggle/auto_release" hx-target="#plan-body" hx-swap="innerHTML"
+                            title="When a step finishes, automatically launch the next ready steps">
+                        <span class="dot"></span>Auto-release</button>
+                    <button class="toggle-chip {{ 'is-on' if plan.auto_merge else '' }}"
+                            hx-post="/api/plans/{{ plan.id }}/toggle/auto_merge" hx-target="#plan-body" hx-swap="innerHTML"
+                            {% if not plan.auto_merge %}hx-confirm="Turn on auto-merge? Each step's MR will be merged into its target branch automatically whenever it merges cleanly — this writes to the target branch without asking each time."{% endif %}
+                            title="Auto-merge each step's MR into its target when it merges cleanly">
+                        <span class="dot"></span>Auto-merge</button>
+                </div>
+                {% endif %}
             </div>
             <div id="plan-items" hx-get="/api/plans/{{ plan.id }}/items"
                  {% if has_launched %}hx-trigger="every 6s"{% endif %} hx-swap="innerHTML">
