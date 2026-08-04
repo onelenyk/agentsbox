@@ -38,9 +38,25 @@ def _prompt(text, template, repo_names, agent_names):
     )
 
 
+_ONESHOT_PREAMBLE = (
+    "Answer IMMEDIATELY using ONLY the information in this prompt. Do NOT use any "
+    "tools, do NOT read files, grep, or explore a codebase, do NOT call subagents — "
+    "just produce the requested output directly and nothing else.\n\n"
+)
+
+
 def run_prompt(prompt: str, timeout: int = 60) -> str:
     """One-shot local AI call through the default runner (opencode), forced to the
-    runner's cheap/fast model. Returns the model's stdout text. No new model HTTP."""
+    runner's cheap/fast model. Returns the model's stdout text. No new model HTTP.
+
+    `opencode run` is an *agentic* runtime, not a plain completion: left to the
+    user's global config it loads a heavy persona (plugins, skills, memory) and,
+    prompted to "plan against a project", will wander off reading files in a
+    tool-using loop — turning a ~10s answer into a 2-minute exploration that then
+    times out or emits non-parseable tool noise. `--pure` drops the global
+    plugins (we don't use project-local MCP here, so nothing we need is lost) and
+    the preamble forbids tool use, making the call a fast, deterministic
+    completion."""
     from core.runner_detect import resolve
     from core.runners import get_default_runner
 
@@ -60,8 +76,8 @@ def run_prompt(prompt: str, timeout: int = 60) -> str:
     # model and the call takes ~5x longer.
     model_args = ["--model", runner["model"]] if runner.get("model") else []
     with tempfile.TemporaryDirectory(prefix="sisyphus-ai-") as d:
-        proc = subprocess.run([binary, "run", *model_args, prompt], capture_output=True,
-                              text=True, timeout=timeout, cwd=d, env=env)
+        proc = subprocess.run([binary, "run", "--pure", *model_args, _ONESHOT_PREAMBLE + prompt],
+                              capture_output=True, text=True, timeout=timeout, cwd=d, env=env)
     return proc.stdout or ""
 
 
