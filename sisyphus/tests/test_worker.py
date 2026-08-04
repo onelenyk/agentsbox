@@ -70,6 +70,20 @@ class TestNoRepo:
         with pytest.raises(ValueError):
             await spawn_worker(task["id"], "wizard", "x")
 
+    @pytest.mark.asyncio
+    async def test_named_but_unresolvable_repo_fails_never_runs_unconfined(self, db_path):
+        # A task that names a repo the worker can't prepare must FAIL — never
+        # silently fall through to the repo-less scratch dir, where the agent's
+        # native tools would run with no git isolation and could reach the real
+        # source repo on disk. (This is exactly how a live run once committed to
+        # the wrong repo's main.)
+        task = store.create_task("edit something", repo="ghost-repo")   # never registered
+        mock_launch = AsyncMock(return_value=AgentResult(status="completed", summary="ok"))
+        with patch("core.worker.launch_agent", mock_launch):
+            with pytest.raises(ValueError, match="ghost-repo"):
+                await spawn_worker(task["id"], "engineer", "do it", repo_name="ghost-repo")
+        mock_launch.assert_not_called()   # the agent never started
+
 
 class TestRepoBackedWorktree:
     @pytest.mark.asyncio
