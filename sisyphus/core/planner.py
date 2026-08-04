@@ -35,15 +35,23 @@ def init_planner_tables() -> None:
     conn = get_conn()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS plans (
-            id         TEXT PRIMARY KEY,
-            title      TEXT NOT NULL DEFAULT 'New plan',
-            repo       TEXT NOT NULL DEFAULT '',
-            status     TEXT NOT NULL DEFAULT 'planning',
-            brief      TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+            id           TEXT PRIMARY KEY,
+            title        TEXT NOT NULL DEFAULT 'New plan',
+            repo         TEXT NOT NULL DEFAULT '',
+            status       TEXT NOT NULL DEFAULT 'planning',
+            brief        TEXT NOT NULL DEFAULT '',
+            auto_release INTEGER NOT NULL DEFAULT 0,
+            auto_merge   INTEGER NOT NULL DEFAULT 0,
+            created_at   TEXT NOT NULL,
+            updated_at   TEXT NOT NULL
         )
     """)
+    # migrate existing DBs: add the autonomy flags if they predate this column
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(plans)").fetchall()}
+    if "auto_release" not in cols:
+        conn.execute("ALTER TABLE plans ADD COLUMN auto_release INTEGER NOT NULL DEFAULT 0")
+    if "auto_merge" not in cols:
+        conn.execute("ALTER TABLE plans ADD COLUMN auto_merge INTEGER NOT NULL DEFAULT 0")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS plan_items (
             id         TEXT PRIMARY KEY,
@@ -112,7 +120,8 @@ def list_plans(limit: int = 30) -> List[dict]:
 
 
 def update_plan(pid: str, **fields) -> Optional[dict]:
-    allowed = {k: v for k, v in fields.items() if k in ("title", "repo", "status", "brief") and v is not None}
+    allowed = {k: v for k, v in fields.items()
+               if k in ("title", "repo", "status", "brief", "auto_release", "auto_merge") and v is not None}
     if allowed:
         cols = ", ".join(f"{k} = ?" for k in allowed)
         conn = get_conn()
@@ -455,14 +464,63 @@ def launch_item(iid: str) -> dict:
 
 
 def on_task_terminal(task_id: str, status: str) -> None:
-    """Advance the plan when a launched task terminates — mark its item done/failed.
-    (Auto-release of newly-ready items is P2; here we just record progress.)"""
+    """Advance the plan when a launched task terminates. Marks the item done/failed,
+    then — if the plan opts in — auto-merges the item's MR and auto-releases any
+    now-ready dependents, so the whole DAG can run hands-off. Runs inside the
+    daemon that executes tasks, so launching more work here is safe."""
     conn = get_conn()
-    row = conn.execute("SELECT id FROM plan_items WHERE task_id = ? AND status = 'launched'",
+    row = conn.execute("SELECT id, plan_id FROM plan_items WHERE task_id = ? AND status = 'launched'",
                        (task_id,)).fetchone()
     conn.close()
-    if row:
-        update_item(row["id"], status=("done" if status == "done" else "failed"))
+    if not row:
+        return
+    update_item(row["id"], status=("done" if status == "done" else "failed"))
+    if status != "done":
+        return   # a failed step blocks its dependents — don't cascade past it
+
+    plan = get_plan(row["plan_id"])
+    if not plan:
+        return
+    # 1) auto-merge this step's MR (before releasing dependents, so the next step
+    #    clones a base that already contains this one's changes)
+    if plan.get("auto_merge"):
+        _auto_merge_task(task_id)
+    # 2) auto-release: launch every draft item whose prerequisites are now done
+    if plan.get("auto_release"):
+        items = list_items(plan["id"])
+        by = {x["id"]: x for x in items}
+        for it in items:
+            if it["status"] == "draft" and releasable(it, by):
+                try:
+                    launch_item(it["id"])
+                except Exception:  # noqa: BLE001
+                    logger.exception("auto-release failed for item %s", it["id"])
+
+
+def _auto_merge_task(task_id: str) -> None:
+    """Merge a task's open MR into its target if it merges cleanly. Best-effort:
+    a conflict or a missing/absent MR is left for the user to resolve by hand."""
+    try:
+        from core import mergerequests, store
+        mr = mergerequests.latest_for_task(task_id)
+        if not mr or mr["status"] != "open":
+            return
+        check = mergerequests.check_mergeability(
+            mr["bare_path"], mr["source_path"], mr["source_branch"], mr["target_branch"])
+        if not (check.get("ok") and check.get("mergeable")):
+            logger.info("auto-merge skipped for %s — not cleanly mergeable", task_id)
+            return
+        res = mergerequests.merge_branch(mr, mr["target_branch"])
+        if res.get("ok"):
+            mergerequests.mark_merged(mr["id"], res["sha"])
+            store.post_message(task_id, "system", kind="note",
+                               text=f"Auto-merged {mr['source_branch']} into {res['target']} ({res['sha'][:8]})")
+            from core.worker import cleanup_task
+            cleanup_task(task_id)
+        else:
+            logger.info("auto-merge failed for %s — %s", task_id, res.get("error"))
+    except Exception:  # noqa: BLE001
+        logger.exception("auto-merge errored for task %s", task_id)
 
 
 def steps_dag_mermaid(steps: list) -> str:

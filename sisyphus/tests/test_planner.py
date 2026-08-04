@@ -136,3 +136,52 @@ def test_on_task_terminal_failed(db_path, monkeypatch):
     la = planner.launch_item(a["id"])
     planner.on_task_terminal(la["task_id"], "failed")
     assert planner.get_item(a["id"])["status"] == "failed"
+
+
+def test_auto_release_cascades(db_path, monkeypatch):
+    _emit(monkeypatch)
+    p = planner.create_plan("p", repo="testrepo")
+    planner.update_plan(p["id"], auto_release=1)
+    a = planner.add_item(p["id"], "A", repo="testrepo", agent="engineer")
+    b = planner.add_item(p["id"], "B", repo="testrepo", after=[a["id"]])
+    c = planner.add_item(p["id"], "C", repo="testrepo", after=[b["id"]])
+    la = planner.launch_item(a["id"])
+
+    # A done → B is auto-launched (not left as a ready draft)
+    planner.on_task_terminal(la["task_id"], "done")
+    b = planner.get_item(b["id"])
+    assert b["status"] == "launched" and b["task_id"]
+    assert planner.get_item(c["id"])["status"] == "draft"   # still blocked by B
+
+    # B done → C auto-launches too — the whole chain runs hands-off
+    planner.on_task_terminal(b["task_id"], "done")
+    assert planner.get_item(c["id"])["status"] == "launched"
+
+
+def test_auto_release_off_by_default(db_path, monkeypatch):
+    _emit(monkeypatch)
+    p = planner.create_plan("p", repo="testrepo")
+    a = planner.add_item(p["id"], "A", repo="testrepo")
+    b = planner.add_item(p["id"], "B", repo="testrepo", after=[a["id"]])
+    la = planner.launch_item(a["id"])
+    planner.on_task_terminal(la["task_id"], "done")
+    assert planner.get_item(b["id"])["status"] == "draft"   # ready, but not auto-launched
+
+
+def test_auto_merge_invoked_on_done(db_path, monkeypatch):
+    _emit(monkeypatch)
+    merged = []
+    monkeypatch.setattr("core.planner._auto_merge_task", lambda tid: merged.append(tid))
+    p = planner.create_plan("p", repo="testrepo")
+    planner.update_plan(p["id"], auto_merge=1)
+    a = planner.add_item(p["id"], "A", repo="testrepo", agent="engineer")
+    la = planner.launch_item(a["id"])
+    planner.on_task_terminal(la["task_id"], "done")
+    assert merged == [la["task_id"]]
+
+    # failed task → no merge attempt
+    merged.clear()
+    b = planner.add_item(p["id"], "B", repo="testrepo")
+    lb = planner.launch_item(b["id"])
+    planner.on_task_terminal(lb["task_id"], "failed")
+    assert merged == []
