@@ -3,6 +3,8 @@ import asyncio
 import json
 import logging
 import os
+import platform
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -203,6 +205,15 @@ async def launch_agent(
     # (e.g. a launchd-supervised daemon), falling back to the bare name.
     from .runner_detect import resolve as _resolve_binary
     binary = _resolve_binary(runner["binary"]) or runner["binary"]
+    # Verify the binary exists up front: once the command is wrapped in
+    # sandbox-exec (which does exist), a missing runner would no longer raise
+    # FileNotFoundError here — sandbox-exec would spawn and merely exit nonzero,
+    # masking the real cause. Fail fast with the actionable message instead.
+    if not (os.path.isabs(binary) and os.path.exists(binary)) and shutil.which(binary) is None:
+        return AgentResult(
+            status="error",
+            error=f"Runner binary '{binary}' not found. Check runner config or install it.",
+        )
     extra_args = json.loads(runner.get("extra_args", "[]") or "[]")
 
     start_time = time.monotonic()
@@ -240,6 +251,16 @@ async def launch_agent(
         args.extend(["--agent", agent])
     if worktree_path and worktree_path != "/tmp":
         args.extend(["--dir", str(worktree_path)])
+
+    # Confine the runner's filesystem writes to the workspace (see core.sandbox).
+    # Without a backend the run proceeds unconfined — surface that once so it's
+    # never a silent assumption.
+    from . import sandbox
+    if sandbox.enabled():
+        args = sandbox.wrap(args, str(worktree_path), str(output_dir))
+    elif not sandbox.available():
+        logger.warning("no filesystem sandbox on this platform (%s) — worker runs unconfined",
+                       platform.system())
 
     try:
         proc = await asyncio.create_subprocess_exec(
