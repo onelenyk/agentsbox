@@ -231,7 +231,20 @@ async def spawn_worker(
         r = get_runner(role_def["runner_id"])
         runner_name = r["name"] if r else None
 
-    bare_path, branch = _prepare_repo(task_id, repo_name or task.get("repo"))
+    requested_repo = repo_name or task.get("repo")
+    bare_path, branch = _prepare_repo(task_id, requested_repo)
+    if requested_repo and not bare_path:
+        # The task named a repo we couldn't prepare — unregistered, or the
+        # daemon's config cache predates its registration. Do NOT fall through
+        # to the repo-less scratch dir: without a checked-out clone the agent's
+        # native tools (bash with an arbitrary workdir, glob/edit on absolute
+        # paths) have no git isolation and can reach — and commit to — whatever
+        # is on disk, including the real source repo. Fail loudly instead; the
+        # scratch path is only for tasks that genuinely have no repo.
+        raise ValueError(
+            f"repo {requested_repo!r} is not available to the worker (not "
+            f"registered, or the daemon must reload its config) — refusing to "
+            f"run the agent without an isolated worktree")
     if bare_path:
         # Every worker for a task works on the task's own branch
         # (sisyphus/<task_id>), cut from the repo default. The engineer checks
