@@ -247,12 +247,18 @@ async def spawn_worker(
             f"run the agent without an isolated worktree")
     if bare_path:
         # Every worker for a task works on the task's own branch
-        # (sisyphus/<task_id>), cut from the repo default. The engineer checks
-        # it out attached so its commits advance the branch; read-only roles
-        # (explorer/reviewer) check it out detached so they don't hold it and
-        # block the engineer — only one worktree may hold a branch at a time.
+        # (sisyphus/<task_id>), cut from its base branch. Normally that's the repo
+        # default, but a plan step is cut from its plan's integration branch
+        # (task.base_branch) so it inherits everything earlier steps merged there
+        # — that's how dependent steps see each other's code instead of each
+        # re-cloning a pristine main and reinventing the interface.
+        # The engineer checks it out attached so its commits advance the branch;
+        # read-only roles (explorer/reviewer) check it out detached so they don't
+        # hold it and block the engineer — only one worktree may hold a branch at
+        # a time.
         from .git_ops import ensure_task_branch
-        task_br = ensure_task_branch(bare_path, task_id, branch or "main")
+        base_br = task.get("base_branch") or branch or "main"
+        task_br = ensure_task_branch(bare_path, task_id, base_br)
         worktree_path = create_worktree(
             bare_path, task_id, role, task_br, detach=(role != "engineer"),
         )
