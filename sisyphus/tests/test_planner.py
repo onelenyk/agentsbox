@@ -91,6 +91,56 @@ def test_plan_turn_unparseable_raises(db_path, monkeypatch):
     assert planner.get_plan(p["id"])["brief_obj"]["approach"] == "keep me"
 
 
+def test_integration_branch_flows_code_to_next_step(db_path, tmp_path, monkeypatch):
+    """Real git, no AI: a step's code merged into the plan branch is present when
+    the next step is cut from that branch — the mechanism that lets dependent
+    steps see each other's work — while the repo's main stays untouched."""
+    import subprocess
+    from core import git_ops, mergerequests, repos
+
+    def git(*a, cwd, **kw):
+        return subprocess.run(["git", "-C", cwd, *a], capture_output=True, text=True, **kw)
+
+    src = tmp_path / "src"; src.mkdir()
+    subprocess.run(["git", "init", "-b", "main", str(src)], capture_output=True)
+    git("config", "user.email", "t@t", cwd=str(src)); git("config", "user.name", "t", cwd=str(src))
+    (src / "README.md").write_text("base\n")
+    git("add", "-A", cwd=str(src)); git("commit", "-m", "init", cwd=str(src))
+
+    monkeypatch.setattr(repos, "get_repo",
+                        lambda name: {"name": name, "source": str(src), "branch": "main"})
+    mergerequests.init_mr_table()
+
+    plan_id = "pl-flow01"
+    br = planner._ensure_plan_branch(plan_id, "r")
+    assert br == f"plan/{plan_id}"                         # plan branch stood up in source
+
+    # step 1: clone, cut a task branch off the plan branch, add a file, register an MR
+    bare1 = tmp_path / "bare1.git"
+    subprocess.run(["git", "clone", "--bare", str(src), str(bare1)], capture_output=True)
+    t1 = git_ops.ensure_task_branch(str(bare1), "task-flow1", br)
+    wt1 = tmp_path / "wt1"
+    subprocess.run(["git", "-C", str(bare1), "worktree", "add", str(wt1), t1], capture_output=True)
+    (wt1 / "step1.py").write_text("def one(): return 'STEP1'\n")
+    git("add", "-A", cwd=str(wt1))
+    git("-c", "user.email=s@s", "-c", "user.name=s", "commit", "-m", "step1", cwd=str(wt1))
+    mergerequests.create_mr(task_id="task-flow1", repo="r", source_branch=t1, target_branch=br,
+                            title="s1", bare_path=str(bare1), base_branch=br, source_path=str(src))
+
+    planner._integrate_into_plan_branch("task-flow1", plan_id)   # ← the merge-forward
+
+    # the plan branch in source now carries step 1's file …
+    assert git("show", f"{br}:step1.py", cwd=str(src)).returncode == 0
+    # … so a fresh clone cut off the plan branch (step 2) sees it
+    bare2 = tmp_path / "bare2.git"
+    subprocess.run(["git", "clone", "--bare", str(src), str(bare2)], capture_output=True)
+    t2 = git_ops.ensure_task_branch(str(bare2), "task-flow2", br)
+    seen = git("show", f"{t2}:step1.py", cwd=str(bare2))
+    assert seen.returncode == 0 and "STEP1" in seen.stdout   # code flowed to the next step
+    # main never received it
+    assert git("show", "main:step1.py", cwd=str(src)).returncode != 0
+
+
 def test_convert_to_drafts_maps_deps(db_path, monkeypatch):
     p = planner.create_plan("p", repo="testrepo")
     monkeypatch.setattr("core.ai_assist.run_prompt", lambda pr, **k: json.dumps({
@@ -166,6 +216,46 @@ def test_auto_release_off_by_default(db_path, monkeypatch):
     la = planner.launch_item(a["id"])
     planner.on_task_terminal(la["task_id"], "done")
     assert planner.get_item(b["id"])["status"] == "draft"   # ready, but not auto-launched
+
+
+def test_plan_branch_name(db_path):
+    assert planner.plan_branch("pl-abc123") == "plan/pl-abc123"
+
+
+def test_launch_cuts_from_plan_branch(db_path, monkeypatch):
+    # a repo-backed step is cut from the plan's integration branch
+    _emit(monkeypatch)
+    monkeypatch.setattr("core.planner._ensure_plan_branch", lambda pid, repo: f"plan/{pid}")
+    p = planner.create_plan("p", repo="testrepo")
+    a = planner.add_item(p["id"], "do A", repo="testrepo", agent="engineer")
+    la = planner.launch_item(a["id"])
+    assert store.get_task(la["task_id"])["base_branch"] == f"plan/{p['id']}"
+
+
+def test_repoless_step_has_no_base_branch(db_path, monkeypatch):
+    _emit(monkeypatch)
+    p = planner.create_plan("p")                      # no repo
+    a = planner.add_item(p["id"], "explore", agent="explorer")
+    la = planner.launch_item(a["id"])
+    assert store.get_task(la["task_id"])["base_branch"] is None
+
+
+def test_integrate_runs_on_done_then_releases_onto_plan_branch(db_path, monkeypatch):
+    _emit(monkeypatch)
+    monkeypatch.setattr("core.planner._ensure_plan_branch", lambda pid, repo: f"plan/{pid}")
+    integrated = []
+    monkeypatch.setattr("core.planner._integrate_into_plan_branch",
+                        lambda tid, pid: integrated.append(tid))
+    p = planner.create_plan("p", repo="testrepo")
+    planner.update_plan(p["id"], auto_release=1)
+    a = planner.add_item(p["id"], "A", repo="testrepo", agent="engineer")
+    b = planner.add_item(p["id"], "B", repo="testrepo", after=[a["id"]])
+    la = planner.launch_item(a["id"])
+    planner.on_task_terminal(la["task_id"], "done")
+    assert integrated == [la["task_id"]]              # step integrated into plan branch
+    b = planner.get_item(b["id"])
+    assert b["status"] == "launched"                  # dependent auto-released
+    assert store.get_task(b["task_id"])["base_branch"] == f"plan/{p['id']}"  # onto the same branch
 
 
 def test_auto_merge_invoked_on_done(db_path, monkeypatch):

@@ -445,8 +445,55 @@ def convert_to_drafts(plan_id: str) -> List[dict]:
     return list_items(plan_id)
 
 
+def plan_branch(plan_id: str) -> str:
+    """The integration branch a plan's steps stack on: each step is cut from it
+    and merged back into it, so dependent steps inherit each other's code. Lives
+    in the source repo; never touches the repo's default branch."""
+    return f"plan/{plan_id}"
+
+
+def _ensure_plan_branch(plan_id: str, repo_name: str) -> Optional[str]:
+    """Stand up the plan's integration branch in the source repo, off the repo's
+    default. Returns the branch name, or None if the repo can't be resolved (in
+    which case the step just falls back to the repo default base)."""
+    try:
+        from core import repos, git_ops
+        r = repos.get_repo(repo_name)
+        if not r or not r.get("source"):
+            return None
+        br = plan_branch(plan_id)
+        git_ops.ensure_branch(r["source"], br, r.get("branch") or "main")
+        return br
+    except Exception:  # noqa: BLE001 — never let integration setup block a launch
+        logger.exception("could not ensure plan branch for %s", plan_id)
+        return None
+
+
+def _integrate_into_plan_branch(task_id: str, plan_id: str) -> None:
+    """Merge a finished step's task branch into the plan's integration branch, so
+    steps launched after it are cut from a base that already contains its code.
+    Best-effort: a conflict (genuinely parallel steps touching the same lines) is
+    logged and left — the step's own MR still exists for manual reconciliation."""
+    try:
+        from core import mergerequests
+        m = mergerequests.latest_for_task(task_id)
+        if not m:
+            return   # reviewer / no-change step — nothing to integrate
+        res = mergerequests.merge_branch(m, plan_branch(plan_id))
+        if res.get("ok"):
+            logger.info("integrated %s into %s (%s)", m["source_branch"],
+                        plan_branch(plan_id), res["sha"][:8])
+        else:
+            logger.warning("could not integrate %s into %s: %s", m["source_branch"],
+                           plan_branch(plan_id), res.get("error"))
+    except Exception:  # noqa: BLE001
+        logger.exception("integrate-into-plan-branch errored for task %s", task_id)
+
+
 def launch_item(iid: str) -> dict:
-    """Launch a draft item as a real task (only if releasable). Returns the item."""
+    """Launch a draft item as a real task (only if releasable). Returns the item.
+    The task is cut from the plan's integration branch so it inherits whatever
+    earlier steps merged there."""
     it = get_item(iid)
     if not it:
         raise ValueError("item not found")
@@ -457,7 +504,9 @@ def launch_item(iid: str) -> dict:
         raise ValueError("blocked — a prerequisite isn't done yet")
     from core import store
     from core.orchestrator import emit
-    task = store.create_task(it["goal"], it.get("repo") or "", agent=it.get("agent") or None)
+    base_br = _ensure_plan_branch(it["plan_id"], it["repo"]) if it.get("repo") else None
+    task = store.create_task(it["goal"], it.get("repo") or "",
+                             agent=it.get("agent") or None, base_branch=base_br)
     emit(task["id"], "created")
     update_item(iid, status="launched", task_id=task["id"])
     return get_item(iid)
@@ -481,11 +530,15 @@ def on_task_terminal(task_id: str, status: str) -> None:
     plan = get_plan(row["plan_id"])
     if not plan:
         return
-    # 1) auto-merge this step's MR (before releasing dependents, so the next step
-    #    clones a base that already contains this one's changes)
+    # 1) integrate this step into the plan branch — always, so any step launched
+    #    after it (a dependent, or a later auto-released one) is cut from a base
+    #    that already contains its code. This is what lets dependent steps build
+    #    on each other instead of each re-cloning a pristine default branch.
+    _integrate_into_plan_branch(task_id, plan["id"])
+    # 2) auto-merge this step's MR to its real target (opt-in; writes to main)
     if plan.get("auto_merge"):
         _auto_merge_task(task_id)
-    # 2) auto-release: launch every draft item whose prerequisites are now done
+    # 3) auto-release: launch every draft item whose prerequisites are now done
     if plan.get("auto_release"):
         items = list_items(plan["id"])
         by = {x["id"]: x for x in items}

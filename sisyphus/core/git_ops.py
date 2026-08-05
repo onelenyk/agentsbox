@@ -45,6 +45,21 @@ def is_git_repo(worktree: str) -> bool:
     return r.returncode == 0 and r.stdout.strip() == "true"
 
 
+def ensure_branch(repo_path: str, branch: str, base: str) -> bool:
+    """Create *branch* off *base* in a real (non-bare) repo if it doesn't already
+    exist. Non-destructive — only adds a ref, never touches the working tree.
+    Returns True if it was created, False if it already existed. Used to stand up
+    a plan's integration branch in the source repo so dependent steps stack on it."""
+    exists = _run(["git", "-C", repo_path, "rev-parse", "--verify", "--quiet",
+                   f"refs/heads/{branch}"])
+    if exists.returncode == 0:
+        return False
+    r = _run(["git", "-C", repo_path, "branch", branch, base])
+    if r.returncode != 0:
+        raise RuntimeError(f"could not create branch {branch} off {base}: {r.stderr.strip()}")
+    return True
+
+
 def ensure_task_branch(bare_path: str, task_id: str, base_branch: str) -> str:
     """Create ``sisyphus/<task_id>`` off *base_branch* in the bare repo if it
     doesn't exist yet. Returns the branch name."""
