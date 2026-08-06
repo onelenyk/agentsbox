@@ -141,6 +141,65 @@ def test_integration_branch_flows_code_to_next_step(db_path, tmp_path, monkeypat
     assert git("show", "main:step1.py", cwd=str(src)).returncode != 0
 
 
+def _conflict_repo(tmp_path):
+    """A repo where branch A and B change the same line (x.py) — merging B into A
+    conflicts. Returns (src_path, git_fn)."""
+    import subprocess
+    src = tmp_path / "src"; src.mkdir()
+    def git(*a, cwd=str(src)):
+        return subprocess.run(["git", "-C", cwd, *a], capture_output=True, text=True)
+    subprocess.run(["git", "init", "-b", "main", str(src)], capture_output=True)
+    git("config", "user.email", "t@t"); git("config", "user.name", "t")
+    (src / "x.py").write_text("base\n"); git("add", "-A"); git("commit", "-m", "i")
+    git("branch", "A", "main"); git("branch", "B", "main")
+    for br, content in (("A", "AAA\n"), ("B", "BBB\n")):
+        wt = tmp_path / ("wt" + br)
+        subprocess.run(["git", "-C", str(src), "worktree", "add", str(wt), br], capture_output=True)
+        (wt / "x.py").write_text(content)
+        git("add", "-A", cwd=str(wt))
+        git("-c", "user.email=s@s", "-c", "user.name=s", "commit", "-m", br, cwd=str(wt))
+        subprocess.run(["git", "-C", str(src), "worktree", "remove", "--force", str(wt)], capture_output=True)
+    return src, git
+
+
+def test_merge_resolving_auto_resolves_conflict(db_path, tmp_path):
+    from core import mergerequests
+    src, git = _conflict_repo(tmp_path)
+    mergerequests.init_mr_table()
+    mr = mergerequests.create_mr(task_id="t1", repo="r", source_branch="B", target_branch="A",
+                                 title="", bare_path=str(src), base_branch="A", source_path=str(src))
+    seen = {}
+    def resolver(path, text):
+        seen["path"] = path
+        assert "<<<<<<<" in text            # the conflicted content is handed over
+        return "MERGED\n"
+    res = mergerequests.merge_resolving(mr, "A", resolver)
+    assert res["ok"] and res["resolved"] == ["x.py"] and seen["path"] == "x.py"
+    assert git("show", "A:x.py").stdout == "MERGED\n"     # A now carries the resolution
+
+
+def test_merge_resolving_aborts_when_unresolvable(db_path, tmp_path):
+    from core import mergerequests
+    src, git = _conflict_repo(tmp_path)
+    mergerequests.init_mr_table()
+    mr = mergerequests.create_mr(task_id="t1", repo="r", source_branch="B", target_branch="A",
+                                 title="", bare_path=str(src), base_branch="A", source_path=str(src))
+    res = mergerequests.merge_resolving(mr, "A", lambda p, t: None)   # resolver gives up
+    assert not res["ok"]
+    assert git("show", "A:x.py").stdout == "AAA\n"        # A left untouched
+
+
+def test_ai_conflict_resolver_guards_bad_output(db_path, monkeypatch):
+    # a resolution that still contains markers, or no JSON, is rejected (→ None)
+    monkeypatch.setattr("core.ai_assist.run_prompt",
+                        lambda p, **k: '{"resolved": "<<<<<<< still conflicted"}')
+    assert planner._ai_conflict_resolver("x.py", "conflict") is None
+    monkeypatch.setattr("core.ai_assist.run_prompt", lambda p, **k: "no json here")
+    assert planner._ai_conflict_resolver("x.py", "conflict") is None
+    monkeypatch.setattr("core.ai_assist.run_prompt", lambda p, **k: '{"resolved": "clean()\\n"}')
+    assert planner._ai_conflict_resolver("x.py", "conflict") == "clean()\n"
+
+
 def test_open_plan_mr_lands_the_whole_feature(db_path, tmp_path, monkeypatch):
     """When the plan branch has diverged from the default, one MR (plan → default)
     is opened to land the assembled feature — idempotently, and not before there's
