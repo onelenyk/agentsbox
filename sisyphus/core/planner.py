@@ -490,6 +490,36 @@ def _integrate_into_plan_branch(task_id: str, plan_id: str) -> None:
         logger.exception("integrate-into-plan-branch errored for task %s", task_id)
 
 
+def _open_plan_mr(plan_id: str) -> None:
+    """Once every step is done, open ONE merge request from the plan's integration
+    branch to the repo default — the whole feature, assembled by the steps, as a
+    single reviewable change to land. Idempotent; only opens if the plan branch
+    actually diverged from the default."""
+    try:
+        from core import mergerequests, repos, git_ops
+        plan = get_plan(plan_id)
+        if not plan or not plan.get("repo"):
+            return
+        r = repos.get_repo(plan["repo"])
+        if not r or not r.get("source"):
+            return
+        src, default = r["source"], (r.get("branch") or "main")
+        br = plan_branch(plan_id)
+        ahead = git_ops._run(["git", "-C", src, "rev-list", "--count",
+                              f"{default}..{br}"]).stdout.strip()
+        if not ahead or ahead == "0":
+            return   # nothing landed on the plan branch — no feature to open
+        if any(m.get("source_branch") == br for m in mergerequests.list_mrs()):
+            return   # already opened
+        mergerequests.create_mr(
+            task_id=f"plan:{plan_id}", repo=plan["repo"], source_branch=br,
+            target_branch=default, title=f"{plan.get('title') or 'Plan'} — full feature",
+            bare_path=src, base_branch=default, source_path=src)
+        logger.info("opened plan MR %s -> %s for %s", br, default, plan_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("could not open plan MR for %s", plan_id)
+
+
 def launch_item(iid: str) -> dict:
     """Launch a draft item as a real task (only if releasable). Returns the item.
     The task is cut from the plan's integration branch so it inherits whatever
@@ -548,6 +578,10 @@ def on_task_terminal(task_id: str, status: str) -> None:
                     launch_item(it["id"])
                 except Exception:  # noqa: BLE001
                     logger.exception("auto-release failed for item %s", it["id"])
+    # 4) plan complete → open the single land-the-feature MR (plan branch → default)
+    items = list_items(plan["id"])
+    if items and all(it["status"] in ("done", "skipped") for it in items):
+        _open_plan_mr(plan["id"])
 
 
 def _auto_merge_task(task_id: str) -> None:
