@@ -469,23 +469,53 @@ def _ensure_plan_branch(plan_id: str, repo_name: str) -> Optional[str]:
         return None
 
 
+def _ai_conflict_resolver(path: str, text: str) -> Optional[str]:
+    """Merge one conflicted file with the local model, preserving both sides.
+    Returns the resolved content, or None if it couldn't (markers remain / empty)
+    so the caller aborts and leaves the conflict for a human."""
+    from core import ai_assist
+    prompt = (
+        "You are resolving ONE git merge conflict. The file below contains conflict "
+        "markers (<<<<<<<, =======, >>>>>>>). Produce the correct merged file that "
+        "PRESERVES the intent of BOTH sides — never drop either side's changes — and "
+        "removes every conflict marker. Respond with ONLY a JSON object: "
+        '{"resolved": "<the complete merged file content>"}.\n\n'
+        f"File: {path}\n\n{text}")
+    try:
+        obj = _find_json(ai_assist.run_prompt(prompt, timeout=150))
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(obj, dict) or "resolved" not in obj:
+        return None
+    out = str(obj["resolved"])
+    if "<<<<<<<" in out or ">>>>>>>" in out or not out.strip():
+        return None
+    return out if out.endswith("\n") else out + "\n"
+
+
 def _integrate_into_plan_branch(task_id: str, plan_id: str) -> None:
     """Merge a finished step's task branch into the plan's integration branch, so
     steps launched after it are cut from a base that already contains its code.
-    Best-effort: a conflict (genuinely parallel steps touching the same lines) is
-    logged and left — the step's own MR still exists for manual reconciliation."""
+    A clean merge just commits; a conflict (genuinely parallel steps on the same
+    lines) is auto-resolved by the model, preserving both sides — and if it can't,
+    it's left untouched for a human (the step's own MR still stands). The plan
+    branch never reaches main without a human reviewing the final plan MR, so an
+    imperfect auto-resolution can't silently land."""
     try:
         from core import mergerequests
         m = mergerequests.latest_for_task(task_id)
         if not m:
             return   # reviewer / no-change step — nothing to integrate
-        res = mergerequests.merge_branch(m, plan_branch(plan_id))
-        if res.get("ok"):
+        res = mergerequests.merge_resolving(m, plan_branch(plan_id), _ai_conflict_resolver)
+        if res.get("ok") and res.get("resolved"):
+            logger.info("integrated %s into %s — AI-resolved conflicts in %s",
+                        m["source_branch"], plan_branch(plan_id), res["resolved"])
+        elif res.get("ok"):
             logger.info("integrated %s into %s (%s)", m["source_branch"],
                         plan_branch(plan_id), res["sha"][:8])
         else:
-            logger.warning("could not integrate %s into %s: %s", m["source_branch"],
-                           plan_branch(plan_id), res.get("error"))
+            logger.warning("could not integrate %s into %s: %s — left for manual merge",
+                           m["source_branch"], plan_branch(plan_id), res.get("error"))
     except Exception:  # noqa: BLE001
         logger.exception("integrate-into-plan-branch errored for task %s", task_id)
 

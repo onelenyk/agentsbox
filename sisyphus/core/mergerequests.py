@@ -10,6 +10,7 @@ The engineer's work already lives on `source_branch` (sisyphus/<task_id>) in the
 per-task bare clone (`bare_path`); `source_path` is the user's real repo that the
 Land/Merge actions touch.
 """
+import os
 import shutil
 import subprocess
 import tempfile
@@ -112,6 +113,61 @@ def merge_branch(mr: dict, target: str) -> dict:
             return {"ok": False, "error": "merge conflict — resolve manually"}
         sha = _run(["git", "-C", wt, "rev-parse", "HEAD"]).stdout.strip()
         return {"ok": True, "sha": sha, "target": target}
+    finally:
+        _run(["git", "-C", real, "worktree", "remove", "--force", wt])
+        shutil.rmtree(wt, ignore_errors=True)
+
+
+def merge_resolving(mr: dict, target: str, resolve_fn) -> dict:
+    """Merge the MR's source branch into *target* in the user's real repo, calling
+    ``resolve_fn(path, conflicted_text) -> resolved_text | None`` for each file that
+    conflicts. A clean merge just commits. Runs entirely in a throwaway worktree on
+    *target* (never the user's checked-out branch); on any unresolved file it aborts
+    and leaves *target* untouched. Returns {ok, sha, target, resolved} or {ok: False,
+    error}. *resolved* is the list of files the resolver had to fix."""
+    real, src, bare = mr["source_path"], mr["source_branch"], mr["bare_path"]
+    f = _run(["git", "-C", real, "fetch", bare, f"{src}:{src}"])
+    if f.returncode != 0:
+        return {"ok": False, "error": f"fetch failed: {f.stderr.strip()[:120]}"}
+    wt = tempfile.mkdtemp(prefix="sisyphus-resolve-")
+    resolved_files: List[str] = []
+    try:
+        a = _run(["git", "-C", real, "worktree", "add", wt, target])
+        if a.returncode != 0:
+            return {"ok": False, "error": f"cannot check out '{target}': {a.stderr.strip()[:120]}"}
+        m = _run(["git", "-C", wt, "merge", "--no-commit", "--no-ff", src])
+        if m.returncode != 0:
+            conflicted = [c for c in _run(["git", "-C", wt, "diff", "--name-only",
+                          "--diff-filter=U"]).stdout.splitlines() if c.strip()]
+            if not conflicted:
+                _run(["git", "-C", wt, "merge", "--abort"])
+                return {"ok": False, "error": "merge failed with no resolvable conflicts"}
+            for path in conflicted:
+                full = os.path.join(wt, path)
+                try:
+                    with open(full, "r", encoding="utf-8", errors="replace") as fh:
+                        text = fh.read()
+                    fixed = resolve_fn(path, text)
+                    if fixed is None:
+                        _run(["git", "-C", wt, "merge", "--abort"])
+                        return {"ok": False, "error": f"unresolved conflict in {path}"}
+                    with open(full, "w", encoding="utf-8") as fh:
+                        fh.write(fixed)
+                    _run(["git", "-C", wt, "add", "--", path])
+                    resolved_files.append(path)
+                except Exception as exc:  # noqa: BLE001
+                    _run(["git", "-C", wt, "merge", "--abort"])
+                    return {"ok": False, "error": f"resolver errored on {path}: {exc}"}
+            c = _run(["git", "-C", wt, "-c", "user.email=sisyphus@local",
+                      "-c", "user.name=Sisyphus", "commit", "-m",
+                      f"Merge {src} into {target} (auto-resolved {len(resolved_files)} conflict(s))"])
+        else:
+            c = _run(["git", "-C", wt, "-c", "user.email=sisyphus@local",
+                      "-c", "user.name=Sisyphus", "commit", "--no-edit"])
+        if c.returncode != 0:
+            return {"ok": False, "error": f"commit failed: {c.stderr.strip()[:120]}"}
+        sha = _run(["git", "-C", wt, "rev-parse", "HEAD"]).stdout.strip()
+        return {"ok": True, "sha": sha, "target": target, "resolved": resolved_files}
     finally:
         _run(["git", "-C", real, "worktree", "remove", "--force", wt])
         shutil.rmtree(wt, ignore_errors=True)
