@@ -90,7 +90,12 @@ def publish_change(session: dict, title: str, description: str) -> dict:
     source = repo.get("source", "")
     platform = (repo.get("platform") or "").strip() or detect_platform(source)
     task_id = session["task_id"]
-    base = repo.get("branch", "main")
+    # Open the MR against the branch this task was cut from. For a plan step that
+    # is the plan's integration branch, so the MR's diff is just this step's delta
+    # on the shared base (not everything since main) and it merges into the branch
+    # its siblings share — several agents contributing to one codebase. Falls back
+    # to the repo default for a plain (non-plan) task.
+    base = task.get("base_branch") or repo.get("branch", "main")
     bare = _bare_path(task_id, source)
     branch = git_ops.task_branch(task_id)
 

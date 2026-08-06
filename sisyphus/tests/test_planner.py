@@ -141,6 +141,44 @@ def test_integration_branch_flows_code_to_next_step(db_path, tmp_path, monkeypat
     assert git("show", "main:step1.py", cwd=str(src)).returncode != 0
 
 
+def test_open_plan_mr_lands_the_whole_feature(db_path, tmp_path, monkeypatch):
+    """When the plan branch has diverged from the default, one MR (plan → default)
+    is opened to land the assembled feature — idempotently, and not before there's
+    anything to land."""
+    import subprocess
+    from core import repos, mergerequests
+
+    def git(*a, cwd):
+        return subprocess.run(["git", "-C", cwd, *a], capture_output=True, text=True)
+
+    src = tmp_path / "src"; src.mkdir()
+    subprocess.run(["git", "init", "-b", "main", str(src)], capture_output=True)
+    git("config", "user.email", "t@t", cwd=str(src)); git("config", "user.name", "t", cwd=str(src))
+    (src / "a").write_text("1\n"); git("add", "-A", cwd=str(src)); git("commit", "-m", "i", cwd=str(src))
+
+    p = planner.create_plan("Feat", repo="r")
+    monkeypatch.setattr(repos, "get_repo",
+                        lambda name: {"name": name, "source": str(src), "branch": "main"})
+    mergerequests.init_mr_table()
+    br = planner._ensure_plan_branch(p["id"], "r")
+
+    planner._open_plan_mr(p["id"])                     # nothing landed yet → no MR
+    assert not any(m["source_branch"] == br for m in mergerequests.list_mrs())
+
+    # a commit lands on the plan branch (what integration does)
+    wt = tmp_path / "wt"
+    subprocess.run(["git", "-C", str(src), "worktree", "add", str(wt), br], capture_output=True)
+    (wt / "feat.py").write_text("x\n")
+    git("add", "-A", cwd=str(wt))
+    git("-c", "user.email=s@s", "-c", "user.name=s", "commit", "-m", "feat", cwd=str(wt))
+
+    planner._open_plan_mr(p["id"])
+    mrs = [m for m in mergerequests.list_mrs() if m["source_branch"] == br]
+    assert len(mrs) == 1 and mrs[0]["target_branch"] == "main"
+    planner._open_plan_mr(p["id"])                     # idempotent
+    assert len([m for m in mergerequests.list_mrs() if m["source_branch"] == br]) == 1
+
+
 def test_convert_to_drafts_maps_deps(db_path, monkeypatch):
     p = planner.create_plan("p", repo="testrepo")
     monkeypatch.setattr("core.ai_assist.run_prompt", lambda pr, **k: json.dumps({
