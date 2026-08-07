@@ -7,6 +7,7 @@ login and is restarted on crash. Secrets come from ``.env`` (loaded by the app),
 never the plist.
 """
 import json
+import logging
 import os
 import signal
 import subprocess
@@ -14,6 +15,8 @@ import sys
 import time
 import urllib.request
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 PORT = 7677
 HEALTH_URL = f"http://127.0.0.1:{PORT}/api/v1/health"
@@ -30,7 +33,8 @@ def health():
     try:
         with urllib.request.urlopen(HEALTH_URL, timeout=2) as r:
             return json.loads(r.read())
-    except Exception:
+    except Exception as e:
+        logger.debug("daemon health check failed: %s", e)
         return None
 
 

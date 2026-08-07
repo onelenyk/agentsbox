@@ -986,7 +986,8 @@ async def task_delete(task_id: str):
     for tid in tree:
         try:
             cleanup_task(tid, deep=True)
-        except Exception:
+        except Exception as e:
+            logger.warning("cleanup failed for task %s during delete: %s", tid, e)
             pass
     resp = Response(status_code=200)
     resp.headers["HX-Redirect"] = "/tasks"   # navigate back to the board
