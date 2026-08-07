@@ -5,6 +5,8 @@ JSON-RPC with the Bearer token. Verifies role-scoped tools, thread writes, and
 preconditions.
 """
 import json
+import os
+import subprocess
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -34,6 +36,13 @@ def _session(db_path, role="explorer"):
     task = store.create_task("do the thing", repo="sisyphus")
     token = sessions.mint(task["id"], role)
     return task["id"], token
+
+
+def _grant(role, *tools):
+    from core import agents
+    current = agents.agent_tools(role)
+    new = list(set(current) | set(tools))
+    agents.update_agent(role, tools=new)
 
 
 # ── protocol ────────────────────────────────────────────────────────────
@@ -297,3 +306,109 @@ def test_decide_spawn_worker_rejects_unknown_agent(db_path):
     err = json.loads(out["result"]["content"][0]["text"])["error"]
     assert "unknown agent 'code'" in err and "engineer" in err
     assert sessions.resolve(token).get("decision") is None   # not recorded
+
+
+# ── merge request tools ──────────────────────────────────────────────────
+
+
+def test_list_mrs_returns_open(db_path):
+    from core import mergerequests
+
+    _grant("explorer", "list_mrs")
+    task_id, token = _session(db_path, "explorer")
+    mr = mergerequests.create_mr(task_id, "test-repo", "branch", "main", "Test MR")
+    out = _call(_client(), token, "list_mrs")
+    result = json.loads(out["result"]["content"][0]["text"])
+    assert isinstance(result, list)
+    assert any(r["id"] == mr["id"] for r in result)
+
+
+def test_list_mrs_repo_filter(db_path):
+    from core import mergerequests
+
+    _grant("explorer", "list_mrs")
+    task_id, token = _session(db_path, "explorer")
+    mr_a = mergerequests.create_mr(task_id, "repo-a", "branch-a", "main", "MR A")
+    mr_b = mergerequests.create_mr(task_id, "repo-b", "branch-b", "main", "MR B")
+
+    all_out = _call(_client(), token, "list_mrs")
+    all_result = json.loads(all_out["result"]["content"][0]["text"])
+    assert len(all_result) >= 2
+
+    filt_out = _call(_client(), token, "list_mrs", {"repo": "repo-a"})
+    filt_result = json.loads(filt_out["result"]["content"][0]["text"])
+    assert any(r["id"] == mr_a["id"] for r in filt_result)
+    assert not any(r["id"] == mr_b["id"] for r in filt_result)
+
+
+def test_get_mr_diff_returns_patch(db_path):
+    from core import attachments, mergerequests
+
+    _grant("explorer", "get_mr_diff")
+    task_id, token = _session(db_path)
+    mr = mergerequests.create_mr(task_id, "test-repo", "branch", "main", "Test")
+    attachments.save_text(task_id, "change.patch", "diff --git a/x b/x\n")
+    out = _call(_client(), token, "get_mr_diff", {"mr_id": mr["id"]})
+    result = json.loads(out["result"]["content"][0]["text"])
+    assert "diff" in result
+    assert "diff --git" in result["diff"]
+    assert result["source"] == "snapshot"
+
+
+def test_get_mr_diff_fresh_from_clone(db_path, tmp_path):
+    from core import mergerequests
+
+    _grant("explorer", "get_mr_diff")
+    task_id, token = _session(db_path)
+
+    repo = tmp_path / "clone"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init"], capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.email=test@test",
+                    "-c", "user.name=test", "commit", "--allow-empty", "-m", "base"],
+                   capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "checkout", "-b", "sisyphus-task"],
+                   capture_output=True)
+    (repo / "file.txt").write_text("changed")
+    subprocess.run(["git", "-C", str(repo), "add", "file.txt"], capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.email=test@test",
+                    "-c", "user.name=test", "commit", "-m", "change"],
+                   capture_output=True)
+
+    mr = mergerequests.create_mr(
+        task_id, "test-repo", "sisyphus-task", "main", "Test",
+        bare_path=str(repo),
+    )
+    out = _call(_client(), token, "get_mr_diff", {"mr_id": mr["id"]})
+    result = json.loads(out["result"]["content"][0]["text"])
+    assert "diff" in result
+    assert result["source"] == "fresh"
+    assert "file.txt" in result["diff"]
+
+
+def test_get_mr_diff_fresh_fails_falls_back(db_path):
+    from core import attachments, mergerequests
+
+    _grant("explorer", "get_mr_diff")
+    task_id, token = _session(db_path)
+    mr = mergerequests.create_mr(task_id, "test-repo", "branch", "main", "Test",
+                                 bare_path="/nonexistent/path")
+    attachments.save_text(task_id, "change.patch", "snapshot diff\n")
+    out = _call(_client(), token, "get_mr_diff", {"mr_id": mr["id"]})
+    result = json.loads(out["result"]["content"][0]["text"])
+    assert result["source"] == "snapshot"
+    assert result["diff"] == "snapshot diff\n"
+
+
+def test_get_mr_diff_missing_errors(db_path):
+    _grant("explorer", "get_mr_diff")
+    _, token = _session(db_path)
+    out = _call(_client(), token, "get_mr_diff", {"mr_id": "mr-nonexistent"})
+    assert out["result"]["isError"] is True
+
+
+def test_list_mrs_requires_session(db_path):
+    _grant("explorer", "list_mrs")
+    out = _call(_client(), None, "list_mrs")
+    assert out["id"] == 1
+    assert "error" in out
