@@ -68,6 +68,8 @@ def _migrate(conn) -> None:
         conn.execute("ALTER TABLE tasks ADD COLUMN agent TEXT")
     if "base_branch" not in cols:
         conn.execute("ALTER TABLE tasks ADD COLUMN base_branch TEXT")
+    if "title" not in cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN title TEXT")
 
 
 def _now() -> str:
@@ -81,16 +83,28 @@ def _dict(row) -> Optional[dict]:
 # ── Tasks ───────────────────────────────────────────────────────────────
 
 
+def task_display_title(task: dict) -> str:
+    """Return the human-readable display title for a task."""
+    if task.get("title"):
+        return task["title"]
+    goal = task.get("goal", "")
+    first_line = goal.split("\n", 1)[0].strip()
+    if len(first_line) > 80:
+        return first_line[:80] + "…"
+    return first_line
+
+
 def create_task(goal: str, repo: str = "", status: str = "active",
                 parent_id: Optional[str] = None, agent: Optional[str] = None,
-                base_branch: Optional[str] = None) -> dict:
+                base_branch: Optional[str] = None,
+                title: Optional[str] = None) -> dict:
     task_id = f"task-{uuid4().hex[:8]}"
     now = _now()
     conn = get_conn()
     conn.execute(
-        "INSERT INTO tasks (id, goal, repo, status, parent_id, agent, base_branch, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (task_id, goal, repo, status, parent_id, agent or None, base_branch or None, now, now),
+        "INSERT INTO tasks (id, goal, repo, status, parent_id, agent, base_branch, title, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (task_id, goal, repo, status, parent_id, agent or None, base_branch or None, title or None, now, now),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
@@ -249,6 +263,8 @@ def render_thread(task_id: str, for_prompt: bool = False,
         att = f"  [attachment: {m['attachment']}]" if m["attachment"] else ""
         return f"{m['seq']}. [{m['author']}/{m['kind']}] {m['text']}{att}"
 
+    # The FULL goal, never the display title: this header is what the
+    # orchestrator (and any thread reader) sees as the task statement.
     header = [f"Task: {task['goal']}", f"Status: {task['status']}", "---"]
     msgs = get_thread(task_id)
 

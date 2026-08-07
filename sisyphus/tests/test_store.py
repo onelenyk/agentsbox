@@ -212,3 +212,40 @@ class TestTaskAgent:
         t = create_task("g", repo="x", agent="engineer")
         assert t["agent"] == "engineer"
         assert get_task(t["id"])["agent"] == "engineer"
+
+    def test_create_with_title(self, db_path):
+        t = create_task("long goal text\nwith multiple lines", title="Short Title")
+        assert t["title"] == "Short Title"
+        assert t["goal"] == "long goal text\nwith multiple lines"
+
+    def test_create_without_title(self, db_path):
+        t = create_task("some goal")
+        assert t["title"] is None
+
+    def test_display_title_set(self, db_path):
+        from core.store import task_display_title
+        t = create_task("any goal", title="My Title")
+        assert task_display_title(t) == "My Title"
+
+    def test_display_title_fallback_short(self, db_path):
+        from core.store import task_display_title
+        t = create_task("short goal", title=None)
+        assert task_display_title(t) == "short goal"
+
+    def test_display_title_fallback_long(self, db_path):
+        from core.store import task_display_title
+        long = "x" * 100
+        t = create_task(long, title=None)
+        result = task_display_title(t)
+        assert len(result) <= 83
+        assert result.endswith("\u2026")
+
+    def test_display_title_fallback_first_line(self, db_path):
+        from core.store import task_display_title
+        t = create_task("line1\nline2\nline3", title=None)
+        assert task_display_title(t) == "line1"
+
+    def test_display_title_whitespace_title(self, db_path):
+        from core.store import task_display_title
+        t = create_task("the goal", title="")
+        assert task_display_title(t) == "the goal"

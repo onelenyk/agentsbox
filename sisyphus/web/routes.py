@@ -14,7 +14,10 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 def _tmpl():
-    return Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+    from core.store import task_display_title
+    tmpl = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+    tmpl.env.globals["task_display_title"] = task_display_title
+    return tmpl
 
 _started = False
 
@@ -586,7 +589,8 @@ async def tasks_new_form(request: Request):
     })
 
 @router.post("/api/tasks")
-async def tasks_create(goal: str = Form(...), repo: str = Form(""), agent: str = Form("")):
+async def tasks_create(goal: str = Form(...), repo: str = Form(""), agent: str = Form(""),
+                       title: str = Form("")):
     from core import store
     from core.agents import get_agent
     from core.orchestrator import emit
@@ -601,7 +605,7 @@ async def tasks_create(goal: str = Form(...), repo: str = Form(""), agent: str =
         if not a or a["kind"] != "worker":
             return Response(status_code=422)
     # Repo optional — repo-less tasks run in a scratch dir (see web/api.py).
-    task = store.create_task(goal, repo, agent=agent or None)
+    task = store.create_task(goal, repo, agent=agent or None, title=title or None)
     emit(task["id"], "created")
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "taskCreated"

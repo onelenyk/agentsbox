@@ -239,6 +239,7 @@ class CreateTask(BaseModel):
     goal: str
     repo: str = ""
     agent: str = ""   # pin a handling agent; empty = orchestrator dispatches
+    title: str = ""
 
 
 class TaskMessage(BaseModel):
@@ -263,7 +264,7 @@ async def create_task(body: CreateTask):
         a = get_agent(body.agent)
         if not a or a["kind"] != "worker":
             raise HTTPException(status_code=422, detail="agent must be an existing worker agent")
-    task = store.create_task(body.goal, body.repo, agent=body.agent or None)
+    task = store.create_task(body.goal, body.repo, agent=body.agent or None, title=body.title or None)
     emit(task["id"], "created")
     return {"task_id": task["id"], "status": task["status"]}
 

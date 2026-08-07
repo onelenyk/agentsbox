@@ -1,10 +1,11 @@
 <div class="task-detail">
   <div class="panel task-main">
     {% if parent %}
-    <div class="breadcrumb">↑ Part of <a href="/tasks/{{ parent.id }}">{{ parent.goal }}</a></div>
+    <div class="breadcrumb">↑ Part of <a href="/tasks/{{ parent.id }}">{{ task_display_title(parent) }}</a></div>
     {% endif %}
     <div class="panel__head">
-        <h2>{{ task.goal }}</h2>
+        <h2>{{ task_display_title(task) }}</h2>
+        <div class="task-goal-full">{{ task.goal }}</div>
         <div class="row" style="flex-shrink:0">
             <span class="status status--{{ task.status }}">{{ task.status }}</span>
             <button class="btn btn--danger btn--sm"
@@ -43,7 +44,7 @@
     <div class="section-title">Subtasks <span class="chip">{{ children|selectattr('status','equalto','done')|list|length }}/{{ children|length }} done</span></div>
     {% for c in children %}
     <a class="subtask" href="/tasks/{{ c.id }}">
-        <span class="goal">{{ c.goal }} <span class="muted">({{ c.repo or 'no repo' }})</span></span>
+        <span class="goal">{{ task_display_title(c) }} <span class="muted">({{ c.repo or 'no repo' }})</span></span>
         <span class="status status--{{ c.status }}">{{ c.status }}</span>
     </a>
     {% endfor %}
