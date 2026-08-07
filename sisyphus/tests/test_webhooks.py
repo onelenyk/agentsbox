@@ -2,6 +2,7 @@
 receiver endpoint (web/api.py) that maps events back to a task."""
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 from web.app import app
 
@@ -10,6 +11,14 @@ from core import store, webhooks
 
 def _client():
     return TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _loopback_client():
+    # These tests exercise event→task mapping with no webhook secret set;
+    # TestClient's host is "testclient", so simulate a loopback caller.
+    with patch("web.auth._is_local", return_value=True):
+        yield
 
 
 # ── Parser ──────────────────────────────────────────────────────────────

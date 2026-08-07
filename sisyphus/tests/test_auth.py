@@ -1,6 +1,7 @@
 """Tests for the /api/v1 shared-token guard (web/auth.py)."""
 import os
 from contextlib import contextmanager
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -67,11 +68,14 @@ def test_health_is_always_open(db_path):
 
 def test_webhooks_are_exempt(db_path):
     """Forges can't send our token — the webhook path stays open (it maps by
-    MR URL and simply ignores anything it can't place)."""
+    MR URL and simply ignores anything it can't place). When no webhook secret
+    is configured, loopback clients can still send."""
     with _api_token("s3cret"):
-        r = _client().post("/api/v1/webhooks/github", json={"zen": "ping"})
-        assert r.status_code == 200
-        assert r.json() == {"ok": True, "ignored": True}
+        # Mock _is_local to simulate loopback, allowing webhook without secret
+        with patch("web.auth._is_local", return_value=True):
+            r = _client().post("/api/v1/webhooks/github", json={"zen": "ping"})
+            assert r.status_code == 200
+            assert r.json() == {"ok": True, "ignored": True}
 
 
 def test_non_api_routes_unaffected(db_path):

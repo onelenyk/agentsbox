@@ -5,9 +5,57 @@ Best-effort and defensive: an event we can't map to a merge request (or a shape
 we don't recognise) returns None and is ignored. The web layer maps the URL to
 a task and posts the summary as an [external] message.
 """
+import hmac
+import hashlib
+import secrets
 from typing import Optional, Tuple
 
+from core.config import get_config
+
 Parsed = Optional[Tuple[str, str]]
+
+
+def get_webhook_secret() -> Optional[str]:
+    """Get the webhook secret from config, or None if not configured."""
+    secret = get_config("webhooks.secret")
+    if not secret or str(secret).startswith("${"):
+        return None
+    return str(secret)
+
+
+def verify_github_signature(body: bytes, signature_header: str) -> bool:
+    """Verify GitHub webhook HMAC-SHA256 signature.
+
+    Expected format: 'sha256=<hex>' in X-Hub-Signature-256 header.
+    """
+    secret = get_webhook_secret()
+    if not secret:
+        return False
+    if not signature_header or not signature_header.startswith("sha256="):
+        return False
+    expected_sig = hmac.new(
+        secret.encode(),
+        body,
+        hashlib.sha256
+    ).hexdigest()
+    provided_sig = signature_header[7:]  # strip "sha256=" prefix
+    return hmac.compare_digest(provided_sig, expected_sig)
+
+
+def verify_gitlab_token(token_header: str) -> bool:
+    """Verify GitLab X-Gitlab-Token header."""
+    secret = get_webhook_secret()
+    if not secret:
+        return False
+    return secrets.compare_digest(token_header or "", secret)
+
+
+def verify_sisyphus_token(token_header: str) -> bool:
+    """Verify generic/Jira X-Sisyphus-Token header."""
+    secret = get_webhook_secret()
+    if not secret:
+        return False
+    return secrets.compare_digest(token_header or "", secret)
 
 
 def parse(platform: str, payload: dict) -> Parsed:

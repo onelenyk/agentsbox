@@ -5,6 +5,7 @@ any HTTP client). The browser's htmx routes live in ``web/routes.py``; this
 router is JSON-only.
 """
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 api = APIRouter(prefix="/api/v1")
@@ -343,11 +344,41 @@ async def receive_webhook(platform: str, request: Request):
     (1) MR lifecycle — map the payload's MR/PR URL to an existing task and
     re-open it; (2) autopilot triggers — fire webhook autopilots that match this
     platform + event, creating new tasks."""
+    import json
     from core import autopilot, store, webhooks
     from core.orchestrator import emit
+    from web.auth import _is_local
+
+    # Webhook authentication: verify signature if secret is configured,
+    # or require loopback if not.
+    secret = webhooks.get_webhook_secret()
+    body = await request.body()
+
+    if secret:
+        # Secret is configured — verify the request signature
+        if platform == "github":
+            sig = request.headers.get("X-Hub-Signature-256", "")
+            if not webhooks.verify_github_signature(body, sig):
+                return JSONResponse({"detail": "invalid webhook signature"}, status_code=401)
+        elif platform == "gitlab":
+            token = request.headers.get("X-Gitlab-Token", "")
+            if not webhooks.verify_gitlab_token(token):
+                return JSONResponse({"detail": "invalid webhook token"}, status_code=401)
+        else:
+            # generic/jira platform
+            token = request.headers.get("X-Sisyphus-Token", "")
+            if not webhooks.verify_sisyphus_token(token):
+                return JSONResponse({"detail": "invalid webhook token"}, status_code=401)
+    else:
+        # No secret configured — only accept from loopback
+        if not _is_local(request):
+            return JSONResponse(
+                {"detail": "webhook secret not configured; set SISYPHUS_WEBHOOK_SECRET or webhooks.secret"},
+                status_code=403
+            )
 
     try:
-        payload = await request.json()
+        payload = json.loads(body) if body else {}
     except Exception:
         payload = {}
 

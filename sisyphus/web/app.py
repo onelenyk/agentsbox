@@ -35,4 +35,5 @@ if __name__ == "__main__":
     # matches the source. Opt in with SISYPHUS_RELOAD=1 for a quick edit loop;
     # otherwise restart the process to pick up changes.
     reload = os.environ.get("SISYPHUS_RELOAD") == "1"
-    uvicorn.run("web.app:app", host="0.0.0.0", port=7677, reload=reload)
+    host = os.environ.get("SISYPHUS_HOST", "127.0.0.1")
+    uvicorn.run("web.app:app", host=host, port=7677, reload=reload)
