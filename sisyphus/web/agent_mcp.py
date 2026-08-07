@@ -194,21 +194,36 @@ def _request_changes(session, reason="", **_):
     return {"ok": True, "verdict": "changes_requested"}
 
 
-def _list_mrs(session, **_):
+def _list_mrs(session, repo="", **_):
     mrs = mergerequests.list_mrs(status="open")
     return [{"id": m["id"], "task_id": m["task_id"], "title": m["title"],
              "branch": m["source_branch"], "target_branch": m["target_branch"],
-             "status": m["status"], "created_at": m["created_at"]} for m in mrs]
+             "status": m["status"], "created_at": m["created_at"]} for m in mrs
+            if not repo or m["repo"] == repo]
 
 
 def _get_mr_diff(session, mr_id="", **_):
     mr = mergerequests.get_mr(mr_id)
     if not mr:
         return {"error": f"merge request {mr_id!r} not found"}
+
+    bare_path = mr.get("bare_path", "")
+    if bare_path:
+        try:
+            import subprocess
+            r = subprocess.run(
+                ["git", "-C", bare_path, "diff", f"{mr['target_branch']}...{mr['source_branch']}"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if r.returncode == 0:
+                return {"mr_id": mr_id, "source": "fresh", "diff": r.stdout}
+        except Exception:
+            pass
+
     diff = attachments.read(mr["task_id"], "change.patch")
-    if diff is None:
-        return {"error": f"no diff found for MR {mr_id!r}"}
-    return {"mr_id": mr_id, "diff": diff}
+    if diff is not None:
+        return {"mr_id": mr_id, "source": "snapshot", "diff": diff}
+    return {"error": f"no diff found for MR {mr_id!r}"}
 
 
 # name -> (description, inputSchema, handler)
@@ -231,7 +246,7 @@ TOOLS = {
     "open_mr": ("Open a merge request. Requires a prior commit.",
                  {"type": "object", "properties": {"title": {"type": "string"}, "description": {"type": "string"}}, "required": ["title"]}, _open_mr),
     "list_mrs": ("List open merge requests and their statuses.",
-                 {"type": "object", "properties": {}}, _list_mrs),
+                 {"type": "object", "properties": {"repo": {"type": "string"}}}, _list_mrs),
     "get_mr_diff": ("Get the diff/patch of a merge request.",
                     {"type": "object", "properties": {"mr_id": {"type": "string"}}, "required": ["mr_id"]}, _get_mr_diff),
     "approve": ("Approve the reviewed work (a reviewer's way to finish).",
