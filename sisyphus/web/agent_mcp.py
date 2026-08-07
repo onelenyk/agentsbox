@@ -12,7 +12,7 @@ request (notifications get 202). Mounted in the daemon where the DB is writable.
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
-from core import agents, sessions, store
+from core import agents, attachments, mergerequests, sessions, store
 
 agent_mcp = APIRouter()
 
@@ -194,6 +194,23 @@ def _request_changes(session, reason="", **_):
     return {"ok": True, "verdict": "changes_requested"}
 
 
+def _list_mrs(session, **_):
+    mrs = mergerequests.list_mrs(status="open")
+    return [{"id": m["id"], "task_id": m["task_id"], "title": m["title"],
+             "branch": m["source_branch"], "target_branch": m["target_branch"],
+             "status": m["status"], "created_at": m["created_at"]} for m in mrs]
+
+
+def _get_mr_diff(session, mr_id="", **_):
+    mr = mergerequests.get_mr(mr_id)
+    if not mr:
+        return {"error": f"merge request {mr_id!r} not found"}
+    diff = attachments.read(mr["task_id"], "change.patch")
+    if diff is None:
+        return {"error": f"no diff found for MR {mr_id!r}"}
+    return {"mr_id": mr_id, "diff": diff}
+
+
 # name -> (description, inputSchema, handler)
 TOOLS = {
     "get_context": ("Read the task goal and the full thread so far.",
@@ -212,7 +229,11 @@ TOOLS = {
     "commit": ("Commit your changes in the working tree.",
                {"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]}, _commit),
     "open_mr": ("Open a merge request. Requires a prior commit.",
-                {"type": "object", "properties": {"title": {"type": "string"}, "description": {"type": "string"}}, "required": ["title"]}, _open_mr),
+                 {"type": "object", "properties": {"title": {"type": "string"}, "description": {"type": "string"}}, "required": ["title"]}, _open_mr),
+    "list_mrs": ("List open merge requests and their statuses.",
+                 {"type": "object", "properties": {}}, _list_mrs),
+    "get_mr_diff": ("Get the diff/patch of a merge request.",
+                    {"type": "object", "properties": {"mr_id": {"type": "string"}}, "required": ["mr_id"]}, _get_mr_diff),
     "approve": ("Approve the reviewed work (a reviewer's way to finish).",
                 {"type": "object", "properties": {"summary": {"type": "string"}}}, _approve),
     "request_changes": ("Request changes with a reason (a reviewer's way to finish).",
