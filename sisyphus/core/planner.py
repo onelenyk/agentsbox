@@ -202,6 +202,19 @@ def update_item(iid: str, **fields) -> Optional[dict]:
     allowed = {k: v for k, v in fields.items()
                if k in ("goal", "repo", "agent", "after", "position", "status", "task_id") and v is not None}
     if "after" in allowed:
+        # Guard: if modifying dependencies, check that it doesn't introduce a cycle
+        it = get_item(iid)
+        if it:
+            plan_items = list_items(it["plan_id"])
+            # Create a hypothetical copy with the updated `after` field for cycle check
+            test_items = []
+            for pi in plan_items:
+                if pi["id"] == iid:
+                    test_items.append({**pi, "after": fields.get("after") or []})
+                else:
+                    test_items.append(pi)
+            if has_cycle(test_items):
+                raise ValueError("plan steps contain a dependency cycle")
         allowed["after"] = json.dumps(allowed["after"])
     if allowed:
         cols = ", ".join(f"{k} = ?" for k in allowed)
@@ -438,6 +451,27 @@ def convert_to_drafts(plan_id: str) -> List[dict]:
     for i, s in enumerate(steps):
         it = add_item(plan_id, s["goal"], s.get("repo", ""), s.get("agent", ""), after=[], position=i)
         ids.append(it["id"])
+
+    # Guard: check the dependency graph for cycles BEFORE updating items
+    # Build a hypothetical items list with updated dependencies
+    items = list_items(plan_id)
+    test_items = []
+    for i, s in enumerate(steps):
+        after_ids = [ids[j] for j in s.get("after", []) if 0 <= j < len(ids) and j != i]
+        for it in items:
+            if it["id"] == ids[i]:
+                test_it = dict(it)
+                test_it["after"] = after_ids
+                test_items.append(test_it)
+                break
+    if has_cycle(test_items):
+        # rollback: delete the created items since they form a cycle
+        for it in items:
+            if it["status"] == "draft":
+                delete_item(it["id"])
+        raise ValueError("plan steps contain a dependency cycle")
+
+    # Now safe to update items with dependencies
     for i, s in enumerate(steps):
         after_ids = [ids[j] for j in s.get("after", []) if 0 <= j < len(ids) and j != i]
         if after_ids:
