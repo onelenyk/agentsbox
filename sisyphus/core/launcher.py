@@ -225,7 +225,7 @@ async def launch_agent(
     env["SISYPHUS_OUTPUT_DIR"] = str(output_dir)
     env["SISYPHUS_WORKTREE"] = str(worktree_path)
     env["SISYPHUS_DB_READONLY"] = "1"
-    if runner.get("model"):
+    if model_override or runner.get("model"):
         env["SISYPHUS_MODEL"] = model_override or runner["model"]
 
     api_env = runner.get("api_key_env", "")
