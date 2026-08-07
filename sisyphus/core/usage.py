@@ -8,6 +8,9 @@ page can report real token spend and $ cost — no estimation.
 import json
 from datetime import datetime, timezone
 from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 from .db import get_conn
 

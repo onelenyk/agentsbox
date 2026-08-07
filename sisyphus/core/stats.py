@@ -5,6 +5,9 @@ token/cost (core.usage). No estimation.
 """
 from datetime import datetime
 from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 from . import usage as _usage
 from .db import get_conn
@@ -42,7 +45,8 @@ def dashboard() -> dict:
 def _seconds(a: str, b: str) -> Optional[float]:
     try:
         return (datetime.fromisoformat(b) - datetime.fromisoformat(a)).total_seconds()
-    except Exception:
+    except Exception as e:
+        logger.debug("_seconds: datetime parse failed: %s", e)
         return None
 
 

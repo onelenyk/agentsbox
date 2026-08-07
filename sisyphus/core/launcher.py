@@ -287,7 +287,8 @@ async def launch_agent(
         try:
             proc.kill()
             await proc.wait()
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to kill process after communication error: %s", e)
             pass
         duration = (time.monotonic() - start_time) * 1000
         return AgentResult(status="error", duration_ms=duration, error=str(e))
@@ -302,7 +303,8 @@ async def launch_agent(
     log_content = f"=== STDOUT ===\n{stdout_str}\n=== STDERR ===\n{stderr_str}"
     try:
         save_agent_log(run_id, step, log_content)
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to save agent log for run %s step %s: %s", run_id, step, e)
         pass
 
     # Token/cost usage is reported even on a timeout/cancel (work happened
