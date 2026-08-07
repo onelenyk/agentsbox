@@ -4,8 +4,10 @@
     <div class="breadcrumb">↑ Part of <a href="/tasks/{{ parent.id }}">{{ task_display_title(parent) }}</a></div>
     {% endif %}
     <div class="panel__head">
-        <h2>{{ task_display_title(task) }}</h2>
-        <div class="task-goal-full">{{ task.goal }}</div>
+        <div style="flex:1 1 auto; min-width:0">
+            <h2>{{ task_display_title(task) }}</h2>
+            <div class="task-goal-full">{{ task.goal }}</div>
+        </div>
         <div class="row" style="flex-shrink:0">
             <span class="status status--{{ task.status }}">{{ task.status }}</span>
             <button class="btn btn--danger btn--sm"
