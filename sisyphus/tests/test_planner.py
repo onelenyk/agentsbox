@@ -38,11 +38,17 @@ def test_items_and_dag_state(db_path):
 
 
 def test_cycle_detection(db_path):
+    """has_cycle correctly detects cycles in dependency graphs."""
     p = planner.create_plan("p")
     a = planner.add_item(p["id"], "a")
     b = planner.add_item(p["id"], "b", after=[a["id"]])
-    planner.update_item(a["id"], after=[b["id"]])   # a→b→a cycle
-    assert planner.has_cycle(planner.list_items(p["id"])) is True
+    # Acyclic: a -> b
+    assert planner.has_cycle(planner.list_items(p["id"])) is False
+    # Try to create cycle a→b→a; guard prevents it
+    with pytest.raises(ValueError, match="dependency cycle"):
+        planner.update_item(a["id"], after=[b["id"]])
+    # Graph is still acyclic
+    assert planner.has_cycle(planner.list_items(p["id"])) is False
 
 
 def test_plan_turn_saves_brief(db_path, monkeypatch):
@@ -372,3 +378,57 @@ def test_auto_merge_invoked_on_done(db_path, monkeypatch):
     lb = planner.launch_item(b["id"])
     planner.on_task_terminal(lb["task_id"], "failed")
     assert merged == []
+
+
+def test_convert_to_drafts_rejects_cyclic_graph(db_path, monkeypatch):
+    """convert_to_drafts raises ValueError if the brief's steps contain a cycle,
+    and creates no items."""
+    p = planner.create_plan("p", repo="testrepo")
+    # Brief with a cycle: step 0 -> step 1 -> step 0
+    monkeypatch.setattr("core.ai_assist.run_prompt", lambda pr, **k: json.dumps({
+        "approach": "", "diagram": "", "risks": [], "questions": [], "affected": [],
+        "steps": [
+            {"goal": "step A", "repo": "testrepo", "agent": "", "after": [1]},
+            {"goal": "step B", "repo": "testrepo", "agent": "", "after": [0]},
+        ],
+    }))
+    planner.plan_turn(p["id"], "go")
+    # Try to convert — should raise and leave no draft items
+    with pytest.raises(ValueError, match="dependency cycle"):
+        planner.convert_to_drafts(p["id"])
+    # Verify no draft items were created
+    items = planner.list_items(p["id"])
+    assert len(items) == 0
+
+
+def test_convert_to_drafts_acyclic_graph_still_works(db_path, monkeypatch):
+    """convert_to_drafts with a valid acyclic graph succeeds and creates items."""
+    p = planner.create_plan("p", repo="testrepo")
+    # Brief with no cycle: step 0 -> step 1 -> step 2
+    monkeypatch.setattr("core.ai_assist.run_prompt", lambda pr, **k: json.dumps({
+        "approach": "", "diagram": "", "risks": [], "questions": [], "affected": [],
+        "steps": [
+            {"goal": "step A", "repo": "testrepo", "agent": "", "after": []},
+            {"goal": "step B", "repo": "testrepo", "agent": "", "after": [0]},
+            {"goal": "step C", "repo": "testrepo", "agent": "", "after": [1]},
+        ],
+    }))
+    planner.plan_turn(p["id"], "go")
+    items = planner.convert_to_drafts(p["id"])
+    assert len(items) == 3
+    assert items[0]["goal"] == "step A"
+    assert items[1]["goal"] == "step B" and items[1]["after"] == [items[0]["id"]]
+    assert items[2]["goal"] == "step C" and items[2]["after"] == [items[1]["id"]]
+    assert not planner.has_cycle(items)
+
+
+def test_update_item_rejects_cyclic_dependency(db_path):
+    """update_item raises ValueError if the update would introduce a cycle."""
+    p = planner.create_plan("p")
+    a = planner.add_item(p["id"], "a")
+    b = planner.add_item(p["id"], "b", after=[a["id"]])
+    # Try to create cycle a->b->a; should raise
+    with pytest.raises(ValueError, match="dependency cycle"):
+        planner.update_item(a["id"], after=[b["id"]])
+    # Verify a's dependencies weren't changed
+    assert planner.get_item(a["id"])["after"] == []
