@@ -156,6 +156,7 @@ async def launch_agent(
     step_id: str = "",
     pure: bool = False,
     agent: Optional[str] = None,
+    model_override: Optional[str] = None,
 ) -> AgentResult:
     """Spawn AI runner subprocess, capture output.
 
@@ -225,7 +226,7 @@ async def launch_agent(
     env["SISYPHUS_WORKTREE"] = str(worktree_path)
     env["SISYPHUS_DB_READONLY"] = "1"
     if runner.get("model"):
-        env["SISYPHUS_MODEL"] = runner["model"]
+        env["SISYPHUS_MODEL"] = model_override or runner["model"]
 
     api_env = runner.get("api_key_env", "")
     if api_env:
@@ -311,7 +312,7 @@ async def launch_agent(
     # before the cutoff), so parse it regardless of terminal status.
     from .usage import parse_usage
     usage = parse_usage(stdout_str)
-    model = runner.get("model", "") if isinstance(runner, dict) else ""
+    model = model_override if model_override else (runner.get("model", "") if isinstance(runner, dict) else "")
 
     if status == "cancelled":
         return AgentResult(status="cancelled", duration_ms=duration, usage=usage, model=model)

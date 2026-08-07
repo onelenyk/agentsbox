@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from core import sessions, store
+from core.agents import update_agent
 from core.launcher import AgentResult
 from core.worker import spawn_worker
 
@@ -267,3 +268,36 @@ class TestDeciderRetry:
             dec = await spawn_decider(task["id"], "orchestrator", "thread")
         assert dec == {"action": "note", "why": "ok"}
         assert calls["n"] == 2   # retried once
+
+
+class TestModelOverride:
+    @pytest.mark.asyncio
+    async def test_spawn_worker_passes_model_override(self, db_path):
+        store.create_task("test goal")
+        agent_name = "explorer"
+        update_agent(agent_name, model="gpt-5-agent-override")
+        task = store.create_task("test model override")
+        mock_launch = AsyncMock(return_value=AgentResult(status="completed", summary="ok"))
+
+        with patch("core.worker.launch_agent", mock_launch):
+            await spawn_worker(task["id"], agent_name, "test instruction")
+
+        mock_launch.assert_called_once()
+        kwargs = mock_launch.call_args.kwargs
+        assert kwargs.get("model_override") == "gpt-5-agent-override"
+
+    @pytest.mark.asyncio
+    async def test_spawn_decider_passes_model_override(self, db_path, tmp_path, monkeypatch):
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+        from core.agents import init_agents_table
+        init_agents_table()
+        from core.worker import spawn_decider
+        update_agent("orchestrator", model="gpt-5-decider-override")
+        task = store.create_task("coordinate", repo="sisyphus")
+        mock_launch = AsyncMock(return_value=AgentResult(status="completed", summary="ok"))
+
+        with patch("core.worker.launch_agent", mock_launch):
+            await spawn_decider(task["id"], "orchestrator", "thread")
+
+        kwargs = mock_launch.call_args.kwargs
+        assert kwargs.get("model_override") == "gpt-5-decider-override"

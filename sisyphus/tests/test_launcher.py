@@ -10,6 +10,9 @@ reporting contract.
 import asyncio
 import os
 import pathlib
+import shutil
+import tempfile
+
 import pytest
 
 from core.launcher import launch_agent
@@ -260,3 +263,52 @@ class TestBinaryNotFound:
 
         assert result.status == "error"
         assert "not found" in result.error.lower() or "nonexistent" in result.error.lower()
+
+
+class TestModelOverride:
+    """launch_agent uses model_override when given."""
+
+    @pytest.mark.asyncio
+    async def test_override_passed_to_env_and_result(self, db_path):
+        runner_name = "test_runner"
+        init_runners_table()
+        add_runner(runner_name, "python3", model="runner-default-model")
+
+        worktree = tempfile.mkdtemp()
+        output_dir = tempfile.mkdtemp()
+        try:
+            agent_def = {"name": "test-agent", "runner": runner_name}
+            prompt = "echo hello"
+
+            result = await launch_agent(
+                agent_def, prompt, worktree, output_dir,
+                runner_name=runner_name, model_override="gpt-5-override",
+                timeout=10,
+            )
+
+            assert result.model == "gpt-5-override"
+        finally:
+            shutil.rmtree(worktree, ignore_errors=True)
+            shutil.rmtree(output_dir, ignore_errors=True)
+
+    @pytest.mark.asyncio
+    async def test_no_override_uses_runner_model(self, db_path):
+        runner_name = "test_runner"
+        init_runners_table()
+        add_runner(runner_name, "python3", model="runner-default-model")
+
+        worktree = tempfile.mkdtemp()
+        output_dir = tempfile.mkdtemp()
+        try:
+            agent_def = {"name": "test-agent", "runner": runner_name}
+            prompt = "echo hello"
+
+            result = await launch_agent(
+                agent_def, prompt, worktree, output_dir,
+                runner_name=runner_name, timeout=10,
+            )
+
+            assert result.model == "runner-default-model"
+        finally:
+            shutil.rmtree(worktree, ignore_errors=True)
+            shutil.rmtree(output_dir, ignore_errors=True)
