@@ -9,6 +9,7 @@ it's exposed on a network, a shared bearer token gates it. Config:
 
 Two paths stay open regardless: health (liveness probes) and webhooks (forge
 callers authenticate by their own secret, not our token)."""
+import secrets
 from fastapi.responses import JSONResponse
 
 from core.config import get_config
@@ -42,7 +43,8 @@ async def api_token_guard(request, call_next):
         token = configured_token()
         if token:
             allow_local = get_config("api.allow_localhost", True)
-            authed = _bearer(request) == token or (allow_local and _is_local(request))
+            bearer = _bearer(request) or ""
+            authed = secrets.compare_digest(bearer, token) or (allow_local and _is_local(request))
             if not authed:
                 return JSONResponse({"detail": "invalid or missing API token"}, status_code=401)
     return await call_next(request)

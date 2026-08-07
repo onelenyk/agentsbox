@@ -1,6 +1,8 @@
 api:
   allow_localhost: true
   token: ${SISYPHUS_API_TOKEN}
+webhooks:
+  secret: ${SISYPHUS_WEBHOOK_SECRET}
 default_model: deepseek
 default_timeout: 300
 # Max worker subprocesses running at once (bounds fan-out resource use).

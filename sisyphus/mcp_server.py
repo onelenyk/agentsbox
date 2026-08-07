@@ -181,7 +181,7 @@ def sisyphus_server_start(port: int = 7677) -> dict[str, Any]:
 
     ws_root = os.environ.get("WORKSPACE_ROOT", os.path.join(os.path.dirname(__file__), "workspace"))
     proc = subprocess.Popen(
-        ["python3", "-m", "uvicorn", "web.app:app", "--host", "0.0.0.0", "--port", str(port)],
+        ["python3", "-m", "uvicorn", "web.app:app", "--host", "127.0.0.1", "--port", str(port)],
         env={**os.environ, "WORKSPACE_ROOT": ws_root},
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
