@@ -8,7 +8,7 @@
         <div class="board-col__body">
             {% for t in columns[status] %}
             <a class="task-card" href="/tasks/{{ t.id }}">
-                <div class="task-card__title">{{ t.goal[:90] ~ '…' if t.goal|length > 90 else t.goal }}</div>
+                <div class="task-card__title">{{ task_display_title(t) }}</div>
                 <div class="task-card__meta">
                     {% if t.repo %}<span class="badge">{{ t.repo }}</span>{% endif %}
                     <span class="badge badge--mono">{{ t.id }}</span>
