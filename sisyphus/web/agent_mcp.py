@@ -9,12 +9,15 @@ file-based agent contract (events.jsonl / result.json / dir-scan).
 Speaks MCP JSON-RPC 2.0 over HTTP: one POST endpoint, one JSON response per
 request (notifications get 202). Mounted in the daemon where the DB is writable.
 """
+import logging
+
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
 from core import agents, attachments, mergerequests, sessions, store
 
 agent_mcp = APIRouter()
+logger = logging.getLogger(__name__)
 
 # Phase 3 sets this to enqueue an orchestrator event when a worker finishes.
 # None = no-op (Phase 2 has no event bus yet).
@@ -217,8 +220,8 @@ def _get_mr_diff(session, mr_id="", **_):
             )
             if r.returncode == 0:
                 return {"mr_id": mr_id, "source": "fresh", "diff": r.stdout}
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("get_mr_diff: fresh diff failed for %s, falling back to snapshot: %s", mr_id, e)
 
     diff = attachments.read(mr["task_id"], "change.patch")
     if diff is not None:
