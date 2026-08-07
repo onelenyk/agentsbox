@@ -8,6 +8,9 @@ page can report real token spend and $ cost — no estimation.
 import json
 from datetime import datetime, timezone
 from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 from .db import get_conn
 
@@ -48,7 +51,8 @@ def parse_usage(stdout: str) -> dict:
             continue
         try:
             obj = json.loads(line)
-        except Exception:
+        except Exception as e:
+            logger.debug("parse_usage: failed to parse JSON line: %s", e)
             continue
         # usage sits on a step-finish event, at the root or under "part"
         part = obj.get("part") if isinstance(obj, dict) else None

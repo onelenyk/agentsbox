@@ -93,12 +93,14 @@ def _find_json(out: str):
     s = re.sub(r"```(?:json)?", "", out).strip()
     try:
         return json.loads(s)
-    except Exception:
+    except Exception as e:
+        logger.debug("_find_json: JSON parse failed: %s", e)
         pass
     for m in reversed(re.findall(r"\{.*?\}", out, re.DOTALL)):
         try:
             return json.loads(m)
-        except Exception:
+        except Exception as e:
+            logger.debug("_find_json: regex extraction failed: %s", e)
             continue
     return None
 
