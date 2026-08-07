@@ -51,8 +51,7 @@ def parse_usage(stdout: str) -> dict:
             continue
         try:
             obj = json.loads(line)
-        except Exception as e:
-            logger.debug("parse_usage: failed to parse JSON line: %s", e)
+        except Exception:
             continue
         # usage sits on a step-finish event, at the root or under "part"
         part = obj.get("part") if isinstance(obj, dict) else None
