@@ -231,6 +231,8 @@ async def spawn_worker(
         r = get_runner(role_def["runner_id"])
         runner_name = r["name"] if r else None
 
+    model_override = role_def.get("model") or None
+
     requested_repo = repo_name or task.get("repo")
     bare_path, branch = _prepare_repo(task_id, requested_repo)
     if requested_repo and not bare_path:
@@ -302,6 +304,7 @@ async def spawn_worker(
         # _write_opencode_config's docstring for why a borrowed built-in name
         # ("build") wasn't durable.
         agent=_WORKER_AGENT,
+        model_override=model_override,
     )
 
     from .usage import record_run
@@ -362,6 +365,8 @@ async def spawn_decider(task_id: str, agent_name: str, thread_text: str,
         r = get_runner(agent["runner_id"])
         runner_name = r["name"] if r else None
 
+    model_override = agent.get("model") or None
+
     ws = os.environ.get("WORKSPACE_ROOT", "/workspace")
     scratch = f"{ws}/scratch/{task_id}-orch"
     os.makedirs(scratch, exist_ok=True)
@@ -384,6 +389,7 @@ async def spawn_decider(task_id: str, agent_name: str, thread_text: str,
             agent_def, prompt, scratch, output_dir,
             timeout=timeout, idle_timeout=idle_timeout, step_id=f"{task_id}-orchestrator",
             runner_name=runner_name, agent=_WORKER_AGENT,
+            model_override=model_override,
         )
         record_run(task_id, agent_name, result.model, result.usage, result.duration_ms)
         session = sessions.resolve(token)
