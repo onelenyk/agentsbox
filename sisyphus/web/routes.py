@@ -68,12 +68,12 @@ async def root():
 
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard_page(request: Request):
-    return _tmpl().TemplateResponse("dashboard.html", {"request": request, "active_page": "dashboard"})
+    return _tmpl().TemplateResponse(request, "dashboard.html", {"active_page": "dashboard"})
 
 @router.get("/api/dashboard/view", response_class=HTMLResponse)
 async def dashboard_view(request: Request):
     from core.stats import dashboard
-    return _tmpl().TemplateResponse("dashboard_view.html", {"request": request, "d": dashboard()})
+    return _tmpl().TemplateResponse(request, "dashboard_view.html", {"d": dashboard()})
 
 @router.get("/api/notifications/poll")
 async def notifications_poll():
@@ -128,9 +128,9 @@ async def runtime_page(request: Request):
             integrations[key] = url
 
     return _tmpl().TemplateResponse(
+        request,
         "runtime.html",
         {
-            "request": request,
             "active_page": "runtime",
             "config": cfg,
             "workspace_root": workspace_root,
@@ -141,7 +141,7 @@ async def runtime_page(request: Request):
 
 @router.get("/repos", response_class=HTMLResponse)
 async def repos_page(request: Request):
-    return _tmpl().TemplateResponse("repos.html", {"request": request, "active_page": "repos"})
+    return _tmpl().TemplateResponse(request, "repos.html", {"active_page": "repos"})
 
 @router.get("/api/repos/list", response_class=HTMLResponse)
 async def repos_list(request: Request):
@@ -153,7 +153,7 @@ async def repos_list(request: Request):
         rt = [t for t in tasks if t.get("repo") == r["name"]]
         r["task_total"] = len(rt)
         r["task_done"] = sum(1 for t in rt if t["status"] == "done")
-    return _tmpl().TemplateResponse("repos_list.html", {"request": request, "repos": repos})
+    return _tmpl().TemplateResponse(request, "repos_list.html", {"repos": repos})
 
 @router.get("/repos/{name}", response_class=HTMLResponse)
 async def repo_detail_page(request: Request, name: str):
@@ -166,8 +166,8 @@ async def repo_detail_page(request: Request, name: str):
     repo["cloned"] = bare.exists() and (bare / "HEAD").exists()
     source = repo.get("source", "")
     tasks = [t for t in store.list_tasks() if t.get("repo") == name and not t.get("parent_id")]
-    return _tmpl().TemplateResponse("repos_detail.html", {
-        "request": request, "active_page": "repos", "repo": repo,
+    return _tmpl().TemplateResponse(request, "repos_detail.html", {
+        "active_page": "repos", "repo": repo,
         "resources": repo_context.resources(source),
         "summary": repo_context.summary(source),
         "tasks": tasks,
@@ -180,12 +180,12 @@ async def repo_resource_view(request: Request, name: str, path: str):
     from core import repo_context
     repo = get_repo(name)
     content = repo_context.read_resource(repo["source"], path) if repo else None
-    return _tmpl().TemplateResponse("repo_resource_modal.html",
-        {"request": request, "name": name, "path": path, "content": content})
+    return _tmpl().TemplateResponse(request, "repo_resource_modal.html",
+        {"name": name, "path": path, "content": content})
 
 @router.get("/api/repos/new-form", response_class=HTMLResponse)
 async def repos_new_form(request: Request):
-    return _tmpl().TemplateResponse("repos_new.html", {"request": request})
+    return _tmpl().TemplateResponse(request, "repos_new.html", {})
 
 @router.post("/api/repos")
 async def repos_add(name: str = Form(...), source: str = Form(...), platform: str = Form(""), branch: str = Form("main")):
@@ -215,7 +215,7 @@ async def repos_edit_form(request: Request, name: str):
     repo = get_repo(name)
     if not repo:
         return HTMLResponse("<p>Repo not found</p>")
-    return _tmpl().TemplateResponse("repos_edit.html", {"request": request, "repo": repo})
+    return _tmpl().TemplateResponse(request, "repos_edit.html", {"repo": repo})
 
 @router.post("/api/repos/{name}/edit")
 async def repos_edit(name: str, source: str = Form(""), platform: str = Form(""), branch: str = Form("")):
@@ -251,21 +251,23 @@ async def repos_update(name: str):
 
 @router.get("/backups", response_class=HTMLResponse)
 async def backups_page(request: Request):
-    return _tmpl().TemplateResponse("backups.html", {"request": request, "active_page": "backups"})
+    return _tmpl().TemplateResponse(request, "backups.html", {"active_page": "backups"})
 
 @router.get("/api/backups/list", response_class=HTMLResponse)
 async def backups_list_view(request: Request):
     from core import backup
     return _tmpl().TemplateResponse(
+        request,
         "backups_list.html",
-        {"request": request, "backups": backup.list_backups(), "retention": backup.RETENTION},
+        {"backups": backup.list_backups(), "retention": backup.RETENTION},
     )
 
 def _backups_list_response(request, flash=None, error=None):
     from core import backup
     resp = _tmpl().TemplateResponse(
+        request,
         "backups_list.html",
-        {"request": request, "backups": backup.list_backups(),
+        {"backups": backup.list_backups(),
          "retention": backup.RETENTION, "flash": flash, "error": error},
     )
     return resp
@@ -303,13 +305,14 @@ async def backups_delete(request: Request, name: str):
 
 @router.get("/autopilots", response_class=HTMLResponse)
 async def autopilots_page(request: Request):
-    return _tmpl().TemplateResponse("autopilots.html", {"request": request, "active_page": "autopilots"})
+    return _tmpl().TemplateResponse(request, "autopilots.html", {"active_page": "autopilots"})
 
 def _autopilots_list_response(request, flash=None, error=None):
     from core.autopilot import list_autopilots
     return _tmpl().TemplateResponse(
+        request,
         "autopilots_list.html",
-        {"request": request, "autopilots": list_autopilots(), "flash": flash, "error": error},
+        {"autopilots": list_autopilots(), "flash": flash, "error": error},
     )
 
 @router.get("/api/autopilots/list", response_class=HTMLResponse)
@@ -320,16 +323,16 @@ async def autopilots_list_view(request: Request):
 async def autopilots_new_form(request: Request):
     from core.repos import list_repos
     from core.agents import list_agents
-    return _tmpl().TemplateResponse("autopilots_form.html",
-        {"request": request, "ap": None, "repos": list_repos(), "agents": list_agents(kind="worker")})
+    return _tmpl().TemplateResponse(request, "autopilots_form.html",
+        {"ap": None, "repos": list_repos(), "agents": list_agents(kind="worker")})
 
 @router.get("/api/autopilots/{ap_id}/edit-form", response_class=HTMLResponse)
 async def autopilots_edit_form(request: Request, ap_id: str):
     from core.autopilot import get_autopilot
     from core.repos import list_repos
     from core.agents import list_agents
-    return _tmpl().TemplateResponse("autopilots_form.html",
-        {"request": request, "ap": get_autopilot(ap_id), "repos": list_repos(), "agents": list_agents(kind="worker")})
+    return _tmpl().TemplateResponse(request, "autopilots_form.html",
+        {"ap": get_autopilot(ap_id), "repos": list_repos(), "agents": list_agents(kind="worker")})
 
 def _ap_form_fields(name, description, trigger_type, cron, interval_seconds,
                     webhook_platform, webhook_event, goal_template, repo, agent, skip_if_running):
@@ -384,16 +387,16 @@ async def autopilots_delete(request: Request, ap_id: str):
 
 @router.get("/runners", response_class=HTMLResponse)
 async def runners_page(request: Request):
-    return _tmpl().TemplateResponse("runners.html", {"request": request, "active_page": "runners"})
+    return _tmpl().TemplateResponse(request, "runners.html", {"active_page": "runners"})
 
 @router.get("/api/runners/list", response_class=HTMLResponse)
 async def runners_list_view(request: Request):
     from core.runners import list_runners
-    return _tmpl().TemplateResponse("runners_list.html", {"request": request, "runners": list_runners()})
+    return _tmpl().TemplateResponse(request, "runners_list.html", {"runners": list_runners()})
 
 @router.get("/api/runners/new-form", response_class=HTMLResponse)
 async def runners_new_form(request: Request):
-    return _tmpl().TemplateResponse("runners_new.html", {"request": request})
+    return _tmpl().TemplateResponse(request, "runners_new.html", {})
 
 @router.get("/api/runners/detect", response_class=HTMLResponse)
 async def runners_detect_view(request: Request):
@@ -407,8 +410,9 @@ async def runners_detect_view(request: Request):
     conf = [{"name": r["name"], "binary": r["binary"], "resolved": resolve(r["binary"])}
             for r in configured]
     return _tmpl().TemplateResponse(
+        request,
         "runners_detect.html",
-        {"request": request, "detected": detected, "configured": conf},
+        {"detected": detected, "configured": conf},
     )
 
 @router.post("/api/runners")
@@ -427,7 +431,7 @@ async def runners_edit_form(request: Request, runner_id: str):
     runner = get_runner(runner_id)
     if not runner:
         return HTMLResponse("<p>Runner not found</p>")
-    return _tmpl().TemplateResponse("runners_edit.html", {"request": request, "runner": runner})
+    return _tmpl().TemplateResponse(request, "runners_edit.html", {"runner": runner})
 
 @router.post("/api/runners/{runner_id}/edit")
 async def runners_edit(runner_id: str, name: str = Form(""), binary: str = Form(""),
@@ -478,33 +482,33 @@ async def runners_health(runner_id: str):
 
 @router.get("/stats", response_class=HTMLResponse)
 async def stats_page(request: Request):
-    return _tmpl().TemplateResponse("stats.html", {"request": request, "active_page": "stats"})
+    return _tmpl().TemplateResponse(request, "stats.html", {"active_page": "stats"})
 
 @router.get("/api/stats/view", response_class=HTMLResponse)
 async def stats_view(request: Request):
     from core.stats import overview
-    return _tmpl().TemplateResponse("stats_view.html", {"request": request, "s": overview()})
+    return _tmpl().TemplateResponse(request, "stats_view.html", {"s": overview()})
 
 # ── Agents ──────────────────────────────────────────────────────────────
 
 @router.get("/agents", response_class=HTMLResponse)
 async def agents_page(request: Request):
-    return _tmpl().TemplateResponse("agents.html", {"request": request, "active_page": "agents"})
+    return _tmpl().TemplateResponse(request, "agents.html", {"active_page": "agents"})
 
 @router.get("/api/agents/list", response_class=HTMLResponse)
 async def agents_list_view(request: Request):
     from core.agents import list_agents
     from core.runners import list_runners
     runners = {r["id"]: r["name"] for r in list_runners()}
-    return _tmpl().TemplateResponse("agents_list.html",
-                                    {"request": request, "agents": list_agents(), "runners": runners})
+    return _tmpl().TemplateResponse(request, "agents_list.html",
+                                    {"agents": list_agents(), "runners": runners})
 
 @router.get("/api/agents/new-form", response_class=HTMLResponse)
 async def agents_new_form(request: Request):
     from web.agent_mcp import TOOLS
     from core.runners import list_runners
-    return _tmpl().TemplateResponse("agents_new.html",
-                                    {"request": request, "catalog": list(TOOLS), "runners": list_runners()})
+    return _tmpl().TemplateResponse(request, "agents_new.html",
+                                    {"catalog": list(TOOLS), "runners": list_runners()})
 
 @router.post("/api/agents")
 async def agents_add(name: str = Form(...), kind: str = Form("worker"), persona: str = Form(""),
@@ -526,8 +530,8 @@ async def agents_edit_form(request: Request, name: str):
     agent = get_agent(name)
     if not agent:
         return HTMLResponse("not found", status_code=404)
-    return _tmpl().TemplateResponse("agents_edit.html",
-                                    {"request": request, "agent": agent,
+    return _tmpl().TemplateResponse(request, "agents_edit.html",
+                                    {"agent": agent,
                                      "catalog": list(TOOLS), "runners": list_runners()})
 
 @router.post("/api/agents/{name}/edit")
@@ -556,7 +560,7 @@ async def agents_delete(name: str):
 
 @router.get("/tasks", response_class=HTMLResponse)
 async def tasks_page(request: Request):
-    return _tmpl().TemplateResponse("tasks.html", {"request": request, "active_page": "tasks"})
+    return _tmpl().TemplateResponse(request, "tasks.html", {"active_page": "tasks"})
 
 @router.get("/api/tasks/list", response_class=HTMLResponse)
 async def tasks_list_view(request: Request):
@@ -570,14 +574,14 @@ async def tasks_list_view(request: Request):
                 t["child_total"] = len(kids)
                 t["child_done"] = sum(1 for c in kids if c["status"] == "done")
         columns[status] = tasks
-    return _tmpl().TemplateResponse("tasks_list.html", {"request": request, "columns": columns})
+    return _tmpl().TemplateResponse(request, "tasks_list.html", {"columns": columns})
 
 @router.get("/api/tasks/new-form", response_class=HTMLResponse)
 async def tasks_new_form(request: Request):
     from core.repos import list_repos
     from core.agents import list_agents
-    return _tmpl().TemplateResponse("tasks_new.html", {
-        "request": request, "repos": list_repos(),
+    return _tmpl().TemplateResponse(request, "tasks_new.html", {
+        "repos": list_repos(),
         "agents": list_agents(kind="worker"),
     })
 
@@ -615,14 +619,14 @@ async def tasks_ai_parse(text: str = Form(...), template: str = Form("")):
     if not text.strip():
         return JSONResponse({"error": "empty"}, status_code=422)
     try:
-        return ai_assist.parse_task(text, template, list_repos(), list_agents(kind="worker"))
+        return await asyncio.to_thread(ai_assist.parse_task, text, template, list_repos(), list_agents(kind="worker"))
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"error": str(exc)}, status_code=503)
 
 def _copilot_panel(request, session):
     from core.copilot_store import get_messages
-    return _tmpl().TemplateResponse("copilot_panel.html",
-        {"request": request, "session": session, "messages": get_messages(session["id"])})
+    return _tmpl().TemplateResponse(request, "copilot_panel.html",
+        {"session": session, "messages": get_messages(session["id"])})
 
 @router.get("/api/board/copilot", response_class=HTMLResponse)
 async def copilot_load(request: Request):
@@ -633,8 +637,8 @@ async def copilot_load(request: Request):
 @router.get("/api/board/copilot/sessions", response_class=HTMLResponse)
 async def copilot_sessions(request: Request):
     from core.copilot_store import list_sessions
-    return _tmpl().TemplateResponse("copilot_sessions.html",
-        {"request": request, "sessions": list_sessions()})
+    return _tmpl().TemplateResponse(request, "copilot_sessions.html",
+        {"sessions": list_sessions()})
 
 @router.post("/api/board/copilot/new", response_class=HTMLResponse)
 async def copilot_new(request: Request):
@@ -668,7 +672,7 @@ async def board_chat(request: Request):
     history = [{"role": m["role"], "text": m["text"]} for m in copilot_store.get_messages(sid)]
     copilot_store.add_message(sid, "user", message)
     try:
-        result = copilot.chat(message, history)
+        result = await asyncio.to_thread(copilot.chat, message, history)
     except Exception as exc:  # noqa: BLE001
         return JSONResponse({"error": str(exc), "session_id": sid}, status_code=503)
     copilot_store.add_message(sid, "assistant", result.get("reply", ""))
@@ -694,7 +698,7 @@ async def board_act(request: Request):
 
 @router.get("/plans", response_class=HTMLResponse)
 async def plans_page(request: Request):
-    return _tmpl().TemplateResponse("plans.html", {"request": request, "active_page": "plans"})
+    return _tmpl().TemplateResponse(request, "plans.html", {"active_page": "plans"})
 
 def _plan_ctx(request, plan, flash=None, error=None):
     from core import planner
@@ -718,7 +722,7 @@ def _plan_ctx(request, plan, flash=None, error=None):
     }
 
 def _plan_panel(request, plan, **kw):
-    return _tmpl().TemplateResponse("plan_panel.html", _plan_ctx(request, plan, **kw))
+    return _tmpl().TemplateResponse(request, "plan_panel.html", _plan_ctx(request, plan, **kw))
 
 @router.get("/api/plans/panel", response_class=HTMLResponse)
 async def plans_panel_latest(request: Request):
@@ -733,7 +737,7 @@ async def plans_panel(request: Request, pid: str):
 @router.get("/api/plans/{pid}/items", response_class=HTMLResponse)
 async def plans_items(request: Request, pid: str):
     from core import planner
-    return _tmpl().TemplateResponse("plan_items.html", _plan_ctx(request, planner.get_plan(pid) or planner.create_plan()))
+    return _tmpl().TemplateResponse(request, "plan_items.html", _plan_ctx(request, planner.get_plan(pid) or planner.create_plan()))
 
 @router.post("/api/plans/new", response_class=HTMLResponse)
 async def plans_new(request: Request):
@@ -769,8 +773,11 @@ async def plans_plan_turn(request: Request, pid: str, message: str = Form(...)):
 @router.post("/api/plans/{pid}/convert", response_class=HTMLResponse)
 async def plans_convert(request: Request, pid: str):
     from core import planner
-    planner.convert_to_drafts(pid)
-    return _plan_panel(request, planner.get_plan(pid), flash="Converted to draft tasks.")
+    try:
+        planner.convert_to_drafts(pid)
+        return _plan_panel(request, planner.get_plan(pid), flash="Converted to draft tasks.")
+    except Exception as exc:  # noqa: BLE001
+        return _plan_panel(request, planner.get_plan(pid), error=str(exc))
 
 @router.post("/api/plans/{pid}/launch/{iid}", response_class=HTMLResponse)
 async def plans_launch(request: Request, pid: str, iid: str):
@@ -801,8 +808,8 @@ async def task_page(request: Request, task_id: str):
     if not task:
         return HTMLResponse('<div class="detail-panel"><p style="color:#f85149">Task not found</p></div>', status_code=404)
     from core import usage
-    return _tmpl().TemplateResponse("task_detail.html", {
-        "request": request, "active_page": "tasks",
+    return _tmpl().TemplateResponse(request, "task_detail.html", {
+        "active_page": "tasks",
         "task": task, "messages": store.get_thread(task_id),
         "result": store.result_view(task_id),
         "children": store.list_children(task_id),
@@ -841,8 +848,8 @@ async def task_diff_modal(request: Request, task_id: str, filename: str):
     if text is None:
         return HTMLResponse('<div class="modal-backdrop" onclick="this.remove()"><div class="modal" onclick="event.stopPropagation()"><div class="modal__body"><div class="empty">Attachment not found.</div></div></div></div>')
     lines, adds, dels = _classify_diff(text)
-    return _tmpl().TemplateResponse("diff_modal.html", {
-        "request": request, "filename": filename, "lines": lines,
+    return _tmpl().TemplateResponse(request, "diff_modal.html", {
+        "filename": filename, "lines": lines,
         "adds": adds, "dels": dels,
     })
 
@@ -866,13 +873,13 @@ async def mr_view(request: Request, mr_id: str):
     mr = mergerequests.get_mr(mr_id)
     if not mr:
         return HTMLResponse('<div class="modal-backdrop" onclick="this.remove()"><div class="modal"><div class="modal__body"><div class="empty">Merge request not found.</div></div></div></div>')
-    return _tmpl().TemplateResponse("mr_modal.html", _mr_view_ctx(request, mr))
+    return _tmpl().TemplateResponse(request, "mr_modal.html", _mr_view_ctx(request, mr))
 
 @router.post("/api/mr/{mr_id}/target", response_class=HTMLResponse)
 async def mr_set_target(request: Request, mr_id: str, target: str = Form(...)):
     from core import mergerequests
     mr = mergerequests.set_target(mr_id, target)
-    return _tmpl().TemplateResponse("mr_modal.html", _mr_view_ctx(request, mr))
+    return _tmpl().TemplateResponse(request, "mr_modal.html", _mr_view_ctx(request, mr))
 
 @router.post("/api/mr/{mr_id}/land", response_class=HTMLResponse)
 async def mr_land(request: Request, mr_id: str):
@@ -891,7 +898,7 @@ async def mr_land(request: Request, mr_id: str):
     else:
         ctx = _mr_view_ctx(request, mr)
         ctx["error"] = res.get("error", "land failed")
-    return _tmpl().TemplateResponse("mr_modal.html", ctx)
+    return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
 
 @router.post("/api/mr/{mr_id}/merge", response_class=HTMLResponse)
 async def mr_merge(request: Request, mr_id: str):
@@ -902,7 +909,7 @@ async def mr_merge(request: Request, mr_id: str):
         return Response(status_code=404)
     if mr["status"] != "open":
         ctx = _mr_view_ctx(request, mr); ctx["error"] = f"MR is already {mr['status']}"
-        return _tmpl().TemplateResponse("mr_modal.html", ctx)
+        return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
     res = mergerequests.merge_branch(mr, mr["target_branch"])
     if res.get("ok"):
         mergerequests.mark_merged(mr_id, res["sha"])
@@ -915,7 +922,7 @@ async def mr_merge(request: Request, mr_id: str):
         ctx["flash"] = f"Merged into {res['target']} as {res['sha'][:8]} — reversible with git reset --hard @{{1}}"
     else:
         ctx = _mr_view_ctx(request, mr); ctx["error"] = res.get("error", "merge failed")
-    return _tmpl().TemplateResponse("mr_modal.html", ctx)
+    return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
 
 @router.post("/api/mr/{mr_id}/close", response_class=HTMLResponse)
 async def mr_close(request: Request, mr_id: str):
@@ -927,7 +934,7 @@ async def mr_close(request: Request, mr_id: str):
     mergerequests.set_status(mr_id, "closed")
     from core.worker import cleanup_task
     cleanup_task(mr["task_id"])   # MR resolved — reclaim the per-task bare clone
-    return _tmpl().TemplateResponse("mr_modal.html", _mr_view_ctx(request, mergerequests.get_mr(mr_id)))
+    return _tmpl().TemplateResponse(request, "mr_modal.html", _mr_view_ctx(request, mergerequests.get_mr(mr_id)))
 
 @router.get("/api/tasks/{task_id}/detail", response_class=HTMLResponse)
 async def task_detail_view(request: Request, task_id: str):
@@ -937,8 +944,8 @@ async def task_detail_view(request: Request, task_id: str):
     if not task:
         return HTMLResponse('<div class="detail-panel"><p style="color:#f85149">Task not found</p></div>')
     from core import usage
-    return _tmpl().TemplateResponse("task_detail_content.html", {
-        "request": request, "task": task, "messages": store.get_thread(task_id),
+    return _tmpl().TemplateResponse(request, "task_detail_content.html", {
+        "task": task, "messages": store.get_thread(task_id),
         "result": store.result_view(task_id),
         "children": store.list_children(task_id),
         "parent": store.get_task(task["parent_id"]) if task.get("parent_id") else None,

@@ -427,7 +427,7 @@ class TestFanout:
         store.set_status(child["id"], "active")
 
         with patch("core.worker.cleanup_task"):
-            orchestrator._terminate(child["id"], "done")
+            await orchestrator._terminate(child["id"], "done")
 
         rolled = [m for m in store.get_thread(parent["id"]) if m["kind"] == "child_finished"]
         assert rolled and "[done]" in rolled[0]["text"]
