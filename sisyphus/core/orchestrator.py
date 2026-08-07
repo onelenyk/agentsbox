@@ -12,6 +12,7 @@ as the next worker_finished event.
 """
 import asyncio
 import logging
+import threading
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Literal, Optional
 
@@ -52,6 +53,8 @@ class Event:
 
 
 _queue: Optional["asyncio.Queue[Event]"] = None
+_loop: Optional["asyncio.AbstractEventLoop"] = None
+_loop_thread: Optional[int] = None
 
 
 def _get_queue() -> "asyncio.Queue[Event]":
@@ -63,9 +66,11 @@ def _get_queue() -> "asyncio.Queue[Event]":
 
 def reset_queue() -> None:
     """Test helper — drop the queue/semaphore so fresh ones bind to the current loop."""
-    global _queue, _worker_sem
+    global _queue, _worker_sem, _loop, _loop_thread
     _queue = None
     _worker_sem = None
+    _loop = None
+    _loop_thread = None
 
 
 # Global cap on concurrently-running worker subprocesses. Per-task double-spawn
@@ -84,14 +89,30 @@ def _get_worker_sem() -> "asyncio.Semaphore":
 
 
 def emit(task_id: str, event_type: str) -> None:
-    """Enqueue one event. Must be called from the daemon's main event loop —
-    the same loop dispatch_forever() and every worker run on."""
-    _get_queue().put_nowait(Event(task_id, event_type))
+    """Enqueue one event. Thread-safe: can be called from the daemon's event loop
+    or from worker threads. If a loop is captured and this is called from another
+    thread, uses call_soon_threadsafe; otherwise puts directly to the queue."""
+    queue = _get_queue()
+    item = Event(task_id, event_type)
+
+    # If we have a captured loop and we're in a different thread, use threadsafe call
+    if _loop is not None and _loop_thread is not None:
+        current_thread = threading.current_thread().ident
+        if current_thread != _loop_thread:
+            _loop.call_soon_threadsafe(queue.put_nowait, item)
+            return
+
+    # Otherwise, call put_nowait directly (either no loop captured yet, or we're in the loop thread)
+    queue.put_nowait(item)
 
 
 async def dispatch_forever() -> None:
     """The daemon's background consumer: pull one event, run one orchestrator
     pass, forever. Started once at app startup (web/routes.py)."""
+    global _loop, _loop_thread
+    _loop = asyncio.get_running_loop()
+    _loop_thread = threading.current_thread().ident
+
     queue = _get_queue()
     while True:
         event = await queue.get()
@@ -285,7 +306,7 @@ def _all_children_done(task_id: str) -> bool:
     return bool(kids) and all(c["status"] == "done" for c in kids)
 
 
-def _terminate(task_id: str, status: str) -> None:
+async def _terminate(task_id: str, status: str) -> None:
     """Set a terminal status AND reclaim the task's disk (worktrees, bare
     clones, run logs). Best-effort cleanup — never let it block termination."""
     task = store.get_task(task_id)
@@ -297,10 +318,11 @@ def _terminate(task_id: str, status: str) -> None:
         logger.exception("cleanup failed for task %s", task_id)
 
     # Advance the Mission Planner: if this task was launched from a plan item,
-    # mark it done/failed (unblocks its dependents).
+    # mark it done/failed (unblocks its dependents). Run in a thread to avoid
+    # blocking the event loop on git subprocesses and AI conflict resolution.
     try:
         from . import planner
-        planner.on_task_terminal(task_id, status)
+        await asyncio.to_thread(planner.on_task_terminal, task_id, status)
     except Exception:
         logger.exception("planner advance failed for task %s", task_id)
 
@@ -373,7 +395,7 @@ async def handle_event(
     if _pass_count(task_id) >= MAX_PASSES:
         store.post_message(task_id, "orchestrator", kind="note",
                            text="[fail] pass budget exceeded — stopping to avoid runaway cost")
-        _terminate(task_id, "failed")
+        await _terminate(task_id, "failed")
         return Decision(action="fail", reason="pass budget exceeded", why="budget"), None
 
     if _consecutive_worker_failures(task_id) >= MAX_CONSECUTIVE_WORKER_FAILURES:
@@ -409,7 +431,7 @@ async def handle_event(
             task_id, "orchestrator", kind="note",
             text=f"[fail] circuit breaker — {decision.action!r} repeated too many times",
         )
-        _terminate(task_id, "failed")
+        await _terminate(task_id, "failed")
         return Decision(action="fail", reason="circuit breaker tripped", why="thrash"), None
 
     bg_task = await _execute(task_id, decision)
@@ -444,11 +466,11 @@ async def _handle_single_agent(task: dict) -> tuple:
     if any(m["kind"] == "result" for m in thread):
         store.post_message(task_id, "orchestrator", kind="note",
                            text=f"[done] {task['agent']} completed the task")
-        _terminate(task_id, "done")
+        await _terminate(task_id, "done")
         return Decision(action="done", why="pinned agent completed"), None
     store.post_message(task_id, "orchestrator", kind="note",
                        text=f"[fail] {task['agent']} ended without a result")
-    _terminate(task_id, "failed")
+    await _terminate(task_id, "failed")
     return Decision(action="fail", reason="pinned agent produced no result",
                     why="single-agent failure"), None
 
@@ -496,10 +518,10 @@ async def _execute(task_id: str, decision: Decision):
         store.set_status(task_id, "waiting")
         return None
     if decision.action == "done":
-        _terminate(task_id, "done")
+        await _terminate(task_id, "done")
         return None
     if decision.action == "fail":
-        _terminate(task_id, "failed")
+        await _terminate(task_id, "failed")
         return None
     return None  # note / noop: nothing further this pass
 
