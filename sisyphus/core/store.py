@@ -263,7 +263,9 @@ def render_thread(task_id: str, for_prompt: bool = False,
         att = f"  [attachment: {m['attachment']}]" if m["attachment"] else ""
         return f"{m['seq']}. [{m['author']}/{m['kind']}] {m['text']}{att}"
 
-    header = [f"Task: {task_display_title(task)}", f"Status: {task['status']}", "---"]
+    # The FULL goal, never the display title: this header is what the
+    # orchestrator (and any thread reader) sees as the task statement.
+    header = [f"Task: {task['goal']}", f"Status: {task['status']}", "---"]
     msgs = get_thread(task_id)
 
     if not (for_prompt and len(msgs) > max_messages):
