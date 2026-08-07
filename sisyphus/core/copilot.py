@@ -6,7 +6,10 @@ either a plain reply, or a proposed action the user confirms before it runs.
 Read is free; every mutating action is confirmed and then executed here.
 """
 import json
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 from core import ai_assist
 
@@ -150,11 +153,13 @@ def _find_json(out: str):
     s = re.sub(r"```(?:json)?", "", out).strip()
     try:
         return json.loads(s)
-    except Exception:
+    except Exception as e:
+        logger.debug("_find_json: JSON parse failed: %s", e)
         pass
     for m in reversed(re.findall(r"\{.*\}", out, re.DOTALL)):
         try:
             return json.loads(m)
-        except Exception:
+        except Exception as e:
+            logger.debug("_find_json: regex extraction failed: %s", e)
             continue
     return None

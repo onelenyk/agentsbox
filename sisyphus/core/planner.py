@@ -288,7 +288,8 @@ def project_context(repo_name: str) -> str:
     try:
         entries = sorted(e for e in os.listdir(src) if not e.startswith(".git"))[:40]
         parts.append("Top-level: " + ", ".join(entries))
-    except Exception:
+    except Exception as e:
+        logger.debug("project_context: os.listdir(%s) failed: %s", src, e)
         pass
     for res in repo_context.resources(src):
         if res["kind"] == "file" and res["path"] in _KEY_FILES:
@@ -517,7 +518,8 @@ def _ai_conflict_resolver(path: str, text: str) -> Optional[str]:
         f"File: {path}\n\n{text}")
     try:
         obj = _find_json(ai_assist.run_prompt(prompt, timeout=150))
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
+        logger.debug("ai_conflict_resolver: AI resolution failed for %s: %s", path, e)
         return None
     if not isinstance(obj, dict) or "resolved" not in obj:
         return None
@@ -693,11 +695,13 @@ def _find_json(out: str):
     s = re.sub(r"```(?:json)?", "", out).strip()
     try:
         return json.loads(s)
-    except Exception:
+    except Exception as e:
+        logger.debug("_find_json: JSON parse failed: %s", e)
         pass
     for m in reversed(re.findall(r"\{.*\}", out, re.DOTALL)):
         try:
             return json.loads(m)
-        except Exception:
+        except Exception as e:
+            logger.debug("_find_json: regex extraction failed: %s", e)
             continue
     return None

@@ -7,6 +7,9 @@ router is JSON-only.
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+import logging
+
+logger = logging.getLogger(__name__)
 
 api = APIRouter(prefix="/api/v1")
 
@@ -330,7 +333,8 @@ async def delete_task(task_id: str):
     for tid in tree:
         try:
             cleanup_task(tid, deep=True)   # also drop each node's attachments store
-        except Exception:
+        except Exception as e:
+            logger.warning("cleanup failed for task %s during delete: %s", tid, e)
             pass
     return {"success": True, "task_id": task_id}
 
@@ -379,7 +383,8 @@ async def receive_webhook(platform: str, request: Request):
 
     try:
         payload = json.loads(body) if body else {}
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to parse webhook body for %s: %s", platform, e)
         payload = {}
 
     result = {"ok": True}
