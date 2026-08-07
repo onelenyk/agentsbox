@@ -6,7 +6,7 @@ persona is just prompt text. Add a role by adding a dict entry.
 """
 
 # Base tools every worker gets.
-_BASE = ["get_context", "comment", "attach"]
+_BASE = ["get_context", "comment", "attach", "list_mrs", "get_mr_diff"]
 
 ROLES = {
     "explorer": {

@@ -65,9 +65,9 @@ def test_missing_token_rejected(db_path):
 def test_tools_list_matches_role(db_path):
     c = _client()
     for role, expected in [
-        ("explorer", {"get_context", "comment", "attach", "propose_subtasks", "finish"}),
-        ("engineer", {"get_context", "comment", "attach", "commit", "open_mr", "finish"}),
-        ("reviewer", {"get_context", "comment", "attach", "approve", "request_changes"}),
+        ("explorer", {"get_context", "comment", "attach", "list_mrs", "get_mr_diff", "propose_subtasks", "finish"}),
+        ("engineer", {"get_context", "comment", "attach", "list_mrs", "get_mr_diff", "commit", "open_mr", "finish"}),
+        ("reviewer", {"get_context", "comment", "attach", "list_mrs", "get_mr_diff", "approve", "request_changes"}),
     ]:
         _, token = _session(db_path, role)
         tools = _rpc(c, token, "tools/list").json()["result"]["tools"]
@@ -297,3 +297,41 @@ def test_decide_spawn_worker_rejects_unknown_agent(db_path):
     err = json.loads(out["result"]["content"][0]["text"])["error"]
     assert "unknown agent 'code'" in err and "engineer" in err
     assert sessions.resolve(token).get("decision") is None   # not recorded
+
+
+# ── merge request tools ──────────────────────────────────────────────────
+
+
+def test_list_mrs_returns_open(db_path):
+    from core import mergerequests
+
+    task_id, token = _session(db_path, "explorer")
+    mr = mergerequests.create_mr(task_id, "test-repo", "branch", "main", "Test MR")
+    out = _call(_client(), token, "list_mrs")
+    result = json.loads(out["result"]["content"][0]["text"])
+    assert isinstance(result, list)
+    assert any(r["id"] == mr["id"] for r in result)
+
+
+def test_get_mr_diff_returns_patch(db_path):
+    from core import attachments, mergerequests
+
+    task_id, token = _session(db_path)
+    mr = mergerequests.create_mr(task_id, "test-repo", "branch", "main", "Test")
+    attachments.save_text(task_id, "change.patch", "diff --git a/x b/x\n")
+    out = _call(_client(), token, "get_mr_diff", {"mr_id": mr["id"]})
+    result = json.loads(out["result"]["content"][0]["text"])
+    assert "diff" in result
+    assert "diff --git" in result["diff"]
+
+
+def test_get_mr_diff_missing_errors(db_path):
+    _, token = _session(db_path)
+    out = _call(_client(), token, "get_mr_diff", {"mr_id": "mr-nonexistent"})
+    assert out["result"]["isError"] is True
+
+
+def test_list_mrs_requires_session(db_path):
+    out = _call(_client(), None, "list_mrs")
+    assert out["id"] == 1
+    assert "error" in out
