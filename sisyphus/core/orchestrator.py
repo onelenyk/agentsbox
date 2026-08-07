@@ -233,11 +233,18 @@ def _consecutive_worker_failures(task_id: str) -> int:
     _consecutive_repeat: the LLM varies its rationale each pass even while
     re-spawning into the same broken runner, so a verbatim-text check alone
     won't catch this — this reads what actually happened, not what the
-    orchestrator said about it."""
-    finished = [m["text"] for m in store.get_thread(task_id) if m["kind"] == "worker_finished"]
+    orchestrator said about it.
+
+    A human answer resets the chain: the human has looked at the failures
+    (fixed the runner, pruned a worktree, ...) and asked to continue — without
+    the reset, three stale failures would re-trip the breaker on every reply
+    and the task could never be resumed."""
+    relevant = [m for m in store.get_thread(task_id) if m["kind"] in ("worker_finished", "answer")]
     n = 0
-    for text in reversed(finished):
-        if any(marker in text for marker in _WORKER_FAILURE_MARKERS):
+    for m in reversed(relevant):
+        if m["kind"] == "answer":
+            break
+        if any(marker in m["text"] for marker in _WORKER_FAILURE_MARKERS):
             n += 1
         else:
             break

@@ -225,6 +225,22 @@ class TestGuards:
         store.post_message(task["id"], "system", kind="worker_finished", text="explorer finished")
         assert orchestrator._consecutive_worker_failures(task["id"]) == 0
 
+    @pytest.mark.asyncio
+    async def test_worker_failures_reset_by_a_human_answer(self, db_path):
+        """A human answer after a failure streak resets it. The human has seen
+        the failures and asked to continue (fixed the runner, pruned a stale
+        worktree, ...) — without the reset, three stale failures re-trip the
+        breaker on every reply and a parked task can never be resumed."""
+        task = store.create_task("fix something")
+        for _ in range(orchestrator.MAX_CONSECUTIVE_WORKER_FAILURES):
+            store.post_message(task["id"], "system", kind="worker_finished",
+                               text="engineer ended without reporting a result: agent_no_result")
+        assert orchestrator._consecutive_worker_failures(task["id"]) >= \
+            orchestrator.MAX_CONSECUTIVE_WORKER_FAILURES
+        store.post_message(task["id"], "human", kind="answer",
+                           text="Fixed the runner — try again.")
+        assert orchestrator._consecutive_worker_failures(task["id"]) == 0
+
 
 class TestRestartIsANoOp:
     @pytest.mark.asyncio
