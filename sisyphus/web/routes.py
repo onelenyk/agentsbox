@@ -1045,8 +1045,28 @@ async def task_detail_view(request: Request, task_id: str):
     if not task:
         return HTMLResponse('<div class="detail-panel"><p style="color:#f85149">Task not found</p></div>')
     from core import usage
+    messages = store.get_thread(task_id)
+
+    # Live "what is happening right now" for the header: a worker running or
+    # queued, with elapsed minutes — the thread is silent while an agent works,
+    # which reads as "stuck" without this.
+    working = None
+    if task["status"] == "active" and messages:
+        last = messages[-1]
+        if last["kind"] in ("worker_started", "worker_queued"):
+            from datetime import datetime, timezone
+            try:
+                started = datetime.fromisoformat(last["created_at"])
+                mins = int((datetime.now(timezone.utc) - started).total_seconds() // 60)
+            except Exception:  # noqa: BLE001
+                mins = 0
+            role = last["text"].split(" ", 2)[1].rstrip(":") if last["kind"] == "worker_started" \
+                else last["text"].split(" ", 1)[0]
+            label = "working" if last["kind"] == "worker_started" else "queued for a slot"
+            working = {"role": role, "label": label, "mins": mins}
+
     return _tmpl().TemplateResponse(request, "task_detail_content.html", {
-        "task": task, "messages": store.get_thread(task_id),
+        "task": task, "messages": messages, "working": working,
         "result": store.result_view(task_id),
         "children": store.list_children(task_id),
         "parent": store.get_task(task["parent_id"]) if task.get("parent_id") else None,
@@ -1068,6 +1088,27 @@ async def task_reply(task_id: str, text: str = Form(...)):
 
     store.post_message(task_id, "human", kind="answer", text=text)
     emit(task_id, "human_replied")
+    resp = Response(status_code=200)
+    resp.headers["HX-Trigger"] = "taskUpdated"
+    return resp
+
+@router.post("/api/tasks/{task_id}/reopen")
+async def task_reopen(task_id: str):
+    """Reopen a terminal task as *waiting*: the follow-up work continues on the
+    same thread (and branch) once the human replies with what to do next —
+    waiting is the right state because only a human reply should resume it."""
+    from core import store
+    from fastapi.responses import Response
+
+    task = store.get_task(task_id)
+    if not task:
+        return Response(status_code=404)
+    if task["status"] not in ("done", "failed"):
+        return Response(status_code=409)
+
+    store.set_status(task_id, "waiting")
+    store.post_message(task_id, "system", kind="note",
+                       text="reopened by the human — reply below to tell the orchestrator what to do next")
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "taskUpdated"
     return resp

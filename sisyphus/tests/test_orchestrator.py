@@ -37,6 +37,10 @@ class TestFullLifecycle:
 
         async def fake_spawn(tid, role, instruction, repo_name=None, **kw):
             store.post_message(tid, role, kind="result", text=f"{role} done: {instruction}")
+            # Every real spawn path ends with worker_finished (agent_mcp's
+            # _end_worker or spawn_worker's crash fallback) — without it the
+            # queued/started marker would read as still in flight.
+            store.post_message(tid, "system", kind="worker_finished", text=f"{role} finished")
 
         decisions = _scripted([
             Decision(action="spawn_worker", role="engineer", instruction="fix it", why="start with a fix"),
@@ -597,3 +601,38 @@ class TestSpawnFailureNeverStalls:
         kinds_text = [(m["kind"], m["text"]) for m in store.get_thread(task["id"])]
         assert any(k == "worker_finished" and "failed to start" in t for k, t in kinds_text)
         assert orchestrator._get_queue().qsize() >= 1   # an event was queued to re-decide
+
+
+class TestQueuedWorkerVisibility:
+    def test_trailing_worker_queued_counts_as_in_flight(self, db_path):
+        """A spawn waiting for a slot must block duplicate spawns — the
+        invisible-queue failure: deciders saw 'not in flight' and piled up
+        phantom spawn decisions while other tasks held every slot."""
+        task = store.create_task("g")
+        store.post_message(task["id"], "system", kind="worker_queued",
+                           text="engineer queued — waiting for a free worker slot")
+        assert orchestrator._worker_in_flight(task["id"]) is True
+        store.post_message(task["id"], "system", kind="worker_finished", text="engineer finished")
+        assert orchestrator._worker_in_flight(task["id"]) is False
+
+    @pytest.mark.asyncio
+    async def test_reconcile_rescues_trailing_worker_queued(self, db_path):
+        task = store.create_task("g")
+        store.set_status(task["id"], "active")
+        store.post_message(task["id"], "system", kind="worker_queued",
+                           text="engineer queued — waiting for a free worker slot")
+        assert reconcile_on_boot() == 1
+        assert store.get_thread(task["id"])[-1]["kind"] == "worker_finished"
+
+    @pytest.mark.asyncio
+    async def test_spawn_safe_posts_queued_marker_before_worker_runs(self, db_path):
+        task = store.create_task("g")
+
+        async def fake_spawn(tid, role, instruction, repo_name=None, **kw):
+            store.post_message(tid, "system", kind="worker_started", text=f"spawning {role}: x")
+
+        with patch("core.orchestrator.spawn_worker", side_effect=fake_spawn):
+            await orchestrator._spawn_worker_safe(task["id"], "engineer", "x", None)
+
+        kinds = [m["kind"] for m in store.get_thread(task["id"])]
+        assert kinds == ["worker_queued", "worker_started"]

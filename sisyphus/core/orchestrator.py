@@ -281,7 +281,7 @@ def _worker_in_flight(task_id: str) -> bool:
     thread = store.get_thread(task_id)
     last_start = None
     for i, m in enumerate(thread):
-        if m["kind"] == "worker_started":
+        if m["kind"] in ("worker_started", "worker_queued"):
             last_start = i
     if last_start is None:
         return False
@@ -489,8 +489,13 @@ async def _spawn_worker_safe(task_id: str, role: str, instruction: str, repo_nam
     into a worker_finished + event, so the orchestrator re-decides."""
     try:
         # Bound total concurrency: wait for a free slot before launching the
-        # subprocess. worker_started is only posted once inside spawn_worker, so
-        # a task queued here stays correctly "not in flight" until it actually runs.
+        # subprocess. The queued marker keeps the wait visible — to the human,
+        # and to the decider, whose passes would otherwise see "no worker in
+        # flight" and spawn duplicates (a live failure: 8 phantom spawns while
+        # two other tasks held both slots). _worker_in_flight treats a trailing
+        # worker_queued as in flight.
+        store.post_message(task_id, "system", kind="worker_queued",
+                           text=f"{role} queued — waiting for a free worker slot; do not spawn again")
         async with _get_worker_sem():
             await spawn_worker(task_id, role, instruction, repo_name=repo_name)
     except Exception as exc:  # noqa: BLE001
@@ -549,7 +554,8 @@ def reconcile_on_boot() -> int:
     n = 0
     for task in store.list_tasks(status="active"):
         thread = store.get_thread(task["id"])
-        if thread and thread[-1]["kind"] == "worker_started":
+        if thread and thread[-1]["kind"] in ("worker_started", "worker_queued"):
+            # A queued spawn dies with the daemon just like a running one.
             store.post_message(
                 task["id"], "system", kind="worker_finished",
                 text="orphaned by a daemon restart — resuming",
