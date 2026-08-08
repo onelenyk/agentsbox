@@ -1,0 +1,39 @@
+{% if waiting or to_merge %}
+{% if waiting %}
+<section class="panel inbox-group">
+    <div class="panel__h"><span class="t">Needs you ({{ waiting|length }})</span></div>
+    <div class="panel__b">
+        {% for w in waiting %}
+        <div class="inbox-row">
+            <a class="inbox-row__title" href="/tasks/{{ w.task.id }}">{{ task_display_title(w.task) }}</a>
+            {% if w.question %}<span class="inbox-row__q muted">{{ w.question }}</span>{% endif %}
+            <form class="inbox-row__reply" hx-post="/api/tasks/{{ w.task.id }}/messages" hx-swap="none"
+                  hx-on::after-request="if(event.detail.successful) htmx.trigger('#inbox','inboxChanged')">
+                <input name="text" placeholder="Reply…" required autocomplete="off">
+                <button type="submit" class="btn btn--primary btn--sm">Send</button>
+            </form>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+{% if to_merge %}
+<section class="panel inbox-group">
+    <div class="panel__h"><span class="t">To merge ({{ to_merge|length }})</span></div>
+    <div class="panel__b">
+        {% for x in to_merge %}
+        <div class="inbox-row">
+            <a class="inbox-row__title" href="/tasks/{{ x.task.id }}">{{ task_display_title(x.task) }}</a>
+            <span class="badge badge--mono">{{ x.mr.source_branch }}</span>
+            <a class="btn btn--ghost btn--sm" href="/tasks/{{ x.task.id }}">View</a>
+            <button type="button" class="btn btn--primary btn--sm"
+                    hx-post="/api/mr/{{ x.mr.id }}/merge" hx-target="#modal-container" hx-swap="innerHTML"
+                    hx-on::after-request="if(event.detail.successful) htmx.trigger('#inbox','inboxChanged')">Merge</button>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+{% else %}
+<div class="empty">Inbox zero — nothing needs you.</div>
+{% endif %}
