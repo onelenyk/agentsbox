@@ -7,9 +7,27 @@ router is JSON-only.
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+import datetime
 import logging
+import subprocess as _subprocess
 
 logger = logging.getLogger(__name__)
+
+_PROCESS_START_TIME = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def _read_git_commit():
+    try:
+        r = _subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return r.stdout.strip()
+    except Exception:
+        return ""
+
+
+_GIT_COMMIT = _read_git_commit()
 
 api = APIRouter(prefix="/api/v1")
 
@@ -29,6 +47,8 @@ async def health():
         "db": pf["db"],
         "runner": pf["runner"],
         "reason": pf["reason"] or None,
+        "process_start_time": _PROCESS_START_TIME,
+        "git_commit": _GIT_COMMIT,
     }
 
 

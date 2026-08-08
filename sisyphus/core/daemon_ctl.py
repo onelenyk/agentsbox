@@ -64,6 +64,53 @@ def _pids_on_port():
     return [int(x) for x in r.stdout.split() if x.strip()]
 
 
+def _port_listen_pid():
+    """Return the PID that actually owns the TCP LISTEN port, or None."""
+    r = subprocess.run(
+        ["lsof", "-tnP", f"-iTCP:{PORT}", "-sTCP:LISTEN"],
+        capture_output=True, text=True,
+    )
+    pids = [int(x) for x in r.stdout.split() if x.strip()]
+    return pids[0] if pids else None
+
+
+def _managed_pid():
+    """Return the PID daemon_ctl believes it manages via launchd, or None."""
+    if not is_installed():
+        return None
+    r = subprocess.run(["launchctl", "list", LABEL], capture_output=True, text=True)
+    output = r.stdout.strip()
+    if not output:
+        return None
+    if not output.startswith("{"):
+        parts = output.split()
+        if parts and parts[0] != "-" and parts[0].isdigit():
+            return int(parts[0])
+        return None
+    for line in output.splitlines():
+        line = line.strip()
+        if '"PID"' in line:
+            val = line.split("=")[-1].strip().rstrip(";")
+            try:
+                return int(val)
+            except ValueError:
+                return None
+    return None
+
+
+def _foreign_pid_on_port():
+    """Return PID if port is owned by an unmanaged (foreign) process, else None."""
+    managed = _managed_pid()
+    port_pid = _port_listen_pid()
+    if port_pid is None:
+        return None
+    if managed is None:
+        return None
+    if port_pid == managed:
+        return None
+    return port_pid
+
+
 def install() -> dict:
     LOG_DIR.mkdir(exist_ok=True)
     PLIST_DEST.parent.mkdir(parents=True, exist_ok=True)
@@ -82,6 +129,11 @@ def uninstall() -> dict:
 
 
 def start() -> dict:
+    foreign = _foreign_pid_on_port()
+    if foreign is not None:
+        msg = f"Port {PORT} is already in use by PID {foreign} (not managed by daemon_ctl). Kill it first: kill {foreign}"
+        print(msg, file=sys.stderr)
+        return {"error": msg, "foreign_pid": foreign}
     if is_running():
         return {"already_running": True}
     if is_installed():
@@ -123,9 +175,26 @@ def restart() -> dict:
 
 def status() -> dict:
     h = health()
-    return {
+    managed = _managed_pid()
+    port_pid = _port_listen_pid()
+    result = {
         "running": h is not None,
         "version": h.get("version") if h else None,
         "supervised": is_installed(),
         "url": HEALTH_URL,
     }
+    if managed is not None and port_pid is not None and managed != port_pid:
+        r = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(port_pid)],
+            capture_output=True, text=True,
+        )
+        start_time = r.stdout.strip()
+        print(f"\n  FOREIGN PROCESS on port {PORT}!")
+        print(f"  Managed PID (launchd): {managed}")
+        print(f"  Actual PID on port:    {port_pid}")
+        print(f"  Foreign process started: {start_time}")
+        print(f"  Kill it: kill {port_pid}\n")
+        result["foreign_pid"] = port_pid
+        result["managed_pid"] = managed
+        result["foreign_start"] = start_time
+    return result
