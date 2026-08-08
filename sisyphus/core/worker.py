@@ -69,6 +69,7 @@ def cleanup_task(task_id: str, deep: bool = False) -> None:
     retrievable, and only wiped when the task itself is deleted."""
     import glob
     import shutil
+    import subprocess
 
     ws = os.environ.get("WORKSPACE_ROOT", "/workspace")
     patterns = [
@@ -83,13 +84,41 @@ def cleanup_task(task_id: str, deep: bool = False) -> None:
         patterns.append(f"{ws}/repos/{task_id}_*")   # per-task bare clone
     if deep:
         patterns.append(f"{ws}/tasks/{task_id}")   # attachments + saved patches
+
+    def _salvage(worktree_path: str) -> None:
+        try:
+            r = subprocess.run(
+                ["git", "-C", worktree_path, "status", "--porcelain", "--untracked-files=normal"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if r.returncode != 0 or not r.stdout.strip():
+                return
+            subprocess.run(
+                ["git", "-C", worktree_path, "add", "-A", "-N"],
+                capture_output=True, text=True, timeout=30,
+            )
+            diff = subprocess.run(
+                ["git", "-C", worktree_path, "diff", "HEAD"],
+                capture_output=True, text=True, timeout=60,
+            )
+            if diff.returncode != 0 or not diff.stdout.strip():
+                return
+            dirname = os.path.basename(worktree_path)
+            from . import attachments
+            saved = attachments.save_text(task_id, f"salvaged-{dirname}.patch", diff.stdout)
+            logger.warning("cleanup_task: salvaged uncommitted work from %s → %s", worktree_path, saved)
+        except Exception as e:
+            logger.debug("cleanup_task: salvage failed for %s: %s", worktree_path, e)
+
+    worktree_glob = f"{ws}/repos/worktrees/{task_id}_*"
     for pattern in patterns:
         for path in glob.glob(pattern):
+            if pattern == worktree_glob:
+                _salvage(path)
             shutil.rmtree(path, ignore_errors=True)
 
     # A bare clone kept alive (open MR) has just lost its worktree dirs; prune
     # the stale registrations so a later respawn can re-add the same paths.
-    import subprocess
     for bare in glob.glob(f"{ws}/repos/{task_id}_*"):
         try:
             subprocess.run(["git", "-C", bare, "worktree", "prune"],
