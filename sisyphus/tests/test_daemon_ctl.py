@@ -96,7 +96,8 @@ def test_status_no_foreign_process(monkeypatch):
 
 
 def test_start_refuses_foreign_process(monkeypatch):
-    monkeypatch.setattr(d, "_foreign_pid_on_port", lambda: 999)
+    monkeypatch.setattr(d, "_port_listen_pid", lambda: 999)
+    monkeypatch.setattr(d, "_managed_pid", lambda: None)
     result = d.start()
     assert "error" in result
     assert result["foreign_pid"] == 999
@@ -106,7 +107,8 @@ def test_start_refuses_foreign_process(monkeypatch):
 def test_restart_refuses_foreign_process(monkeypatch):
     monkeypatch.setattr(d, "stop", lambda: {"via": "launchd"})
     monkeypatch.setattr(d, "is_running", lambda: False)
-    monkeypatch.setattr(d, "_foreign_pid_on_port", lambda: 999)
+    monkeypatch.setattr(d, "_port_listen_pid", lambda: 999)
+    monkeypatch.setattr(d, "_managed_pid", lambda: None)
     result = d.restart()
     assert "error" in result
     assert result["foreign_pid"] == 999
