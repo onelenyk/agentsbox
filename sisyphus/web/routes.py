@@ -625,7 +625,9 @@ async def tasks_list_view(request: Request):
             if kids:
                 t["child_total"] = len(kids)
                 t["child_done"] = sum(1 for c in kids if c["status"] == "done")
-            col = board_column(t, task_latest_mr.get(t["id"]))
+            mr = task_latest_mr.get(t["id"])
+            t["review_status"] = mr.get("review_status") if mr and mr.get("review_status") else None
+            col = board_column(t, mr)
             columns[col].append(t)
     return _tmpl().TemplateResponse(request, "tasks_list.html", {"columns": columns})
 
