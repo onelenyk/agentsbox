@@ -413,7 +413,7 @@ def test_get_mr_diff_fresh_from_clone(db_path, tmp_path):
 
     repo = tmp_path / "clone"
     repo.mkdir()
-    subprocess.run(["git", "-C", str(repo), "init"], capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "init", "-b", "main"], capture_output=True)
     subprocess.run(["git", "-C", str(repo), "-c", "user.email=test@test",
                     "-c", "user.name=test", "commit", "--allow-empty", "-m", "base"],
                    capture_output=True)
