@@ -697,3 +697,13 @@ select { cursor: pointer; appearance: none;
 .cmd-badge--task       { color: var(--good);   background: var(--good-bg);   border-color: rgba(70,209,127,.25); }
 .cmd-badge--mission    { color: var(--violet);  background: var(--violet-bg); border-color: rgba(185,140,255,.25); }
 .cmd-badge--automation { color: var(--warn);    background: var(--warn-bg);   border-color: rgba(224,168,58,.25); }
+
+/* ── Inbox (needs-you feed) ─────────────────────────────────────────── */
+.inbox-group { margin-bottom: 14px; }
+.inbox-row { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; }
+.inbox-row:hover { background: var(--panel-2); }
+.inbox-row__title { flex: 1 1 auto; min-width: 0; font-size: 13px; font-weight: 550; color: var(--text); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.inbox-row__title:hover { color: var(--accent-hi); }
+.inbox-row__q { flex: 2 1 auto; min-width: 0; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.inbox-row__reply { display: flex; gap: 6px; flex: none; }
+.inbox-row__reply input { width: 220px; padding: 5px 10px; font-size: 12px; }

@@ -78,6 +78,27 @@ async def dashboard_view(request: Request):
     from core.stats import dashboard
     return _tmpl().TemplateResponse(request, "dashboard_view.html", {"d": dashboard()})
 
+@router.get("/api/inbox/view", response_class=HTMLResponse)
+async def inbox_view(request: Request):
+    """The Needs-you feed: waiting tasks (with the open question + inline reply)
+    and done tasks whose merge request is still open."""
+    from core import store
+
+    waiting = []
+    for t in store.list_tasks(status="waiting"):
+        q = next((m["text"] for m in reversed(store.get_thread(t["id"]))
+                  if m["kind"] == "question"), "")
+        waiting.append({"task": t, "question": q[:120] + "…" if len(q) > 120 else q})
+
+    open_mr = {}
+    for mr in mergerequests.list_mrs(status="open"):
+        open_mr.setdefault(mr["task_id"], mr)   # newest first — keep the latest
+    to_merge = [{"task": t, "mr": open_mr[t["id"]]}
+                for t in store.list_tasks(status="done") if t["id"] in open_mr]
+
+    return _tmpl().TemplateResponse(request, "inbox_view.html",
+                                    {"waiting": waiting, "to_merge": to_merge})
+
 @router.get("/api/notifications/poll")
 async def notifications_poll():
     """Recent task state changes worth a browser notification: tasks that just
