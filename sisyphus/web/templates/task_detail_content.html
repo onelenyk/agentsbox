@@ -61,6 +61,17 @@
     {% endif %}
 
     <div class="section-title">Thread</div>
+    {% if live_sessions %}
+    <div class="section-title" style="margin-bottom:8px">Working now</div>
+    {% set icons = {'orchestrator':'🧭','engineer':'🔧','reviewer':'🔍','explorer':'🔭','planner':'🗺️'} %}
+    {% for s in live_sessions %}
+    <div class="result" style="margin-bottom:10px">
+        <div class="prop"><span class="k">Role</span><span class="v mono">{{ icons.get(s.role, '⚙️') }} {{ s.role }}{% if s.kind == 'decider' %} <span class="badge badge--accent">decider</span>{% endif %}</span></div>
+        <div class="prop"><span class="k">Instruction</span><span class="v">{{ s.instruction }}</span></div>
+        <div class="prop"><span class="k">Elapsed</span><span class="v mono">{{ s.elapsed_mins }}m{% if s.model %} · {{ s.model }}{% endif %}{% if s.runner %} · {{ s.runner }}{% endif %}</span></div>
+    </div>
+    {% endfor %}
+    {% endif %}
     {% set icons = {'orchestrator':'🧭','engineer':'🔧','reviewer':'🔍','explorer':'🔭','planner':'🗺️','human':'🧑'} %}
     <div class="thread">
         {% for m in messages %}
