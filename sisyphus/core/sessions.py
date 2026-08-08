@@ -12,13 +12,18 @@ from datetime import datetime, timezone
 _SESSIONS: dict = {}
 
 
-def mint(task_id: str, role: str, worktree: str = "") -> str:
+def mint(task_id: str, role: str, worktree: str = "", instruction: str = "",
+         model: str = "", runner: str = "", kind: str = "worker") -> str:
     token = secrets.token_urlsafe(24)
     _SESSIONS[token] = {
         "token": token,
         "task_id": task_id,
         "role": role,
         "worktree": worktree,
+        "instruction": instruction,
+        "model": model,
+        "runner": runner,
+        "kind": kind,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     return token
@@ -38,6 +43,22 @@ def revoke_task(task_id: str) -> None:
     still-running worker can't write to a thread that no longer exists."""
     for token in [t for t, s in _SESSIONS.items() if s.get("task_id") == task_id]:
         _SESSIONS.pop(token, None)
+
+
+def _redact(session: dict) -> dict:
+    """Return a copy of *session* without the token key."""
+    return {k: v for k, v in session.items() if k != "token"}
+
+
+def list_active() -> list:
+    """All sessions sorted by created_at ascending, each WITHOUT the token."""
+    return sorted((_redact(s) for s in _SESSIONS.values()),
+                  key=lambda s: s.get("created_at", ""))
+
+
+def list_for_task(task_id: str) -> list:
+    """Same as list_active(), filtered to one task."""
+    return [s for s in list_active() if s.get("task_id") == task_id]
 
 
 def clear() -> None:
