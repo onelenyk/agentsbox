@@ -540,6 +540,11 @@ def reconcile_on_boot() -> int:
     system). Any task whose last message is worker_started with nothing since
     is re-driven from its thread via a synthetic worker_finished event.
 
+    Active tasks whose last message is anything else (a note, child_finished,
+    a fresh created task, …) are stuck with no pending event to wake them.
+    For those we queue a synthetic ``continue`` so the next dispatch pass
+    re-evaluates them.
+
     Returns the number of tasks reconciled."""
     n = 0
     for task in store.list_tasks(status="active"):
@@ -550,5 +555,8 @@ def reconcile_on_boot() -> int:
                 text="orphaned by a daemon restart — resuming",
             )
             emit(task["id"], "worker_finished")
+            n += 1
+        elif thread:
+            emit(task["id"], "continue")
             n += 1
     return n
