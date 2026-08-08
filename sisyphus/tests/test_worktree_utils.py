@@ -1,5 +1,6 @@
 """Unit tests for pure worktree utility functions (no git required)."""
 import os
+import pathlib
 import stat
 
 import pytest
@@ -94,3 +95,25 @@ class TestStaleRegistrationSelfHeal:
         shutil.rmtree(path)                      # removed WITHOUT prune
         path2 = wt.create_worktree(bare, "task-x", "engineer", branch="main")
         assert os.path.isdir(path2)
+
+    def test_reused_detached_worktree_follows_branch_tip(self, tmp_path, monkeypatch):
+        """A re-spawned read-only role must see the branch's CURRENT state,
+        not the commit its old worktree was created at (the frozen-reviewer
+        bug: three review rounds re-reviewed round-1 files)."""
+        import subprocess
+        from core import worktree as wt
+
+        monkeypatch.setattr(wt, "REPOS_DIR", tmp_path / "repos")
+        bare = self._make_bare(tmp_path)
+        path = wt.create_worktree(bare, "task-y", "reviewer", branch="main", detach=True)
+
+        # advance main in the bare repo via a second (attached) worktree
+        w2 = wt.create_worktree(bare, "task-y", "engineer", branch="main")
+        (pathlib.Path(w2) / "new.txt").write_text("round 2")
+        subprocess.run(["git", "-C", w2, "add", "."], check=True, capture_output=True)
+        subprocess.run(["git", "-C", w2, "-c", "user.email=t@t", "-c", "user.name=t",
+                        "commit", "-m", "round 2"], check=True, capture_output=True)
+
+        path_again = wt.create_worktree(bare, "task-y", "reviewer", branch="main", detach=True)
+        assert path_again == path
+        assert (pathlib.Path(path_again) / "new.txt").exists()
