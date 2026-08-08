@@ -245,6 +245,31 @@ def open_mr_exists(task_id: str) -> bool:
     return n > 0
 
 
+def find_open_mr(task_id: str, source_branch: str, target_branch: str) -> Optional[dict]:
+    """Return the open MR matching (task_id, source_branch, target_branch), or None."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM merge_requests WHERE task_id = ? AND source_branch = ? "
+        "AND target_branch = ? AND status = 'open'",
+        (task_id, source_branch, target_branch),
+    ).fetchone()
+    conn.close()
+    return _dict(row)
+
+
+def update_mr(mr_id: str, title: str = "", description: str = "") -> Optional[dict]:
+    """Refresh an existing MR's title/description/updated_at. Returns the updated row."""
+    conn = get_conn()
+    conn.execute(
+        "UPDATE merge_requests SET title = ?, description = ?, updated_at = ? WHERE id = ?",
+        (title, description, _now(), mr_id),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM merge_requests WHERE id = ?", (mr_id,)).fetchone()
+    conn.close()
+    return _dict(row)
+
+
 def latest_for_task(task_id: str) -> Optional[dict]:
     conn = get_conn()
     row = conn.execute(

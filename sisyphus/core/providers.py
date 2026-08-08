@@ -121,10 +121,14 @@ def _publish_local(task_id: str, bare: str, base: str, branch: str, title: str,
     patch_path = attachments.save_text(task_id, "change.patch", patch)
 
     from . import mergerequests
-    mr = mergerequests.create_mr(
-        task_id=task_id, repo=repo_name, source_branch=branch, target_branch=base,
-        title=title, bare_path=bare, base_branch=base, source_path=source,
-    )
+    existing = mergerequests.find_open_mr(task_id, branch, base)
+    if existing:
+        mr = mergerequests.update_mr(existing["id"], title=title)
+    else:
+        mr = mergerequests.create_mr(
+            task_id=task_id, repo=repo_name, source_branch=branch, target_branch=base,
+            title=title, bare_path=bare, base_branch=base, source_path=source,
+        )
     return {"ok": True, "platform": "local", "branch": branch, "stat": stat,
             "patch_file": "change.patch", "patch_path": patch_path, "mr_id": mr["id"]}
 

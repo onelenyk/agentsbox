@@ -3,12 +3,14 @@ import pytest
 
 from core.mergerequests import (
     create_mr,
+    find_open_mr,
     get_mr,
     latest_for_task,
     list_mrs,
     mark_merged,
     set_status,
     set_target,
+    update_mr,
 )
 
 
@@ -58,3 +60,26 @@ class TestEntity:
         assert got["status"] == "merged"
         assert got["merge_sha"] == "deadbeef1234"
         assert got["merged_at"]
+
+    def test_find_open_mr_returns_none_when_none_open(self, db_path):
+        assert find_open_mr("task-x", "branch-x", "main") is None
+
+    def test_find_open_mr_returns_matching_row(self, db_path):
+        _mk(task_id="t1", source_branch="b1", target_branch="main")
+        mr = find_open_mr("t1", "b1", "main")
+        assert mr is not None
+        assert mr["task_id"] == "t1"
+
+    def test_find_open_mr_ignores_closed(self, db_path):
+        mr = _mk(task_id="t1", source_branch="b1", target_branch="main")
+        set_status(mr["id"], "closed")
+        assert find_open_mr("t1", "b1", "main") is None
+
+    def test_update_mr_refreshes_title_and_bumps_updated_at(self, db_path):
+        mr = _mk(title="original")
+        import time
+        time.sleep(0.01)
+        updated = update_mr(mr["id"], title="refreshed")
+        assert updated["title"] == "refreshed"
+        assert updated["id"] == mr["id"]
+        assert updated["updated_at"] > mr["updated_at"]
