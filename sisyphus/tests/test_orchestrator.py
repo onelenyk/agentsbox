@@ -256,14 +256,20 @@ class TestRestartIsANoOp:
         kinds = [m["kind"] for m in store.get_thread(task["id"])]
         assert kinds.count("worker_finished") == 1
 
-    @pytest.mark.asyncio
-    async def test_reconcile_ignores_tasks_with_progress_since(self, db_path):
+    def test_reconcile_wakes_task_with_progress_since(self, db_path):
         task = store.create_task("do work")
         store.set_status(task["id"], "active")
         store.post_message(task["id"], "system", kind="worker_started", text="spawning")
         store.post_message(task["id"], "explorer", kind="note", text="already working")
 
-        assert reconcile_on_boot() == 0
+        with patch("core.orchestrator.emit") as mock_emit:
+            n = reconcile_on_boot()
+
+        assert n == 1
+        mock_emit.assert_called_once_with(task["id"], "continue")
+
+        kinds = [m["kind"] for m in store.get_thread(task["id"])]
+        assert "worker_finished" not in kinds  # not a worker_started rescue
 
     @pytest.mark.asyncio
     async def test_reconcile_ignores_waiting_and_terminal_tasks(self, db_path):
@@ -275,9 +281,33 @@ class TestRestartIsANoOp:
         assert reconcile_on_boot() == 0
 
     @pytest.mark.asyncio
-    async def test_reconcile_ignores_active_task_with_no_messages(self, db_path):
+    async def test_reconcile_wakes_active_task_with_no_messages(self, db_path):
+        # A task created just before a crash has no messages and no pending
+        # event — reconcile must wake it, not skip it.
         store.create_task("brand new, orchestrator hasn't acted yet")
-        assert reconcile_on_boot() == 0
+        assert reconcile_on_boot() == 1
+
+    def test_reconcile_emits_continue_for_active_task_with_note(self, db_path):
+        task = store.create_task("pending work")
+        store.set_status(task["id"], "active")
+        store.post_message(task["id"], "orchestrator", kind="note", text="just thinking")
+
+        with patch("core.orchestrator.emit") as mock_emit:
+            n = reconcile_on_boot()
+
+        assert n == 1
+        mock_emit.assert_called_once_with(task["id"], "continue")
+
+    def test_reconcile_does_not_wake_waiting_task(self, db_path):
+        task = store.create_task("parked")
+        store.set_status(task["id"], "waiting")
+        store.post_message(task["id"], "orchestrator", kind="question", text="approve?")
+
+        with patch("core.orchestrator.emit") as mock_emit:
+            n = reconcile_on_boot()
+
+        assert n == 0
+        mock_emit.assert_not_called()
 
 
 class TestDecisionValidation:
