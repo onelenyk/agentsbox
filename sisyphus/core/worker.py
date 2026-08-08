@@ -11,10 +11,13 @@ in practice (see docs/adr/); every other MCP server on this machine, and our
 own control-plane mcp_server.py, already use the local/stdio pattern.
 """
 import json
+import logging
 import os
 import sys
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from . import agents, sessions, store
 from .launcher import launch_agent
@@ -83,6 +86,16 @@ def cleanup_task(task_id: str, deep: bool = False) -> None:
     for pattern in patterns:
         for path in glob.glob(pattern):
             shutil.rmtree(path, ignore_errors=True)
+
+    # A bare clone kept alive (open MR) has just lost its worktree dirs; prune
+    # the stale registrations so a later respawn can re-add the same paths.
+    import subprocess
+    for bare in glob.glob(f"{ws}/repos/{task_id}_*"):
+        try:
+            subprocess.run(["git", "-C", bare, "worktree", "prune"],
+                           capture_output=True, text=True, timeout=30)
+        except Exception as e:
+            logger.debug("cleanup_task: worktree prune failed in %s: %s", bare, e)
 
 
 def _prepare_repo(task_id: str, repo_name: Optional[str]):

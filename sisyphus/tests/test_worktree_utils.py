@@ -64,3 +64,33 @@ class TestSetAccess:
         path = tmp_path / "does-not-exist"
         # Should not raise
         set_access(str(path), "read")
+
+
+class TestStaleRegistrationSelfHeal:
+    """create_worktree must survive a worktree dir that was removed without
+    `git worktree prune` (stale registration) — the recurring production bug."""
+
+    def _make_bare(self, tmp_path):
+        import subprocess
+        src = tmp_path / "src"
+        src.mkdir()
+        subprocess.run(["git", "init", "-b", "main"], cwd=src, check=True, capture_output=True)
+        (src / "f.txt").write_text("hi")
+        subprocess.run(["git", "add", "."], cwd=src, check=True, capture_output=True)
+        subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                        "commit", "-m", "init"], cwd=src, check=True, capture_output=True)
+        bare = tmp_path / "bare.git"
+        subprocess.run(["git", "clone", "--bare", str(src), str(bare)],
+                       check=True, capture_output=True)
+        return str(bare)
+
+    def test_readd_after_dir_removed_without_prune(self, tmp_path, monkeypatch):
+        import shutil
+        from core import worktree as wt
+
+        monkeypatch.setattr(wt, "REPOS_DIR", tmp_path / "repos")
+        bare = self._make_bare(tmp_path)
+        path = wt.create_worktree(bare, "task-x", "engineer", branch="main")
+        shutil.rmtree(path)                      # removed WITHOUT prune
+        path2 = wt.create_worktree(bare, "task-x", "engineer", branch="main")
+        assert os.path.isdir(path2)

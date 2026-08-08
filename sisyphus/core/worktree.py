@@ -52,6 +52,14 @@ def create_worktree(bare_path: str, run_id: str, step_id: str,
     add += [str(worktree_path), branch]
     result = subprocess.run(add, capture_output=True, text=True)
 
+    if result.returncode != 0 and "already registered worktree" in result.stderr:
+        # A worktree dir removed without `git worktree prune` leaves a stale
+        # registration that blocks re-adding the same path (bit us three times
+        # in production). Self-heal: prune and retry once.
+        subprocess.run(["git", "-C", bare_path, "worktree", "prune"],
+                       capture_output=True, text=True)
+        result = subprocess.run(add, capture_output=True, text=True)
+
     if result.returncode != 0:
         if "already used by worktree" in result.stderr and not detach:
             detached_result = subprocess.run(
