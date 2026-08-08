@@ -462,3 +462,37 @@ def test_command_create_task(db_path):
     assert task["goal"] == "command-created task"
     assert task["title"] == "My Task"
     mock_emit.assert_called_once()
+
+
+class TestReopenAndWorkingIndicator:
+    def test_reopen_flips_done_to_waiting_with_note(self, db_path):
+        from core import store
+        t = store.create_task("g")
+        store.set_status(t["id"], "done")
+        r = _make_client().post(f"/api/tasks/{t['id']}/reopen")
+        assert r.status_code == 200
+        assert store.get_task(t["id"])["status"] == "waiting"
+        assert "reopened" in store.get_thread(t["id"])[-1]["text"]
+
+    def test_reopen_rejected_for_active_task(self, db_path):
+        from core import store
+        t = store.create_task("g")
+        assert _make_client().post(f"/api/tasks/{t['id']}/reopen").status_code == 409
+
+    def test_working_indicator_shows_running_role(self, db_path):
+        from core import store
+        t = store.create_task("g")
+        store.set_status(t["id"], "active")
+        store.post_message(t["id"], "system", kind="worker_started",
+                           text="spawning engineer: do the thing")
+        html = _make_client().get(f"/api/tasks/{t['id']}/detail").text
+        assert "engineer" in html and "working" in html
+
+    def test_queued_indicator_shows_queued_label(self, db_path):
+        from core import store
+        t = store.create_task("g")
+        store.set_status(t["id"], "active")
+        store.post_message(t["id"], "system", kind="worker_queued",
+                           text="reviewer queued — waiting for a free worker slot")
+        html = _make_client().get(f"/api/tasks/{t['id']}/detail").text
+        assert "reviewer" in html and "queued" in html

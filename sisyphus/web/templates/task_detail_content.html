@@ -10,6 +10,14 @@
         </div>
         <div class="row" style="flex-shrink:0">
             <span class="status status--{{ task.status }}">{{ task.status }}</span>
+            {% if working %}
+            <span class="muted mono" style="font-size:11px">⚙ {{ working.role }} · {{ working.label }} · {{ working.mins }}m</span>
+            {% endif %}
+            {% if task.status in ("done", "failed") %}
+            <button class="btn btn--sm"
+                    hx-post="/api/tasks/{{ task.id }}/reopen"
+                    hx-swap="none">Reopen</button>
+            {% endif %}
             <button class="btn btn--danger btn--sm"
                     hx-post="/api/tasks/{{ task.id }}/delete"
                     hx-confirm="Delete this task and its whole thread? This can't be undone."

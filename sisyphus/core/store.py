@@ -208,18 +208,22 @@ def post_message(
     a single statement under SQLite's write lock (no read-then-write race)."""
     now = _now()
     conn = get_conn()
-    cur = conn.execute(
-        """
-        INSERT INTO messages (task_id, seq, author, kind, text, attachment, created_at)
-        VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE task_id = ?), ?, ?, ?, ?, ?)
-        """,
-        (task_id, task_id, author, kind, text, attachment, now),
-    )
-    conn.execute("UPDATE tasks SET updated_at = ? WHERE id = ?", (now, task_id))
-    conn.commit()
-    row = conn.execute("SELECT * FROM messages WHERE id = ?", (cur.lastrowid,)).fetchone()
-    conn.close()
-    return _dict(row)
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO messages (task_id, seq, author, kind, text, attachment, created_at)
+            VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE task_id = ?), ?, ?, ?, ?, ?)
+            """,
+            (task_id, task_id, author, kind, text, attachment, now),
+        )
+        conn.execute("UPDATE tasks SET updated_at = ? WHERE id = ?", (now, task_id))
+        conn.commit()
+        row = conn.execute("SELECT * FROM messages WHERE id = ?", (cur.lastrowid,)).fetchone()
+        return _dict(row)
+    finally:
+        # An exception mid-transaction (e.g. an FK violation) must not leak an
+        # open write transaction — the next writer would block on busy_timeout.
+        conn.close()
 
 
 def get_thread(task_id: str) -> List[dict]:

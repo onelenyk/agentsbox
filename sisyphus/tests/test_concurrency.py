@@ -21,9 +21,14 @@ async def test_worker_semaphore_bounds_concurrency(db_path, monkeypatch):
     monkeypatch.setattr(orchestrator, "spawn_worker", fake_spawn)
     orchestrator._worker_sem = asyncio.Semaphore(2)  # cap = 2
 
+    # Real task rows: _spawn_worker_safe posts a worker_queued marker, and
+    # messages.task_id has a foreign key to tasks.
+    from core import store
+    tasks = [store.create_task(f"goal {i}") for i in range(5)]
+
     await asyncio.gather(*[
-        orchestrator._spawn_worker_safe(f"t{i}", "engineer", "x", None)
-        for i in range(5)
+        orchestrator._spawn_worker_safe(t["id"], "engineer", "x", None)
+        for t in tasks
     ])
 
     assert peak == 2, f"expected concurrency capped at 2, saw peak {peak}"
