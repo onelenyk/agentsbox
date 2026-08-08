@@ -6,6 +6,8 @@ worker_started message, and the crash-fallback detection (session still
 active after the process exits = it never called finish()).
 """
 import json
+import os
+import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -14,7 +16,7 @@ import pytest
 from core import sessions, store
 from core.agents import update_agent
 from core.launcher import AgentResult
-from core.worker import spawn_worker
+from core.worker import cleanup_task, spawn_worker
 
 
 @pytest.fixture(autouse=True)
@@ -301,3 +303,48 @@ class TestModelOverride:
 
         kwargs = mock_launch.call_args.kwargs
         assert kwargs.get("model_override") == "gpt-5-decider-override"
+
+
+class TestCleanupSalvage:
+
+    def _make_worktree(self, base: Path, task_id: str, role: str, dirty: bool) -> Path:
+        wt = base / "repos" / "worktrees" / f"{task_id}_{role}"
+        wt.mkdir(parents=True)
+        subprocess.run(["git", "init"], cwd=str(wt), capture_output=True, text=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test"], cwd=str(wt),
+            capture_output=True, text=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "test"], cwd=str(wt),
+            capture_output=True, text=True,
+        )
+        (wt / "file.txt").write_text("initial")
+        subprocess.run(["git", "add", "file.txt"], cwd=str(wt), capture_output=True, text=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=str(wt), capture_output=True, text=True)
+        if dirty:
+            (wt / "file.txt").write_text("modified")
+        return wt
+
+    def test_dirty_worktree_salvages_patch(self, db_path, tmp_path, monkeypatch):
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+        task = store.create_task("test salvage")
+        wt = self._make_worktree(tmp_path, task["id"], "engineer", dirty=True)
+
+        cleanup_task(task["id"])
+
+        attachments_dir = tmp_path / "tasks" / task["id"] / "attachments"
+        patch_file = attachments_dir / f"salvaged-{wt.name}.patch"
+        assert patch_file.is_file()
+        content = patch_file.read_text()
+        assert "modified" in content
+
+    def test_clean_worktree_produces_no_attachment(self, db_path, tmp_path, monkeypatch):
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+        task = store.create_task("test clean")
+        wt = self._make_worktree(tmp_path, task["id"], "engineer", dirty=False)
+
+        cleanup_task(task["id"])
+
+        attachments_dir = tmp_path / "tasks" / task["id"] / "attachments"
+        assert not attachments_dir.exists() or not list(attachments_dir.iterdir())
