@@ -281,9 +281,11 @@ class TestRestartIsANoOp:
         assert reconcile_on_boot() == 0
 
     @pytest.mark.asyncio
-    async def test_reconcile_ignores_active_task_with_no_messages(self, db_path):
+    async def test_reconcile_wakes_active_task_with_no_messages(self, db_path):
+        # A task created just before a crash has no messages and no pending
+        # event — reconcile must wake it, not skip it.
         store.create_task("brand new, orchestrator hasn't acted yet")
-        assert reconcile_on_boot() == 0
+        assert reconcile_on_boot() == 1
 
     def test_reconcile_emits_continue_for_active_task_with_note(self, db_path):
         task = store.create_task("pending work")
