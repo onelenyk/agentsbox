@@ -42,6 +42,15 @@ def create_worktree(bare_path: str, run_id: str, step_id: str,
     worktree_path = worktree_dir / f"{run_id}_{step_id}"
 
     if worktree_path.exists():
+        # A reused worktree is frozen at the state it was created with. For a
+        # detached (read-only) role that is a live bug: a reviewer re-spawned
+        # after CHANGES REQUESTED would re-review the previous round's files
+        # forever. Refresh it to the branch's current tip.
+        if detach:
+            subprocess.run(
+                ["git", "-C", str(worktree_path), "checkout", "--detach", branch],
+                capture_output=True, text=True,
+            )
         return str(worktree_path)
 
     worktree_dir.mkdir(parents=True, exist_ok=True)
