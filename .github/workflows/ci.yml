@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: sisyphus
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Run tests
+        run: python -m pytest -q --ignore=tests/e2e
