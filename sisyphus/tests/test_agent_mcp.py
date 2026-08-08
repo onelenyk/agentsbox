@@ -195,6 +195,56 @@ def test_open_mr_requires_prior_commit(db_path):
     assert "sisyphus/x" in mr[0]["text"]
 
 
+def test_open_mr_twice_creates_one_row_refreshes_patch(db_path):
+    task_id, token = _session(db_path, "engineer")
+    c = _client()
+
+    with patch("core.git_ops.is_git_repo", return_value=True), \
+         patch("core.git_ops.commit_all", return_value="a" * 40):
+        _call(c, token, "commit", {"message": "fix: one"})
+
+    from core import mergerequests
+
+    first_mr_id = None
+
+    def _pub(session, title, desc):
+        nonlocal first_mr_id
+        from core import attachments
+        attachments.save_text(session["task_id"], "change.patch",
+                              f"diff for {title}\n")
+        existing = mergerequests.find_open_mr(
+            session["task_id"], "sisyphus/x", "main")
+        if existing:
+            mr = mergerequests.update_mr(existing["id"], title=title)
+        else:
+            mr = mergerequests.create_mr(
+                task_id=session["task_id"], repo="test-repo",
+                source_branch="sisyphus/x", target_branch="main",
+                title=title, bare_path="/tmp/bare",
+                base_branch="main", source_path="/tmp/src",
+            )
+        first_mr_id = mr["id"]
+        return {"ok": True, "platform": "local", "branch": "sisyphus/x",
+                "stat": " file.py | 1 +", "patch_file": "change.patch",
+                "mr_id": mr["id"]}
+
+    with patch("core.providers.publish_change", side_effect=_pub):
+        _call(c, token, "open_mr", {"title": "Fix one"})
+
+    with patch("core.providers.publish_change", side_effect=_pub):
+        _call(c, token, "open_mr", {"title": "Fix two"})
+
+    open_rows = [mr for mr in mergerequests.list_mrs(status="open")
+                 if mr["task_id"] == task_id]
+    assert len(open_rows) == 1
+    assert open_rows[0]["title"] == "Fix two"
+    assert open_rows[0]["id"] == first_mr_id
+
+    from core import attachments
+    patch_content = attachments.read(task_id, "change.patch")
+    assert "diff for Fix two" in (patch_content or "")
+
+
 def test_commit_reports_sha_and_records_it(db_path):
     task_id, token = _session(db_path, "engineer")
     with patch("core.git_ops.is_git_repo", return_value=True), \
