@@ -5,7 +5,7 @@
             <span class="muted mono" style="font-size:11px">classified — you can change it below</span>
         </div>
     </div>
-    <div style="display:flex;flex-direction:column;gap:10px">
+    <form method="post" style="display:flex;flex-direction:column;gap:10px">
         <div class="field">
             <label>Title</label>
             <input name="title" value="{{ result.title }}" autocomplete="off">
@@ -28,25 +28,12 @@
             <input name="cron" value="{{ result.cron }}" placeholder="0 3 * * *" autocomplete="off">
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <form hx-post="/api/command/create-task" hx-target="#cmd-result" style="margin:0">
-                <input type="hidden" name="title" value="{{ result.title }}">
-                <input type="hidden" name="goal" value="{{ result.goal }}">
-                <input type="hidden" name="repo" value="{{ result.repo }}">
-                <button type="submit" class="btn{% if result.kind == 'task' %} btn--primary{% else %} btn--ghost{% endif %}">Create task</button>
-            </form>
-            <form hx-post="/api/command/create-plan" hx-target="#cmd-result" style="margin:0">
-                <input type="hidden" name="title" value="{{ result.title }}">
-                <input type="hidden" name="goal" value="{{ result.goal }}">
-                <input type="hidden" name="repo" value="{{ result.repo }}">
-                <button type="submit" class="btn{% if result.kind == 'mission' %} btn--primary{% else %} btn--ghost{% endif %}">Make it a plan</button>
-            </form>
-            <form hx-post="/api/command/create-automation" hx-target="#cmd-result" style="margin:0">
-                <input type="hidden" name="title" value="{{ result.title }}">
-                <input type="hidden" name="goal" value="{{ result.goal }}">
-                <input type="hidden" name="repo" value="{{ result.repo }}">
-                <input type="hidden" name="cron" value="{{ result.cron }}">
-                <button type="submit" class="btn{% if result.kind == 'automation' %} btn--primary{% else %} btn--ghost{% endif %}">Make it an automation</button>
-            </form>
+            <button type="submit" formaction="/api/command/create-task"
+                    class="btn{% if result.kind == 'task' %} btn--primary{% else %} btn--ghost{% endif %}">Create task</button>
+            <button type="submit" formaction="/api/command/create-plan"
+                    class="btn{% if result.kind == 'mission' %} btn--primary{% else %} btn--ghost{% endif %}">Make it a plan</button>
+            <button type="submit" formaction="/api/command/create-automation"
+                    class="btn{% if result.kind == 'automation' %} btn--primary{% else %} btn--ghost{% endif %}">Make it an automation</button>
         </div>
-    </div>
+    </form>
 </div>
