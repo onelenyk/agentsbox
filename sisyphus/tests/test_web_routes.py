@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from web.app import app
 
 from core.runners import init_runners_table
+from core import mergerequests
 
 
 # ── Fixture: TestClient ──────────────────────────────────────────────────
@@ -193,6 +194,29 @@ def test_child_detail_shows_parent_breadcrumb(db_path):
     r = _make_client().get(f"/api/tasks/{ios['id']}/detail")
     assert "Part of" in r.text
     assert f"/tasks/{parent['id']}" in r.text
+
+
+def test_board_column_unit_mappings(db_path):
+    from web.routes import board_column
+
+    assert board_column({"status": "active"}, None) == "in-progress"
+    assert board_column({"status": "waiting"}, None) == "needs-you"
+    assert board_column({"status": "done"}, None) == "done"
+    assert board_column({"status": "done"}, {"status": "open"}) == "to-merge"
+    assert board_column({"status": "done"}, {"status": "merged"}) == "shipped"
+    assert board_column({"status": "failed"}, None) == "failed"
+
+
+def test_board_lists_done_task_with_open_mr_under_to_merge(db_path):
+    from core import store
+    task = store.create_task("a task", repo="test-repo")
+    store.set_status(task["id"], "done")
+    mergerequests.create_mr(task["id"], "test-repo", "feature/x", "main")
+
+    r = _make_client().get("/api/tasks/list")
+    assert r.status_code == 200
+    assert "board-col--to-merge" in r.text
+    assert task["id"] in r.text
 
 
 def test_board_hides_children_and_shows_parent_chip(db_path):
