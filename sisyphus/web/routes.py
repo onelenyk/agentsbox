@@ -640,6 +640,74 @@ async def tasks_create(goal: str = Form(...), repo: str = Form(""), agent: str =
     resp.headers["HX-Trigger"] = "taskCreated"
     return resp
 
+# ── Command Bar ─────────────────────────────────────────────────────────
+
+@router.post("/api/command/classify", response_class=HTMLResponse)
+async def command_classify(request: Request, text: str = Form(...)):
+    from core import ai_assist
+    from core.repos import list_repos
+
+    if not text.strip():
+        return HTMLResponse('<div class="panel" style="margin-top:12px"><div class="empty">Type something first.</div></div>')
+    repos = list_repos()
+    repo_names = [r["name"] for r in repos]
+    try:
+        result = await asyncio.to_thread(ai_assist.classify_command, text.strip(), repo_names)
+    except Exception:
+        result = {"kind": "task", "title": text.strip()[:80], "goal": text.strip(), "repo": "", "cron": ""}
+    return _tmpl().TemplateResponse(request, "command_result.html", {"result": result, "repos": repos})
+
+
+@router.post("/api/command/create-task")
+async def command_create_task(goal: str = Form(...), repo: str = Form(""), title: str = Form("")):
+    from core import store
+    from core.orchestrator import emit
+    from fastapi.responses import Response
+
+    if not goal.strip():
+        return Response(status_code=422)
+    task = store.create_task(goal.strip(), repo, title=title or None)
+    emit(task["id"], "created")
+    resp = Response(status_code=200)
+    resp.headers["HX-Redirect"] = f"/tasks/{task['id']}"
+    return resp
+
+
+@router.post("/api/command/create-plan")
+async def command_create_plan(goal: str = Form(...), repo: str = Form(""), title: str = Form("")):
+    from core import planner
+    from fastapi.responses import Response
+
+    if not goal.strip():
+        return Response(status_code=422)
+    pid = planner.create_plan(title=title or goal.strip()[:48], repo=repo)["id"]
+    planner.start_plan_turn(pid, goal.strip())
+    resp = Response(status_code=200)
+    resp.headers["HX-Redirect"] = "/plans"
+    return resp
+
+
+@router.post("/api/command/create-automation")
+async def command_create_automation(goal: str = Form(...), repo: str = Form(""),
+                                     title: str = Form(""), cron: str = Form("")):
+    from core.autopilot import create_autopilot
+    from fastapi.responses import Response
+
+    if not goal.strip():
+        return Response(status_code=422)
+    create_autopilot(
+        name=title or goal.strip()[:48],
+        description=goal.strip(),
+        trigger_type="schedule",
+        cron=cron or "",
+        goal_template=goal.strip(),
+        repo=repo,
+        enabled=1,
+    )
+    resp = Response(status_code=200)
+    resp.headers["HX-Redirect"] = "/autopilots"
+    return resp
+
 @router.post("/api/tasks/ai-parse")
 async def tasks_ai_parse(text: str = Form(...), template: str = Form("")):
     """Turn rough words (+ template) into {goal, repo, agent} via a quick local

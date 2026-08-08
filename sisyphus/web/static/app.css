@@ -693,3 +693,7 @@ select { cursor: pointer; appearance: none;
 .toggle-chip:hover { border-color: var(--border-2); color: var(--text-2); }
 .toggle-chip.is-on { background: var(--good-bg); border-color: var(--good); color: var(--good); }
 .toggle-chip.is-on .dot { background: var(--good); }
+
+.cmd-badge--task       { color: var(--good);   background: var(--good-bg);   border-color: rgba(70,209,127,.25); }
+.cmd-badge--mission    { color: var(--violet);  background: var(--violet-bg); border-color: rgba(185,140,255,.25); }
+.cmd-badge--automation { color: var(--warn);    background: var(--warn-bg);   border-color: rgba(224,168,58,.25); }
