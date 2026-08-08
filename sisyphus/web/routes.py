@@ -561,6 +561,25 @@ async def agents_delete(name: str):
 
 # ── Tasks (Task+Thread system) ──────────────────────────────────────────
 
+def board_column(task, mr):
+    """Derived board column from task status + latest merge-request state."""
+    status = task.get("status", "")
+    if status == "active":
+        return "in-progress"
+    if status == "waiting":
+        return "needs-you"
+    if status == "done":
+        if mr is not None:
+            if mr.get("status") == "merged":
+                return "shipped"
+            if mr.get("status") == "open":
+                return "to-merge"
+        return "done"
+    if status == "failed":
+        return "failed"
+    return "done"
+
+
 @router.get("/tasks", response_class=HTMLResponse)
 async def tasks_page(request: Request):
     return _tmpl().TemplateResponse(request, "tasks.html", {"active_page": "tasks"})
@@ -568,15 +587,25 @@ async def tasks_page(request: Request):
 @router.get("/api/tasks/list", response_class=HTMLResponse)
 async def tasks_list_view(request: Request):
     from core import store
-    columns = {}
+
+    all_mrs = mergerequests.list_mrs()
+    task_latest_mr = {}
+    for mr in all_mrs:
+        tid = mr["task_id"]
+        if tid not in task_latest_mr or mr["created_at"] > task_latest_mr[tid]["created_at"]:
+            task_latest_mr[tid] = mr
+
+    cols = ("in-progress", "needs-you", "to-merge", "shipped", "done", "failed")
+    columns = {c: [] for c in cols}
     for status in store.VALID_STATUSES:
         tasks = [t for t in store.list_tasks(status=status) if not t.get("parent_id")]
-        for t in tasks:   # annotate fan-out parents with child progress
+        for t in tasks:
             kids = store.list_children(t["id"])
             if kids:
                 t["child_total"] = len(kids)
                 t["child_done"] = sum(1 for c in kids if c["status"] == "done")
-        columns[status] = tasks
+            col = board_column(t, task_latest_mr.get(t["id"]))
+            columns[col].append(t)
     return _tmpl().TemplateResponse(request, "tasks_list.html", {"columns": columns})
 
 @router.get("/api/tasks/new-form", response_class=HTMLResponse)

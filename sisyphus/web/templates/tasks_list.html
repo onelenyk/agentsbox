@@ -1,12 +1,12 @@
 <div class="board">
-    {% for status in ["active", "waiting", "done", "failed"] %}
-    <div class="board-col board-col--{{ status }}">
+    {% for col_key, col_label in [("in-progress", "In progress"), ("needs-you", "Needs you"), ("to-merge", "To merge"), ("shipped", "Shipped"), ("done", "Done"), ("failed", "Failed")] %}
+    <div class="board-col board-col--{{ col_key }}">
         <div class="board-col__head">
-            <span class="label">{{ status }}</span>
-            <span class="count tnum">{{ columns[status]|length }}</span>
+            <span class="label">{{ col_label }}</span>
+            <span class="count tnum">{{ columns[col_key]|length }}</span>
         </div>
         <div class="board-col__body">
-            {% for t in columns[status] %}
+            {% for t in columns[col_key] %}
             <a class="task-card" href="/tasks/{{ t.id }}">
                 <div class="task-card__title">{{ task_display_title(t) }}</div>
                 <div class="task-card__meta">
