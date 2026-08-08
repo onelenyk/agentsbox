@@ -36,7 +36,7 @@ def _enrich_sessions(raw_sessions):
         except Exception:
             s["elapsed_mins"] = 0
         task = store.get_task(s["task_id"])
-        s["task_title"] = task["title"] if task and task.get("title") else (s["task_id"] or "")
+        s["task_title"] = store.task_display_title(task) if task else (s["task_id"] or "")
         enriched.append(s)
     return enriched
 
