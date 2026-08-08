@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 
 from core.db import init_db
 from core.config import get_config
-from core import mergerequests
+from core import mergerequests, sessions
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -20,6 +20,25 @@ def _tmpl():
     return tmpl
 
 _started = False
+
+
+def _enrich_sessions(raw_sessions):
+    from datetime import datetime, timezone
+    from core import store
+
+    now = datetime.now(timezone.utc)
+    enriched = []
+    for s in raw_sessions:
+        s = dict(s)
+        try:
+            started = datetime.fromisoformat(s["created_at"])
+            s["elapsed_mins"] = int((now - started).total_seconds() // 60)
+        except Exception:
+            s["elapsed_mins"] = 0
+        task = store.get_task(s["task_id"])
+        s["task_title"] = task["title"] if task and task.get("title") else (s["task_id"] or "")
+        enriched.append(s)
+    return enriched
 
 
 @router.on_event("startup")
@@ -76,7 +95,10 @@ async def dashboard_page(request: Request):
 @router.get("/api/dashboard/view", response_class=HTMLResponse)
 async def dashboard_view(request: Request):
     from core.stats import dashboard
-    return _tmpl().TemplateResponse(request, "dashboard_view.html", {"d": dashboard()})
+    return _tmpl().TemplateResponse(request, "dashboard_view.html", {
+        "d": dashboard(),
+        "live_sessions": _enrich_sessions(sessions.list_active()),
+    })
 
 @router.get("/api/inbox/view", response_class=HTMLResponse)
 async def inbox_view(request: Request):
@@ -512,6 +534,13 @@ async def stats_page(request: Request):
 async def stats_view(request: Request):
     from core.stats import overview
     return _tmpl().TemplateResponse(request, "stats_view.html", {"s": overview()})
+
+# ── Live Workers ─────────────────────────────────────────────────────────
+
+@router.get("/api/workers/live", response_class=HTMLResponse)
+async def workers_live(request: Request):
+    return _tmpl().TemplateResponse(request, "workers_live.html",
+                                    {"sessions": _enrich_sessions(sessions.list_active())})
 
 # ── Agents ──────────────────────────────────────────────────────────────
 
@@ -1086,8 +1115,11 @@ async def task_detail_view(request: Request, task_id: str):
             label = "working" if last["kind"] == "worker_started" else "queued for a slot"
             working = {"role": role, "label": label, "mins": mins}
 
+    live_sessions = sessions.list_for_task(task_id)
+
     return _tmpl().TemplateResponse(request, "task_detail_content.html", {
         "task": task, "messages": messages, "working": working,
+        "live_sessions": _enrich_sessions(live_sessions),
         "result": store.result_view(task_id),
         "children": store.list_children(task_id),
         "parent": store.get_task(task["parent_id"]) if task.get("parent_id") else None,
