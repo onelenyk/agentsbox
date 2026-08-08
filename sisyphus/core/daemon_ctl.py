@@ -129,11 +129,14 @@ def uninstall() -> dict:
 
 
 def start() -> dict:
-    foreign = _foreign_pid_on_port()
-    if foreign is not None:
-        msg = f"Port {PORT} is already in use by PID {foreign} (not managed by daemon_ctl). Kill it first: kill {foreign}"
+    # Refuse whenever the port is held by a process we do not manage — even
+    # when launchd has no record (managed None): that is exactly the stray-
+    # daemon case, and binding would fail anyway.
+    port_pid = _port_listen_pid()
+    if port_pid is not None and port_pid != _managed_pid():
+        msg = f"Port {PORT} is already in use by PID {port_pid} (not managed by daemon_ctl). Kill it first: kill {port_pid}"
         print(msg, file=sys.stderr)
-        return {"error": msg, "foreign_pid": foreign}
+        return {"error": msg, "foreign_pid": port_pid}
     if is_running():
         return {"already_running": True}
     if is_installed():
@@ -183,6 +186,15 @@ def status() -> dict:
         "supervised": is_installed(),
         "url": HEALTH_URL,
     }
+    if port_pid is not None and managed is None and result["supervised"]:
+        # Installed but launchd shows no PID while something serves the port:
+        # an unmanaged (stray) process — the exact incident this guard is for.
+        r = subprocess.run(["ps", "-o", "lstart=", "-p", str(port_pid)],
+                           capture_output=True, text=True)
+        print(f"\n  WARNING: port {PORT} is served by PID {port_pid}, but launchd")
+        print(f"  reports no managed process. Likely a stray daemon (started {r.stdout.strip()}).")
+        print(f"  Kill it and restart: kill {port_pid}\n")
+        result["foreign_pid"] = port_pid
     if managed is not None and port_pid is not None and managed != port_pid:
         r = subprocess.run(
             ["ps", "-o", "lstart=", "-p", str(port_pid)],
