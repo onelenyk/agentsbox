@@ -182,7 +182,7 @@ body::before {
 .badge--accent { color: var(--accent); background: var(--accent-bg); border-color: var(--accent-bd); }
 
 /* ── Board ───────────────────────────────────────────────────────────── */
-.board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.board { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; }
 .board-col {
   background: var(--panel); border: 1px solid var(--border);
   border-radius: var(--r-lg); min-height: 220px; display: flex; flex-direction: column;
@@ -201,10 +201,14 @@ body::before {
 .board-col__body { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 
 /* per-status column color */
-.board-col--active  { --col: var(--accent); --col-bg: var(--accent-bg); }
-.board-col--waiting { --col: var(--warn);   --col-bg: var(--warn-bg); }
-.board-col--done    { --col: var(--good);   --col-bg: var(--good-bg); }
-.board-col--failed  { --col: var(--bad);    --col-bg: var(--bad-bg); }
+.board-col--active       { --col: var(--accent); --col-bg: var(--accent-bg); }
+.board-col--waiting      { --col: var(--warn);   --col-bg: var(--warn-bg); }
+.board-col--in-progress  { --col: var(--accent); --col-bg: var(--accent-bg); }
+.board-col--needs-you    { --col: var(--warn);   --col-bg: var(--warn-bg); }
+.board-col--to-merge     { --col: var(--accent); --col-bg: var(--accent-bg); }
+.board-col--shipped      { --col: var(--good);   --col-bg: var(--good-bg); }
+.board-col--done         { --col: var(--good);   --col-bg: var(--good-bg); }
+.board-col--failed       { --col: var(--bad);    --col-bg: var(--bad-bg); }
 .board-col { box-shadow: inset 0 2px 0 var(--col, transparent); }
 .board-col__head { background: var(--col-bg, transparent); }
 .board-col__head .label { color: var(--col, var(--text-2)); }
