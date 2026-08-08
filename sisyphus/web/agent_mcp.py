@@ -14,7 +14,7 @@ import logging
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
-from core import agents, attachments, mergerequests, sessions, store
+from core import agents, attachments, mergerequests, reviews, sessions, store
 
 agent_mcp = APIRouter()
 logger = logging.getLogger(__name__)
@@ -126,12 +126,35 @@ def _open_mr(session, title="", description="", **_):
     else:
         text = f"{title}: {result.get('url', '')}".strip(": ")
         store.post_message(session["task_id"], session["role"], kind="mr", text=text)
+
+    try:
+        mr = mergerequests.latest_for_task(session["task_id"])
+        if mr:
+            task = reviews.ensure_review_task(mr)
+            if task:
+                mergerequests.set_review_status(mr["id"], "pending")
+    except Exception:
+        logger.warning("review hook failed for open_mr on task %s", session["task_id"], exc_info=True)
+
     return {"ok": True, "branch": result.get("branch")}
 
 
 def _approve(session, summary="", **_):
     store.post_message(session["task_id"], session["role"], kind="result",
                        text=f"APPROVED: {summary}".strip())
+    try:
+        task = store.get_task(session["task_id"])
+        if task:
+            marker = reviews.parse_review_marker(task["goal"])
+            if marker:
+                mergerequests.set_review_status(marker["mr_id"], "approved")
+                if marker["origin_task"]:
+                    store.post_message(
+                        marker["origin_task"], author="system", kind="note",
+                        text=f"review verdict for {marker['mr_id']}: APPROVED — {summary}",
+                    )
+    except Exception:
+        logger.warning("review bookkeeping failed for approve on task %s", session["task_id"], exc_info=True)
     _end_worker(session)
     return {"ok": True, "verdict": "approved"}
 
@@ -193,6 +216,19 @@ def _request_changes(session, reason="", **_):
         return {"error": "reason required for request_changes"}
     store.post_message(session["task_id"], session["role"], kind="result",
                        text=f"CHANGES REQUESTED: {reason}")
+    try:
+        task = store.get_task(session["task_id"])
+        if task:
+            marker = reviews.parse_review_marker(task["goal"])
+            if marker:
+                mergerequests.set_review_status(marker["mr_id"], "changes_requested")
+                if marker["origin_task"]:
+                    store.post_message(
+                        marker["origin_task"], author="system", kind="note",
+                        text=f"review verdict for {marker['mr_id']}: CHANGES REQUESTED — {reason}",
+                    )
+    except Exception:
+        logger.warning("review bookkeeping failed for request_changes on task %s", session["task_id"], exc_info=True)
     _end_worker(session)
     return {"ok": True, "verdict": "changes_requested"}
 
