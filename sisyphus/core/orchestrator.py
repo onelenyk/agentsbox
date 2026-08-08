@@ -556,7 +556,9 @@ def reconcile_on_boot() -> int:
             )
             emit(task["id"], "worker_finished")
             n += 1
-        elif thread:
+        else:
+            # Covers the empty-thread case too: a task created just before a
+            # crash has no messages yet and no event to wake it.
             emit(task["id"], "continue")
             n += 1
     return n
