@@ -10,6 +10,10 @@
         <button class="btn btn--primary" hx-get="/api/agents/new-form" hx-target="body" hx-swap="beforeend">+ Add Agent</button>
     </div>
 </div>
+<div id="workers-live" hx-get="/api/workers/live" hx-trigger="load, every 5s" hx-swap="innerHTML" class="panel">
+    <div class="panel__h"><span class="led live"></span><span class="t">Live now</span></div>
+    <div class="panel__b"><div class="empty">Loading...</div></div>
+</div>
 <div id="agents-list" hx-get="/api/agents/list" hx-trigger="load, agentsUpdated from:body" hx-swap="innerHTML">
     <div class="empty">Loading…</div>
 </div>
