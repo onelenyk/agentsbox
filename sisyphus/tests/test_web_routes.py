@@ -231,6 +231,44 @@ def test_board_hides_children_and_shows_parent_chip(db_path):
     assert "0/1" in r.text               # parent's subtask progress chip
 
 
+# ── Inbox (needs-you feed) ───────────────────────────────────────────────
+
+
+def test_inbox_shows_waiting_task_with_reply_form(db_path):
+    from core import store
+    task = store.create_task("needs an answer", repo="test-repo")
+    store.set_status(task["id"], "waiting")
+    store.post_message(task["id"], "orchestrator", kind="question", text="Which colour?")
+
+    r = _make_client().get("/api/inbox/view")
+    assert r.status_code == 200
+    assert "Needs you (1)" in r.text
+    assert "needs an answer" in r.text
+    assert "Which colour?" in r.text
+    # inline reply form posts to the existing messages endpoint
+    assert f"/api/tasks/{task['id']}/messages" in r.text
+
+
+def test_inbox_shows_done_task_with_open_mr_under_to_merge(db_path):
+    from core import store
+    task = store.create_task("mergeable work", repo="test-repo")
+    store.set_status(task["id"], "done")
+    mr = mergerequests.create_mr(task["id"], "test-repo", "feature/inbox", "main")
+
+    r = _make_client().get("/api/inbox/view")
+    assert r.status_code == 200
+    assert "To merge (1)" in r.text
+    assert "mergeable work" in r.text
+    assert "feature/inbox" in r.text
+    assert f"/api/mr/{mr['id']}/merge" in r.text
+
+
+def test_inbox_empty_state(db_path):
+    r = _make_client().get("/api/inbox/view")
+    assert r.status_code == 200
+    assert "Inbox zero" in r.text
+
+
 def test_external_event_renders_distinctly(db_path):
     """A forge webhook's [external] message stands out in the thread."""
     from core import store

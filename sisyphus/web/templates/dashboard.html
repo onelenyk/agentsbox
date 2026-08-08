@@ -17,6 +17,7 @@
     </form>
     <div id="cmd-result" style="margin-top:12px"></div>
 </div>
+<div id="inbox" hx-get="/api/inbox/view" hx-trigger="load, every 10s, taskUpdated from:body, inboxChanged" hx-swap="innerHTML"></div>
 <div id="dash" hx-get="/api/dashboard/view" hx-trigger="load, every 5s" hx-swap="innerHTML">
     <div class="empty">Loading…</div>
 </div>
