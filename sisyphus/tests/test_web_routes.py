@@ -387,3 +387,78 @@ def test_task_detail_shows_handling_agent(db_path):
     c = _make_client()
     assert "engineer (solo)" in c.get(f"/api/tasks/{solo['id']}/detail").text
     assert "orchestrator" in c.get(f"/api/tasks/{auto['id']}/detail").text
+
+
+# ── Command Bar: classify_command fallback ───────────────────────────────
+
+
+def test_classify_command_fallback_automation():
+    from core.ai_assist import classify_command
+    with patch("core.ai_assist.run_prompt", side_effect=RuntimeError("no runner")):
+        result = classify_command("run schema checks every day and report", [])
+    assert result["kind"] == "automation"
+
+
+def test_classify_command_fallback_mission():
+    from core.ai_assist import classify_command
+    long_text = (
+        "Redesign the entire authentication system.\n"
+        + "First, audit current endpoints.\n"
+        + "Then design new OAuth flow.\n"
+        + "Finally, migrate all users.\n"
+        + ("x" * 200)
+    )
+    with patch("core.ai_assist.run_prompt", side_effect=RuntimeError("no runner")):
+        result = classify_command(long_text, [])
+    assert result["kind"] == "mission"
+
+
+def test_classify_command_fallback_task():
+    from core.ai_assist import classify_command
+    with patch("core.ai_assist.run_prompt", side_effect=RuntimeError("no runner")):
+        result = classify_command("fix the login button color", [])
+    assert result["kind"] == "task"
+
+
+def test_classify_command_fallback_title_truncation():
+    from core.ai_assist import classify_command
+    very_long_line = "This is a very long first line that definitely exceeds eighty characters for sure"
+    with patch("core.ai_assist.run_prompt", side_effect=RuntimeError("no runner")):
+        result = classify_command(very_long_line, [])
+    assert len(result["title"]) <= 80
+    assert result["title"] == very_long_line[:80]
+
+
+# ── Command Bar: route tests ─────────────────────────────────────────────
+
+
+def test_command_classify_renders_card(db_path):
+    client = _make_client()
+    mock_result = {"kind": "task", "title": "Fix login", "goal": "fix login button", "repo": "", "cron": ""}
+    mock_repos = [{"name": "sisyphus", "source": "x", "branch": "main"}]
+    with patch("core.ai_assist.classify_command", return_value=mock_result):
+        with patch("core.repos.list_repos", return_value=mock_repos):
+            response = client.post("/api/command/classify", data={"text": "fix login"})
+    assert response.status_code == 200
+    assert "class=" in response.text
+    assert "cmd-badge" in response.text
+
+
+def test_command_create_task(db_path):
+    from core import store
+    client = _make_client()
+    with patch("core.orchestrator.emit") as mock_emit:
+        response = client.post("/api/command/create-task", data={
+            "goal": "command-created task",
+            "repo": "sisyphus",
+            "title": "My Task",
+        })
+    assert response.status_code == 200
+    redirect = response.headers.get("HX-Redirect", "")
+    assert redirect.startswith("/tasks/")
+    task_id = redirect.split("/tasks/")[1]
+    task = store.get_task(task_id)
+    assert task is not None
+    assert task["goal"] == "command-created task"
+    assert task["title"] == "My Task"
+    mock_emit.assert_called_once()
