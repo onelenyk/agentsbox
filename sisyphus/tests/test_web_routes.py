@@ -534,3 +534,51 @@ class TestReopenAndWorkingIndicator:
                            text="reviewer queued — waiting for a free worker slot")
         html = _make_client().get(f"/api/tasks/{t['id']}/detail").text
         assert "reviewer" in html and "queued" in html
+
+
+# ── Live workers endpoints ────────────────────────────────────────────
+
+
+class TestWorkersLive:
+    def test_shows_minted_session_role_and_instruction(self, db_path):
+        from core import sessions, store
+        sessions.clear()
+        task = store.create_task("live task")
+        sessions.mint(task["id"], "engineer", instruction="fix the bug", kind="worker")
+
+        r = _make_client().get("/api/workers/live")
+        assert r.status_code == 200
+        assert "engineer" in r.text
+        assert "fix the bug" in r.text
+        assert "worker" in r.text
+
+    def test_shows_empty_state_when_cleared(self, db_path):
+        from core import sessions
+        sessions.clear()
+
+        r = _make_client().get("/api/workers/live")
+        assert r.status_code == 200
+        assert "No agents running" in r.text
+
+    def test_token_never_in_response(self, db_path):
+        from core import sessions, store
+        sessions.clear()
+        task = store.create_task("secret task")
+        token = sessions.mint(task["id"], "reviewer", instruction="review")
+        s = sessions.resolve(token)
+        assert s is not None and s.get("token") == token
+
+        r = _make_client().get("/api/workers/live")
+        assert r.status_code == 200
+        assert token not in r.text
+
+    def test_decider_kind_badge_shown(self, db_path):
+        from core import sessions, store
+        sessions.clear()
+        task = store.create_task("decider task")
+        sessions.mint(task["id"], "orchestrator", instruction="deciding next step", kind="decider")
+
+        r = _make_client().get("/api/workers/live")
+        assert r.status_code == 200
+        assert "decider" in r.text
+        assert "orchestrator" in r.text
