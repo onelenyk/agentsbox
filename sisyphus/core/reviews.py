@@ -64,3 +64,4 @@ def parse_review_marker(goal: str) -> Optional[dict]:
         return None
     o = _ORIGIN_PAT.search(goal)
     return {"mr_id": m.group(1).strip(), "origin_task": o.group(1).strip() if o else ""}
+
