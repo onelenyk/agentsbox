@@ -105,6 +105,72 @@ def _find_json(out: str):
     return None
 
 
+def classify_command(text: str, repos: list) -> dict:
+    repo_names = [str(r) for r in repos] if repos else []
+    prompt = (
+        "You classify a user's plain-text command into one of three kinds. "
+        "Return ONLY a single JSON object, no prose and no code fences.\n\n"
+        "Kinds:\n"
+        "- task: a small, well-scoped coding job (fix a bug, add a small feature, write tests)\n"
+        "- mission: a multi-step, large-scope effort (redesign, migration, multiple deliverables, \"and then\", enumerated steps)\n"
+        "- automation: a recurring/reactive intent (\"щодня\", \"every day\", \"щоразу коли\", \"when X happens\", cron, webhook, scheduled)\n\n"
+        "Available repositories (use the EXACT name only if the text clearly refers "
+        "to one, else leave empty): " + (", ".join(repo_names) or "(none)") + "\n\n"
+        "User's command:\n\"\"\"\n" + text + "\n\"\"\"\n\n"
+        "Return ONLY this JSON structure:\n"
+        '{"kind": "task"|"mission"|"automation", "title": "short human title <=80 chars", "goal": "cleaned-up goal text", "repo": "exact repo name or empty", "cron": "cron string or empty (only for automation)"}'
+    )
+    try:
+        out = run_prompt(prompt, timeout=60)
+        obj = _find_json(out)
+        if isinstance(obj, dict) and "kind" in obj:
+            return {
+                "kind": obj.get("kind", "task"),
+                "title": str(obj.get("title", "") or "")[:80],
+                "goal": str(obj.get("goal", "") or "") or text,
+                "repo": str(obj.get("repo", "") or "").strip(),
+                "cron": str(obj.get("cron", "") or "").strip() if obj.get("kind") == "automation" else "",
+            }
+    except Exception:
+        logger.debug("classify_command: AI call failed, using fallback", exc_info=True)
+    return _classify_fallback(text)
+
+
+_AUTOMATION_KWS = ["every", "щодня", "щоночі", "webhook", "cron",
+                    "every day", "every week", "every month", "every hour",
+                    "each time", "щоразу", "whenever", "on schedule"]
+
+
+def _classify_fallback(text: str) -> dict:
+    t = text.strip()
+    t_lower = t.lower()
+
+    is_automation = any(kw in t_lower for kw in _AUTOMATION_KWS)
+    if is_automation:
+        kind = "automation"
+        cron = ""
+    elif len(t) > 200 or _has_enumerated_steps(t):
+        kind = "mission"
+    else:
+        kind = "task"
+
+    first_line = t.split("\n")[0].strip()
+    title = first_line[:80] if first_line else t[:80]
+
+    return {"kind": kind, "title": title, "goal": t, "repo": "", "cron": "" if kind != "automation" else ""}
+
+
+def _has_enumerated_steps(text: str) -> bool:
+    import re
+    for line in text.split("\n"):
+        line = line.strip()
+        if re.match(r"^\d+\.\s", line):
+            return True
+        if re.match(r"^[-*]\s", line):
+            return True
+    return False
+
+
 def _parse_out(out: str, repo_names, agent_names) -> dict:
     obj = _find_json(out)
     if not isinstance(obj, dict) or "goal" not in obj:
