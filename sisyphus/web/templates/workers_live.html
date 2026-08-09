@@ -1,0 +1,13 @@
+{% if sessions %}
+{% set icons = {'orchestrator':'🧭','engineer':'🔧','reviewer':'🔍','explorer':'🔭','planner':'🗺️'} %}
+{% for s in sessions %}
+{% set xtone = 'orchestrator' if s.kind == 'decider' else 'worker' %}
+<a class="live-row" href="/tasks/{{ s.task_id }}">
+    <div class="who"><span class="av av--sm av--{{ xtone }}" title="{{ s.role }}">{{ icons.get(s.role, '⚙️') }}</span><span class="led live"></span><span class="role">{{ s.role }}</span><span class="badge {{ 'badge--accent' if s.kind == 'decider' else '' }}">{{ s.kind }}</span></div>
+    <div class="goal">{{ s.task_title }} <small>· {{ s.instruction }}</small></div>
+    <div class="meta">{{ s.elapsed_mins }}m{% if s.model %} · {{ s.model }}{% endif %}{% if s.runner %} · {{ s.runner }}{% endif %}</div>
+</a>
+{% endfor %}
+{% else %}
+<div class="empty">No agents running.</div>
+{% endif %}
