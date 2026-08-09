@@ -18,9 +18,9 @@
             {% set tasks_group = ('tasks', 'plans') %}
             {% set system_group = ('agents', 'runners', 'repos', 'autopilots', 'stats', 'runtime', 'backups') %}
             <nav class="nav">
-                <a href="/dashboard" class="{{ 'active' if active_page == 'dashboard' else '' }}"><span class="ic">◫</span> Home</a>
-                <a href="/tasks" class="{{ 'active' if active_page in tasks_group else '' }}"><span class="ic">◇</span> Tasks</a>
-                <a href="/agents" class="{{ 'active' if active_page in system_group else '' }}"><span class="ic">⚙</span> System</a>
+                <a href="/dashboard" class="{{ 'active' if active_page == 'dashboard' else '' }}" title="Command bar · Inbox · live agents"><span class="ic">◫</span> Home</a>
+                <a href="/tasks" class="{{ 'active' if active_page in tasks_group else '' }}" title="Board · Planner"><span class="ic">◇</span> Tasks</a>
+                <a href="/agents" class="{{ 'active' if active_page in system_group else '' }}" title="Agents · Runners · Repos · Autopilot · Statistics · Daemon · Backups"><span class="ic">⚙</span> System</a>
             </nav>
             <div class="sys">
                 <div class="line"><span id="daemon-led" class="led live"></span> daemon <span id="daemon-val" class="val">live</span></div>
@@ -37,11 +37,11 @@
             {% elif active_page in system_group %}
             <div class="tabstrip">
                 <a href="/agents" class="{{ 'active' if active_page == 'agents' else '' }}">Agents</a>
-                <a href="/runners" class="{{ 'active' if active_page == 'runners' else '' }}">Runtimes</a>
+                <a href="/runners" class="{{ 'active' if active_page == 'runners' else '' }}">Runners</a>
                 <a href="/repos" class="{{ 'active' if active_page == 'repos' else '' }}">Repos</a>
                 <a href="/autopilots" class="{{ 'active' if active_page == 'autopilots' else '' }}">Autopilot</a>
                 <a href="/stats" class="{{ 'active' if active_page == 'stats' else '' }}">Statistics</a>
-                <a href="/runtime" class="{{ 'active' if active_page == 'runtime' else '' }}">Runtime</a>
+                <a href="/runtime" class="{{ 'active' if active_page == 'runtime' else '' }}">Daemon</a>
                 <a href="/backups" class="{{ 'active' if active_page == 'backups' else '' }}">Backups</a>
             </div>
             {% endif %}

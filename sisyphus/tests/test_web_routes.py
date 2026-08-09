@@ -622,7 +622,7 @@ class TestThreeDoorNav:
     def test_system_pages_show_tabstrip_and_active_door(self, db_path):
         html = _make_client().get("/repos").text
         assert 'class="tabstrip"' in html
-        for label in ("Agents", "Runtimes", "Repos", "Autopilot", "Statistics", "Runtime", "Backups"):
+        for label in ("Agents", "Runners", "Repos", "Autopilot", "Statistics", "Daemon", "Backups"):
             assert label in html
         nav = html.split('<nav class="nav">')[1].split("</nav>")[0]
         assert nav.count("active") == 1 and "System" in nav
