@@ -1,12 +1,23 @@
-<div class="board">
-    {% for col_key, col_icon, col_label, col_empty in [
-        ("in-progress", "⚙", "In progress", "Nothing in flight"),
-        ("needs-you", "✋", "Needs you", "Nobody needs you"),
-        ("to-merge", "⇄", "To merge", "No open MRs"),
-        ("shipped", "🚀", "Shipped", "Nothing shipped yet"),
-        ("done", "✓", "Done", "—"),
-        ("failed", "✗", "Failed", "No failures"),
-    ] %}
+{# Two zones with different visual weight: NOW (wide cards — things that move
+   or need a human) and HISTORY (quiet one-line rows). The board's job is the
+   picture at a glance; history must not shout as loud as live work. #}
+{% set now_cols = [
+    ("in-progress", "⚙", "In progress"),
+    ("needs-you", "✋", "Needs you"),
+    ("to-merge", "⇄", "To merge"),
+] %}
+{% set hist_cols = [
+    ("shipped", "🚀", "Shipped"),
+    ("done", "✓", "Done"),
+    ("failed", "✗", "Failed"),
+] %}
+{% set now_total = columns["in-progress"]|length + columns["needs-you"]|length + columns["to-merge"]|length %}
+
+{% if now_total == 0 %}
+<div class="board-quiet">All quiet — no work in flight, nothing needs you.</div>
+{% else %}
+<div class="board board--now">
+    {% for col_key, col_icon, col_label in now_cols %}
     <div class="board-col board-col--{{ col_key }}">
         <div class="board-col__head">
             <span class="label"><span class="col-ic">{{ col_icon }}</span>{{ col_label }}</span>
@@ -22,18 +33,39 @@
                 {% if t.snippet %}<div class="task-card__snippet">{{ t.snippet }}</div>{% endif %}
                 {% if t.question %}<div class="task-card__q">❓ {{ t.question }}</div>{% endif %}
                 <div class="task-card__meta">
-                    {% if t.repo %}<span class="badge">{{ t.repo }}</span>{% endif %}
-                    <span class="badge badge--mono">{{ t.id }}</span>
                     {% if t.child_total %}<span class="chip">⑂ {{ t.child_done }}/{{ t.child_total }}</span>{% endif %}
                     {% if t.review_status == 'pending' %}<span class="badge badge--mono">⏳ review</span>{% elif t.review_status == 'approved' %}<span class="badge" style="color:var(--good);background:var(--good-bg);border-color:var(--good-bd)">✓ reviewed</span>{% elif t.review_status == 'changes_requested' %}<span class="badge" style="color:var(--bad);background:var(--bad-bg);border-color:var(--bad-bd)">✗ changes requested</span>{% endif %}
+                    <span class="task-card__when reltime" data-created="{{ t.created_at }}"></span>
                 </div>
-                <div class="task-card__foot"><span class="reltime" data-created="{{ t.created_at }}"></span></div>
             </a>
             {% else %}
-            <div class="empty empty--col">{{ col_empty }}</div>
+            <div class="empty empty--col">—</div>
             {% endfor %}
         </div>
     </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="board board--history">
+    {% for col_key, col_icon, col_label in hist_cols %}
+    {% if columns[col_key] %}
+    <div class="board-col board-col--{{ col_key }} board-col--quiet">
+        <div class="board-col__head">
+            <span class="label"><span class="col-ic">{{ col_icon }}</span>{{ col_label }}</span>
+            <span class="count tnum">{{ columns[col_key]|length }}</span>
+        </div>
+        <div class="board-col__body board-col__body--rows">
+            {% for t in columns[col_key] %}
+            <a class="task-row" href="/tasks/{{ t.id }}" title="{{ t.id }}{% if t.repo %} · {{ t.repo }}{% endif %}">
+                <span class="task-row__title">{{ task_display_title(t) }}</span>
+                {% if t.review_status == 'approved' %}<span class="task-row__mark" style="color:var(--good)">✓</span>{% elif t.review_status == 'changes_requested' %}<span class="task-row__mark" style="color:var(--bad)">✗</span>{% endif %}
+                <span class="task-row__when reltime" data-created="{{ t.created_at }}"></span>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
     {% endfor %}
 </div>
 <script>
