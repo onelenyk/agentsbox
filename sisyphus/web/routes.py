@@ -619,6 +619,43 @@ async def agents_delete(name: str):
 
 # ── Tasks (Task+Thread system) ──────────────────────────────────────────
 
+def _enrich_now_card(t, mr, status):
+    """Rich-card data for the NOW zone: pipeline stage dots, the last dialogue
+    event, cost, and the pending question. One thread read per live card —
+    the NOW zone holds a handful of tasks, not the whole history."""
+    from core import store, usage
+
+    th = store.get_thread(t["id"])
+    has_commit = any(m["kind"] == "commit" for m in th)
+    reviewed = any(m["kind"] == "result" and m["author"] not in ("engineer", "human")
+                   and (m["text"].startswith("APPROVED") or m["text"].startswith("CHANGES REQUESTED"))
+                   for m in th)
+    merged = bool(mr and mr.get("status") == "merged")
+    t["stages"] = [
+        ("explore", bool(th)),
+        ("code", has_commit),
+        ("review", reviewed),
+        ("merge", merged),
+    ]
+    t["stage_now"] = next((name for name, done in t["stages"] if not done), "merge")
+
+    for m in reversed(th):
+        if store.message_lane(m) == "dialogue" and m["text"]:
+            txt = m["text"].split("\n", 1)[0]
+            t["last_event"] = (txt[:70] + "…") if len(txt) > 70 else txt
+            t["last_author"] = m["author"]
+            break
+
+    if status == "waiting":
+        qs = [m for m in th if m["kind"] == "question"]
+        if qs:
+            q = qs[-1]["text"]
+            t["question"] = (q[:90] + "…") if len(q) > 90 else q
+
+    cost = usage.task_usage(t["id"])["cost"]
+    t["cost"] = f"${cost:.2f}" if cost else None
+
+
 def board_column(task, mr):
     """Derived board column from task status + latest merge-request state."""
     status = task.get("status", "")
@@ -679,13 +716,9 @@ async def tasks_list_view(request: Request):
                 t["live_role"] = live["role"]
                 t["live_mins"] = live["elapsed_mins"]
 
-            if status == "waiting":
-                qs = [m for m in store.get_thread(t["id"]) if m["kind"] == "question"]
-                if qs:
-                    q = qs[-1]["text"]
-                    t["question"] = (q[:90] + "…") if len(q) > 90 else q
-
             col = board_column(t, mr)
+            if col in ("in-progress", "needs-you", "to-merge"):
+                _enrich_now_card(t, mr, status)
             columns[col].append(t)
     return _tmpl().TemplateResponse(request, "tasks_list.html", {"columns": columns})
 

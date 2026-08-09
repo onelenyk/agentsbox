@@ -676,8 +676,12 @@ class TestBoardCards:
         html = _make_client().get("/api/tasks/list").text
         assert "Which repo should I use?" in html
 
-    def test_snippet_renders_goal_body(self, db_path):
+    def test_now_card_shows_stagebar_and_last_event(self, db_path):
         from core import store
-        store.create_task("Title line\nThe body of the goal explains details")
+        t = store.create_task("Build the thing")
+        store.set_status(t["id"], "active")
+        store.post_message(t["id"], "engineer", kind="commit", text="feat: half done (abc123)")
         html = _make_client().get("/api/tasks/list").text
-        assert "The body of the goal explains details" in html
+        assert "stagebar" in html
+        assert "feat: half done" in html          # last dialogue event on the card
+        assert 'title="code"' in html             # stage dots labeled
