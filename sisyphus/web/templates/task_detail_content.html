@@ -73,24 +73,70 @@
     {% endfor %}
     {% endif %}
     {% set icons = {'orchestrator':'🧭','engineer':'🔧','reviewer':'🔍','explorer':'🔭','planner':'🗺️','human':'🧑'} %}
-    <div class="thread">
-        {% for m in messages %}
-        {% set tone = 'external' if m.kind == 'external' else ('human' if m.author == 'human' else ('orchestrator' if m.author == 'orchestrator' else 'worker')) %}
-        {% set icon = '🔔' if m.kind == 'external' else icons.get(m.author, '⚙️') %}
-        <div class="msg msg--{{ tone }}">
-            <div class="msg__head">
-                <span class="av av--{{ tone }}" title="{{ m.author }}">{{ icon }}</span>
-                <span class="msg__who">{{ m.author }}<span class="msg__kind">/{{ m.kind }}</span></span>
-                <span class="msg__time">{{ m.created_at[:19] }}</span>
-            </div>
-            <div class="msg__body">{{ m.text }}</div>
-            {% if m.attachment %}
-            <div class="msg__att">📎 <a href="#" hx-get="/api/tasks/{{ task.id }}/diff/{{ m.attachment }}" hx-target="#modal-container" hx-swap="innerHTML" onclick="return false">{{ m.attachment }}</a></div>
+
+    {# ── Two-lane thread ─────────────────────────────────────────────────
+       DIALOGUE messages render as styled bubbles; consecutive MACHINERY
+       messages (lifecycle noise — lane split lives in store.message_lane)
+       collapse into one thin <details> run, closed by default. hx-preserve
+       keeps a run's open/closed state across the 3s poll swap — its id is
+       keyed off the run's first message seq, stable across re-renders. #}
+    {# preserve=false for the TRAILING run of a live thread: hx-preserve keeps
+       the old element across poll swaps, which would freeze the one run that
+       is still growing. Completed runs (a dialogue message follows them) are
+       content-stable, so preserving their open/closed state is safe. #}
+    {% macro machinery_run(run, preserve=true) %}
+    <details class="msg-run" {% if preserve %}hx-preserve="true" {% endif %}id="run-{{ run[0].seq }}">
+        <summary>⚙ {{ run|length }} service message{{ '' if run|length == 1 else 's' }}</summary>
+        {% for r in run %}
+        <div class="row-line">[{{ r.author }}/{{ r.kind }}] {{ r.text }}</div>
+        {% endfor %}
+    </details>
+    {% endmacro %}
+
+    {% macro dialogue_msg(m, icons, task) %}
+    {% if m.kind == 'commit' %}
+    <div class="msg msg--commit">✓ {{ m.text }}</div>
+    {% else %}
+    {% set tone = 'external' if m.kind == 'external' else ('human' if m.author == 'human' else ('orchestrator' if m.author == 'orchestrator' else 'worker')) %}
+    {% set icon = '🔔' if m.kind == 'external' else icons.get(m.author, '⚙️') %}
+    <div class="msg msg--{{ tone }}">
+        <div class="msg__head">
+            <span class="av av--{{ tone }}" title="{{ m.author }}">{{ icon }}</span>
+            <span class="msg__who">{{ m.author }}<span class="msg__kind">/{{ m.kind }}</span></span>
+            {% if m.kind == 'result' and m.text.startswith('APPROVED') %}
+            <span class="badge badge--ok">APPROVED</span>
+            {% elif m.kind == 'result' and m.text.startswith('CHANGES REQUESTED') %}
+            <span class="badge badge--warn">CHANGES REQUESTED</span>
             {% endif %}
+            <span class="msg__time">{{ m.created_at[:19] }}</span>
         </div>
+        {# Markdown only for LLM-authored dialogue — human-typed text and
+           webhook payloads stay plain. #}
+        {% if m.author == 'human' or m.kind == 'external' %}
+        <div class="msg__body">{{ m.text }}</div>
+        {% else %}
+        <div class="msg__body msg__body--md">{{ m.text | md }}</div>
+        {% endif %}
+        {% if m.attachment %}
+        <div class="msg__att">📎 <a href="#" hx-get="/api/tasks/{{ task.id }}/diff/{{ m.attachment }}" hx-target="#modal-container" hx-swap="innerHTML" onclick="return false">{{ m.attachment }}</a></div>
+        {% endif %}
+    </div>
+    {% endif %}
+    {% endmacro %}
+
+    <div class="thread">
+        {% set ns = namespace(run=[]) %}
+        {% for m in messages %}
+        {% if message_lane(m) == 'machinery' %}
+        {% set ns.run = ns.run + [m] %}
+        {% else %}
+        {% if ns.run %}{{ machinery_run(ns.run) }}{% set ns.run = [] %}{% endif %}
+        {{ dialogue_msg(m, icons, task) }}
+        {% endif %}
         {% else %}
         <div class="empty">No messages yet.</div>
         {% endfor %}
+        {% if ns.run %}{{ machinery_run(ns.run, preserve=(task.status not in ('active', 'waiting'))) }}{% endif %}
     </div>
 
     <form id="reply-composer" hx-preserve="true" class="composer" hx-post="/api/tasks/{{ task.id }}/messages" hx-swap="none" onsubmit="setTimeout(() => this.reset(), 0)">

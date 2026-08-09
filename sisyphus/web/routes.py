@@ -9,14 +9,17 @@ from fastapi.templating import Jinja2Templates
 from core.db import init_db
 from core.config import get_config
 from core import mergerequests, sessions
+from web.markdown import render_md
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 def _tmpl():
-    from core.store import task_display_title
+    from core.store import task_display_title, message_lane
     tmpl = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
     tmpl.env.globals["task_display_title"] = task_display_title
+    tmpl.env.globals["message_lane"] = message_lane
+    tmpl.env.filters["md"] = render_md
     return tmpl
 
 _started = False
