@@ -19,8 +19,8 @@ _BOLD_RE = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*")           # **bold**
 # lone * (e.g. "3 * 4") never eats the rest of the line.
 _ITALIC_RE = re.compile(r"(?<![\w*])\*(?=[^\s*])([^*\n]+?)(?<=\S)\*(?![\w*])")
 _HEADING_RE = re.compile(r"^#{1,6}\s+(.+)$")                   # any # depth
-_UL_RE = re.compile(r"^-\s+(.+)$")                             # "- item"
-_OL_RE = re.compile(r"^\d+\.\s+(.+)$")                         # "1. item"
+_UL_RE = re.compile(r"^[-*+]\s+(.+)$")                         # "- item" / "* item"
+_OL_RE = re.compile(r"^(\d+)\.\s+(.+)$")                       # "1. item"
 _FENCE_SLOT_RE = re.compile(r"^\x00(\d+)\x00$")
 
 
@@ -67,12 +67,16 @@ def render_md(text) -> Markup:
             out.append("<p>" + "<br>".join(para) + "</p>")
             para.clear()
 
-    def _open_list(tag, item):
+    def _open_list(tag, item, start=None):
         nonlocal list_tag
         _flush_para()
         if list_tag != tag:
             _close_list()
-            out.append(f"<{tag}>")
+            # An ordered list interrupted by prose reopens as a NEW <ol>;
+            # carrying the source number over (start=) keeps "1. 2. 3." from
+            # rendering as three lists that each restart at 1.
+            attr = f' start="{start}"' if tag == "ol" and start and start != 1 else ""
+            out.append(f"<{tag}{attr}>")
             list_tag = tag
         out.append(f"<li>{item}</li>")
 
@@ -89,7 +93,7 @@ def render_md(text) -> Markup:
         elif ul:
             _open_list("ul", ul.group(1))
         elif ol:
-            _open_list("ol", ol.group(1))
+            _open_list("ol", ol.group(2), start=int(ol.group(1)))
         elif not line.strip():                     # blank → paragraph break
             _flush_para(); _close_list()
         else:                                      # plain text line
