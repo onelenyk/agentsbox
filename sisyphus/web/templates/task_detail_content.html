@@ -6,7 +6,17 @@
     <div class="panel__head">
         <div style="flex:1 1 auto; min-width:0">
             <h2>{{ task_display_title(task) }}</h2>
+            {# A short goal shows in full; a long spec collapses behind a
+               toggle so the page leads with the result, not a wall of text.
+               hx-preserve keeps the open state across the 3s poll. #}
+            {% if task.goal|length <= 300 %}
             <div class="task-goal-full">{{ task.goal }}</div>
+            {% else %}
+            <details class="goal-fold" hx-preserve="true" id="goal-fold">
+                <summary><span class="goal-fold__preview">{{ task.goal[:220] }}… </span><span class="goal-fold__more">show full goal</span><span class="goal-fold__less">hide full goal</span></summary>
+                <div class="task-goal-full">{{ task.goal }}</div>
+            </details>
+            {% endif %}
         </div>
         <div class="row" style="flex-shrink:0">
             <span class="status status--{{ task.status }}">{{ task.status }}</span>
@@ -30,7 +40,7 @@
     {% if result and (result.summary or result.change or result.commits) %}
     <div class="result">
         <div class="result__label">Result</div>
-        {% if result.summary %}<div class="result__summary">{{ result.summary }}</div>{% endif %}
+        {% if result.summary %}<div class="result__summary msg__body--md">{{ result.summary | md }}</div>{% endif %}
         {% if result.change %}
         <div style="margin-bottom:10px">
             {% if result.change.url %}

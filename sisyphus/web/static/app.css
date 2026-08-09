@@ -294,6 +294,18 @@ body::before {
 }
 .result__label { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
 .result__summary { font-size: 14px; white-space: pre-wrap; margin-bottom: 12px; }
+
+/* long task goals fold behind a toggle so the page leads with the result */
+.goal-fold > summary {
+  cursor: pointer; list-style: none; font-size: 13px; color: var(--text-2);
+  line-height: 1.5; word-break: break-word;
+}
+.goal-fold > summary::-webkit-details-marker { display: none; }
+.goal-fold__more, .goal-fold__less { color: var(--accent-hi); font-size: 12px; white-space: nowrap; }
+.goal-fold__less { display: none; }
+.goal-fold[open] .goal-fold__preview { display: none; }
+.goal-fold[open] .goal-fold__more { display: none; }
+.goal-fold[open] .goal-fold__less { display: inline; }
 .result__commits { font-family: var(--mono); font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
 
 /* subtasks */
