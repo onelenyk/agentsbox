@@ -321,7 +321,12 @@ async def spawn_worker(
         worktree_path = f"{ws}/scratch/{task_id}"
         os.makedirs(worktree_path, exist_ok=True)
 
-    token = sessions.mint(task_id, role, worktree=worktree_path)
+    instruction_first_line = instruction.split("\n")[0][:120]
+    token = sessions.mint(task_id, role, worktree=worktree_path,
+                          instruction=instruction_first_line,
+                          model=model_override or "",
+                          runner=runner_name or "",
+                          kind="worker")
     _write_opencode_config(worktree_path, token)
 
     store.post_message(
@@ -412,7 +417,11 @@ async def spawn_decider(task_id: str, agent_name: str, thread_text: str,
     ws = os.environ.get("WORKSPACE_ROOT", "/workspace")
     scratch = f"{ws}/scratch/{task_id}-orch"
     os.makedirs(scratch, exist_ok=True)
-    token = sessions.mint(task_id, agent_name, worktree=scratch)
+    token = sessions.mint(task_id, agent_name, worktree=scratch,
+                          instruction="deciding next step",
+                          model=model_override or "",
+                          runner=runner_name or "",
+                          kind="decider")
     _write_opencode_config(scratch, token)
 
     roster = [a["name"] for a in agents.list_agents(kind="worker") if a.get("enabled", 1)]
