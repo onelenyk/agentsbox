@@ -91,6 +91,11 @@ async def startup():
 async def root():
     return HTMLResponse('<meta http-equiv="refresh" content="0;url=/dashboard">')
 
+@router.get("/system", response_class=HTMLResponse)
+async def system_page():
+    """The System door in the 3-item nav — lands on its first tab."""
+    return HTMLResponse('<meta http-equiv="refresh" content="0;url=/agents">')
+
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard_page(request: Request):
     return _tmpl().TemplateResponse(request, "dashboard.html", {"active_page": "dashboard"})
@@ -1105,11 +1110,12 @@ async def task_detail_view(request: Request, task_id: str):
     # Live "what is happening right now" for the header: a worker running or
     # queued, with elapsed minutes — the thread is silent while an agent works,
     # which reads as "stuck" without this.
+    from datetime import datetime, timezone
+
     working = None
     if task["status"] == "active" and messages:
         last = messages[-1]
         if last["kind"] in ("worker_started", "worker_queued"):
-            from datetime import datetime, timezone
             try:
                 started = datetime.fromisoformat(last["created_at"])
                 mins = int((datetime.now(timezone.utc) - started).total_seconds() // 60)
@@ -1120,10 +1126,26 @@ async def task_detail_view(request: Request, task_id: str):
             label = "working" if last["kind"] == "worker_started" else "queued for a slot"
             working = {"role": role, "label": label, "mins": mins}
 
+    # Nothing running? Show what JUST ended for a few minutes — otherwise a
+    # worker finishing makes the indicator vanish mid-glance and a refresh
+    # reads as "did anything happen at all?".
+    finished = None
+    if working is None:
+        for m in reversed(messages):
+            if m["kind"] == "worker_finished":
+                try:
+                    ended = datetime.fromisoformat(m["created_at"])
+                    mins = int((datetime.now(timezone.utc) - ended).total_seconds() // 60)
+                except Exception:  # noqa: BLE001
+                    break
+                if mins <= 5:
+                    finished = {"text": m["text"], "mins": mins}
+                break
+
     live_sessions = sessions.list_for_task(task_id)
 
     return _tmpl().TemplateResponse(request, "task_detail_content.html", {
-        "task": task, "messages": messages, "working": working,
+        "task": task, "messages": messages, "working": working, "finished": finished,
         "live_sessions": _enrich_sessions(live_sessions),
         "result": store.result_view(task_id),
         "children": store.list_children(task_id),

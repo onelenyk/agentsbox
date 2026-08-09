@@ -605,3 +605,50 @@ class TestWorkersLive:
         assert r.status_code == 200
         assert "decider" in r.text
         assert "orchestrator" in r.text
+
+
+class TestThreeDoorNav:
+    def test_sidebar_has_exactly_three_doors(self, db_path):
+        html = _make_client().get("/dashboard").text
+        nav = html.split('<nav class="nav">')[1].split("</nav>")[0]
+        assert nav.count("<a ") == 3
+        for label in ("Home", "Tasks", "System"):
+            assert label in nav
+
+    def test_system_redirects_to_first_tab(self, db_path):
+        r = _make_client().get("/system")
+        assert "url=/agents" in r.text
+
+    def test_system_pages_show_tabstrip_and_active_door(self, db_path):
+        html = _make_client().get("/repos").text
+        assert 'class="tabstrip"' in html
+        for label in ("Agents", "Runtimes", "Repos", "Autopilot", "Statistics", "Runtime", "Backups"):
+            assert label in html
+        nav = html.split('<nav class="nav">')[1].split("</nav>")[0]
+        assert nav.count("active") == 1 and "System" in nav
+
+    def test_tasks_pages_show_board_planner_tabs(self, db_path):
+        html = _make_client().get("/tasks").text
+        assert 'class="tabstrip"' in html
+        assert ">Board</a>" in html and ">Planner</a>" in html
+
+    def test_dashboard_has_no_tabstrip(self, db_path):
+        assert 'class="tabstrip"' not in _make_client().get("/dashboard").text
+
+
+class TestFinishedGraceBadge:
+    def test_recent_worker_finished_shows_grace_badge(self, db_path):
+        from core import store
+        t = store.create_task("g")
+        store.set_status(t["id"], "active")
+        store.post_message(t["id"], "system", kind="worker_started", text="spawning engineer: x")
+        store.post_message(t["id"], "system", kind="worker_finished", text="engineer finished")
+        html = _make_client().get(f"/api/tasks/{t['id']}/detail").text
+        assert "engineer finished" in html and "m ago" in html
+
+    def test_no_grace_badge_while_worker_runs(self, db_path):
+        from core import store
+        t = store.create_task("g")
+        store.set_status(t["id"], "active")
+        store.post_message(t["id"], "system", kind="worker_started", text="spawning engineer: x")
+        assert "m ago" not in _make_client().get(f"/api/tasks/{t['id']}/detail").text

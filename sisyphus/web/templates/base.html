@@ -12,19 +12,15 @@
     <div class="app">
         <aside class="sidebar">
             <div class="brand"><span class="bolt">⚡</span> Sisyphus <small>v2</small></div>
+            {# Three doors, by frequency of use. Deep pages keep their own URLs
+               and become tabs (see the tabstrip below), so nothing is lost —
+               it just stops occupying the eye. #}
+            {% set tasks_group = ('tasks', 'plans') %}
+            {% set system_group = ('agents', 'runners', 'repos', 'autopilots', 'stats', 'runtime', 'backups') %}
             <nav class="nav">
-                <div class="sec">Operate</div>
-                <a href="/dashboard" class="{{ 'active' if active_page == 'dashboard' else '' }}"><span class="ic">◫</span> Dashboard</a>
-                <a href="/tasks" class="{{ 'active' if active_page == 'tasks' else '' }}"><span class="ic">◇</span> Tasks</a>
-                <a href="/plans" class="{{ 'active' if active_page == 'plans' else '' }}"><span class="ic">🗺</span> Planner</a>
-                <a href="/autopilots" class="{{ 'active' if active_page == 'autopilots' else '' }}"><span class="ic">⚡</span> Autopilot</a>
-                <a href="/stats" class="{{ 'active' if active_page == 'stats' else '' }}"><span class="ic">▤</span> Statistics</a>
-                <div class="sec">Configure</div>
-                <a href="/agents" class="{{ 'active' if active_page == 'agents' else '' }}"><span class="ic">✦</span> Agents</a>
-                <a href="/runners" class="{{ 'active' if active_page == 'runners' else '' }}"><span class="ic">▸</span> Runtimes</a>
-                <a href="/repos" class="{{ 'active' if active_page == 'repos' else '' }}"><span class="ic">⌥</span> Repos</a>
-                <a href="/runtime" class="{{ 'active' if active_page == 'runtime' else '' }}"><span class="ic">⚙</span> Runtime</a>
-                <a href="/backups" class="{{ 'active' if active_page == 'backups' else '' }}"><span class="ic">⧉</span> Backups</a>
+                <a href="/dashboard" class="{{ 'active' if active_page == 'dashboard' else '' }}"><span class="ic">◫</span> Home</a>
+                <a href="/tasks" class="{{ 'active' if active_page in tasks_group else '' }}"><span class="ic">◇</span> Tasks</a>
+                <a href="/agents" class="{{ 'active' if active_page in system_group else '' }}"><span class="ic">⚙</span> System</a>
             </nav>
             <div class="sys">
                 <div class="line"><span id="daemon-led" class="led live"></span> daemon <span id="daemon-val" class="val">live</span></div>
@@ -33,6 +29,22 @@
             </div>
         </aside>
         <main class="main">
+            {% if active_page in tasks_group %}
+            <div class="tabstrip">
+                <a href="/tasks" class="{{ 'active' if active_page == 'tasks' else '' }}">Board</a>
+                <a href="/plans" class="{{ 'active' if active_page == 'plans' else '' }}">Planner</a>
+            </div>
+            {% elif active_page in system_group %}
+            <div class="tabstrip">
+                <a href="/agents" class="{{ 'active' if active_page == 'agents' else '' }}">Agents</a>
+                <a href="/runners" class="{{ 'active' if active_page == 'runners' else '' }}">Runtimes</a>
+                <a href="/repos" class="{{ 'active' if active_page == 'repos' else '' }}">Repos</a>
+                <a href="/autopilots" class="{{ 'active' if active_page == 'autopilots' else '' }}">Autopilot</a>
+                <a href="/stats" class="{{ 'active' if active_page == 'stats' else '' }}">Statistics</a>
+                <a href="/runtime" class="{{ 'active' if active_page == 'runtime' else '' }}">Runtime</a>
+                <a href="/backups" class="{{ 'active' if active_page == 'backups' else '' }}">Backups</a>
+            </div>
+            {% endif %}
             {% block content %}{% endblock %}
         </main>
     </div>
