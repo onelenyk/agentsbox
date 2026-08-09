@@ -295,6 +295,8 @@ body::before {
 .result__label { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
 .result__summary { font-size: 14px; white-space: pre-wrap; margin-bottom: 12px; }
 
+.task-goal-full { font-size: 13px; color: var(--text-2); margin-top: 4px; }
+
 /* long task goals fold behind a toggle so the page leads with the result */
 .goal-fold > summary {
   cursor: pointer; list-style: none; font-size: 13px; color: var(--text-2);

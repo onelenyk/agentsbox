@@ -10,11 +10,11 @@
                toggle so the page leads with the result, not a wall of text.
                hx-preserve keeps the open state across the 3s poll. #}
             {% if task.goal|length <= 300 %}
-            <div class="task-goal-full">{{ task.goal }}</div>
+            <div class="task-goal-full msg__body--md">{{ task.goal | md }}</div>
             {% else %}
             <details class="goal-fold" hx-preserve="true" id="goal-fold">
                 <summary><span class="goal-fold__preview">{{ task.goal[:220] }}… </span><span class="goal-fold__more">show full goal</span><span class="goal-fold__less">hide full goal</span></summary>
-                <div class="task-goal-full">{{ task.goal }}</div>
+                <div class="task-goal-full msg__body--md">{{ task.goal | md }}</div>
             </details>
             {% endif %}
         </div>
