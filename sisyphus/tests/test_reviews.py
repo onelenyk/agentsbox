@@ -1,0 +1,99 @@
+"""Tests for core/reviews.py — the auto-review hook module."""
+import pytest
+
+from core import mergerequests, reviews, store
+
+
+def _mr(task_id="task-x", **kw):
+    kw.setdefault("repo", "test-repo")
+    kw.setdefault("source_branch", "feature/x")
+    kw.setdefault("target_branch", "main")
+    kw.setdefault("title", "Test MR")
+    return mergerequests.create_mr(task_id=task_id, **kw)
+
+
+class TestEnsureReviewTask:
+    def test_creates_pinned_mr_reviewer_task(self, db_path):
+        mr = _mr()
+        task = reviews.ensure_review_task(mr)
+        assert task is not None
+        assert task["agent"] == "mr-reviewer"
+        assert task["repo"] == "test-repo"
+        assert f"Review-of-MR: {mr['id']}" in task["goal"]
+        assert f"Origin-task: {mr['task_id']}" in task["goal"]
+
+    def test_dedup_second_call_returns_none(self, db_path):
+        mr = _mr()
+        t1 = reviews.ensure_review_task(mr)
+        assert t1 is not None
+        t2 = reviews.ensure_review_task(mr)
+        assert t2 is None
+
+    def test_allows_new_after_old_is_terminal(self, db_path):
+        mr = _mr()
+        t1 = reviews.ensure_review_task(mr)
+        assert t1 is not None
+        store.set_status(t1["id"], "done")
+        t2 = reviews.ensure_review_task(mr)
+        assert t2 is not None
+        assert t2["id"] != t1["id"]
+
+    def test_allows_new_after_old_failed(self, db_path):
+        mr = _mr()
+        t1 = reviews.ensure_review_task(mr)
+        assert t1 is not None
+        store.set_status(t1["id"], "failed")
+        t2 = reviews.ensure_review_task(mr)
+        assert t2 is not None
+        assert t2["id"] != t1["id"]
+
+
+class TestParseReviewMarker:
+    def test_roundtrip(self, db_path):
+        goal = (
+            "Review-of-MR: mr-abc123\n"
+            "Origin-task: task-xyz789\n"
+            "\n"
+            "Review this MR. Use get_mr_diff, then approve or request_changes.\n"
+        )
+        marker = reviews.parse_review_marker(goal)
+        assert marker is not None
+        assert marker["mr_id"] == "mr-abc123"
+        assert marker["origin_task"] == "task-xyz789"
+
+    def test_returns_none_on_ordinary_goal(self, db_path):
+        goal = "Fix the login bug in auth module"
+        assert reviews.parse_review_marker(goal) is None
+
+    def test_returns_none_on_empty(self, db_path):
+        assert reviews.parse_review_marker("") is None
+
+    def test_returns_none_on_missing_origin(self, db_path):
+        goal = "Review-of-MR: mr-abc123\n\nJust review this MR."
+        marker = reviews.parse_review_marker(goal)
+        assert marker is not None
+        assert marker["mr_id"] == "mr-abc123"
+        assert marker["origin_task"] == ""
+
+
+class TestMergeRequestsMigration:
+    def test_review_status_migration_is_idempotent(self, db_path):
+        mergerequests.init_mr_table()
+        mergerequests.init_mr_table()
+
+        from core.db import get_conn
+        conn = get_conn()
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(merge_requests)").fetchall()}
+        conn.close()
+        assert "review_status" in cols
+
+    def test_set_review_status_works(self, db_path):
+        mr = _mr()
+        mergerequests.set_review_status(mr["id"], "approved")
+        got = mergerequests.get_mr(mr["id"])
+        assert got["review_status"] == "approved"
+
+    def test_set_review_status_null_by_default(self, db_path):
+        mr = _mr()
+        got = mergerequests.get_mr(mr["id"])
+        assert got["review_status"] is None
