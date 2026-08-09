@@ -348,3 +348,35 @@ class TestCleanupSalvage:
 
         attachments_dir = tmp_path / "tasks" / task["id"] / "attachments"
         assert not attachments_dir.exists() or not list(attachments_dir.iterdir())
+
+
+class TestCleanupRetainsRunLogs:
+    def test_run_logs_survive_normal_cleanup(self, db_path, tmp_path, monkeypatch):
+        # Run logs are the only forensic record of what a worker did — a
+        # terminal-status cleanup must keep them (only deep delete reclaims).
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+        task = store.create_task("keep my logs")
+        run_dir = tmp_path / "runs" / task["id"] / "logs"
+        run_dir.mkdir(parents=True)
+        (run_dir / "engineer.log").write_text("evidence")
+
+        cleanup_task(task["id"])
+        assert (run_dir / "engineer.log").is_file()
+
+        cleanup_task(task["id"], deep=True)
+        assert not (tmp_path / "runs" / task["id"]).exists()
+
+
+class TestSetAccessWriteAlias:
+    def test_write_level_actually_chmods(self, tmp_path):
+        # core.worker calls set_access(path, "write"); an unknown level is a
+        # silent no-op, so "write" must be a real mode (alias of "edit").
+        import os as _os
+        from core.worktree import set_access
+
+        d = tmp_path / "wt"; d.mkdir()
+        f = d / "a.txt"; f.write_text("x")
+        f.chmod(0o444)
+
+        set_access(str(d), "write")
+        assert _os.access(str(f), _os.W_OK), "file left read-only — 'write' was a no-op"
