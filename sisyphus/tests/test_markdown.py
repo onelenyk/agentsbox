@@ -88,3 +88,13 @@ class TestNoLinks:
         html = str(render_md("see https://example.com/page"))
         assert "<a" not in html
         assert "https://example.com/page" in html
+
+
+def test_star_bullets_render_as_list():
+    html = str(render_md("* one\n* two"))
+    assert "<ul>" in html and html.count("<li>") == 2
+
+
+def test_interrupted_ordered_list_keeps_numbering():
+    html = str(render_md("1. first\n\nprose between\n\n2. second"))
+    assert '<ol start="2">' in html
