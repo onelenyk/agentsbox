@@ -564,3 +564,16 @@ def test_open_mr_fires_review_hook(db_path):
                     if t.get("agent") == "mr-reviewer"
                     and f"Review-of-MR: {published_mr_id}" in t["goal"]]
     assert len(review_tasks) == 1
+
+
+def test_second_decision_in_one_pass_is_rejected(db_path):
+    """Exactly one decision per decider pass: the first wins, a second decide_*
+    call errors instead of silently overwriting (live incident task-1e23e9e8:
+    three overwriting spawns ended as a bogus ask_human)."""
+    _, token = _session(db_path, "orchestrator")
+    first = _call(_client(), token, "decide_spawn_worker",
+                  {"agent": "engineer", "instruction": "fix it", "why": "start"})
+    assert first["result"]["isError"] is False
+    second = _call(_client(), token, "decide_ask_human", {"question": "help?"})
+    assert second["result"]["isError"] is True
+    assert sessions.resolve(token)["decision"]["action"] == "spawn_worker"

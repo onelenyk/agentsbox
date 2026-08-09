@@ -167,8 +167,17 @@ def _approve(session, summary="", **_):
 
 
 def _record(session, decision: dict):
+    # Exactly ONE decision per pass, enforced. Without this the decider can
+    # call decide_* repeatedly in one session — each call silently overwrote
+    # the last, {ok:true} read as "it happened", and the model spiraled into
+    # "I spawned 3 workers and nothing appeared" → ask_human (live incident,
+    # task-1e23e9e8). First decision wins; later calls get a hard error.
+    if session.get("decision") is not None:
+        return {"error": "decision already recorded for this pass — it executes "
+                         "AFTER your session ends. Do not call another decide_* "
+                         "tool; end your turn now."}
     session["decision"] = decision
-    return {"ok": True}
+    return {"ok": True, "note": "decision recorded; it executes after this session ends — end your turn"}
 
 
 def _decide_spawn_worker(session, agent="", instruction="", why="", **_):
