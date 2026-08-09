@@ -199,6 +199,21 @@ def init_mr_table() -> None:
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_mr_task ON merge_requests(task_id)")
+
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(merge_requests)").fetchall()}
+    if "review_status" not in cols:
+        conn.execute("ALTER TABLE merge_requests ADD COLUMN review_status TEXT")
+
+    conn.commit()
+    conn.close()
+
+
+def set_review_status(mr_id: str, review_status: str) -> None:
+    conn = get_conn()
+    conn.execute(
+        "UPDATE merge_requests SET review_status = ?, updated_at = ? WHERE id = ?",
+        (review_status, _now(), mr_id),
+    )
     conn.commit()
     conn.close()
 

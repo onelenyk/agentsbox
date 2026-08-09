@@ -462,3 +462,105 @@ def test_list_mrs_requires_session(db_path):
     out = _call(_client(), None, "list_mrs")
     assert out["id"] == 1
     assert "error" in out
+
+
+# ── review task cross-posting ───────────────────────────────────────────
+
+
+def test_approve_on_review_task_sets_review_status_and_crossposts(db_path):
+    from core import mergerequests, reviews, sessions
+
+    origin = store.create_task("build feature X", repo="sisyphus", agent="engineer")
+    mr = mergerequests.create_mr(
+        task_id=origin["id"], repo="sisyphus",
+        source_branch="sisyphus/feat", target_branch="main",
+        title="Add feature X",
+    )
+    review = reviews.ensure_review_task(mr)
+    assert review is not None
+
+    sessions.clear()
+    token = sessions.mint(review["id"], "reviewer")
+    out = _call(_client(), token, "approve", {"summary": "looks great"})
+    assert out["result"]["isError"] is False
+
+    got = mergerequests.get_mr(mr["id"])
+    assert got["review_status"] == "approved"
+
+    origin_thread = store.get_thread(origin["id"])
+    notes = [m for m in origin_thread if m["author"] == "system" and m["kind"] == "note"]
+    assert any("APPROVED" in m["text"] and "looks great" in m["text"] for m in notes)
+
+
+def test_request_changes_on_review_task_sets_review_status_and_crossposts(db_path):
+    from core import mergerequests, reviews, sessions
+
+    origin = store.create_task("build feature Y", repo="sisyphus", agent="engineer")
+    mr = mergerequests.create_mr(
+        task_id=origin["id"], repo="sisyphus",
+        source_branch="sisyphus/feat2", target_branch="main",
+        title="Add feature Y",
+    )
+    review = reviews.ensure_review_task(mr)
+    assert review is not None
+
+    sessions.clear()
+    token = sessions.mint(review["id"], "reviewer")
+    out = _call(_client(), token, "request_changes", {"reason": "needs tests"})
+    assert out["result"]["isError"] is False
+
+    got = mergerequests.get_mr(mr["id"])
+    assert got["review_status"] == "changes_requested"
+
+    origin_thread = store.get_thread(origin["id"])
+    notes = [m for m in origin_thread if m["author"] == "system" and m["kind"] == "note"]
+    assert any("CHANGES REQUESTED" in m["text"] and "needs tests" in m["text"] for m in notes)
+
+
+def test_open_mr_fires_review_hook(db_path):
+    from core import mergerequests, reviews, sessions
+
+    sessions.clear()
+    task = store.create_task("build Z", repo="sisyphus")
+    token = sessions.mint(task["id"], "engineer")
+    c = _client()
+
+    from unittest.mock import patch
+
+    published_mr_id = None
+
+    def _pub(session, title, desc):
+        nonlocal published_mr_id
+        from core import attachments
+        attachments.save_text(session["task_id"], "change.patch", "diff content\n")
+        existing = mergerequests.find_open_mr(
+            session["task_id"], "sisyphus/task-1", "main")
+        if existing:
+            mr = mergerequests.update_mr(existing["id"], title=title)
+        else:
+            mr = mergerequests.create_mr(
+                task_id=session["task_id"], repo="test-repo",
+                source_branch="sisyphus/task-1", target_branch="main",
+                title=title, bare_path="/tmp/bare",
+                base_branch="main", source_path="/tmp/src",
+            )
+        published_mr_id = mr["id"]
+        return {"ok": True, "platform": "local", "branch": "sisyphus/task-1",
+                "stat": " file.py | 1 +", "patch_file": "change.patch",
+                "mr_id": mr["id"]}
+
+    with patch("core.git_ops.is_git_repo", return_value=True), \
+         patch("core.git_ops.commit_all", return_value="a" * 40):
+        _call(c, token, "commit", {"message": "fix: review hook"})
+
+    with patch("core.providers.publish_change", side_effect=_pub):
+        ok = _call(c, token, "open_mr", {"title": "Review Hook Test"})
+    assert ok["result"]["isError"] is False
+
+    mr = mergerequests.get_mr(published_mr_id)
+    assert mr["review_status"] == "pending"
+
+    review_tasks = [t for t in store.list_tasks()
+                    if t.get("agent") == "mr-reviewer"
+                    and f"Review-of-MR: {published_mr_id}" in t["goal"]]
+    assert len(review_tasks) == 1

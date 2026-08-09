@@ -13,6 +13,7 @@
                     {% if t.repo %}<span class="badge">{{ t.repo }}</span>{% endif %}
                     <span class="badge badge--mono">{{ t.id }}</span>
                     {% if t.child_total %}<span class="chip">⑂ {{ t.child_done }}/{{ t.child_total }}</span>{% endif %}
+                    {% if t.review_status == 'pending' %}<span class="badge badge--mono">⏳ review</span>{% elif t.review_status == 'approved' %}<span class="badge" style="color:var(--good);background:var(--good-bg);border-color:var(--good-bd)">✓ reviewed</span>{% elif t.review_status == 'changes_requested' %}<span class="badge" style="color:var(--bad);background:var(--bad-bg);border-color:var(--bad-bd)">✗ changes requested</span>{% endif %}
                 </div>
                 <div class="task-card__foot"><span class="reltime" data-created="{{ t.created_at }}"></span></div>
             </a>
