@@ -652,3 +652,32 @@ class TestFinishedGraceBadge:
         store.set_status(t["id"], "active")
         store.post_message(t["id"], "system", kind="worker_started", text="spawning engineer: x")
         assert "m ago" not in _make_client().get(f"/api/tasks/{t['id']}/detail").text
+
+
+class TestBoardCards:
+    def test_live_card_shows_working_pulse(self, db_path):
+        from core import sessions, store
+        sessions.clear()
+        t = store.create_task("goal line\nmore detail here")
+        store.set_status(t["id"], "active")
+        sessions.mint(t["id"], "engineer", instruction="do x", kind="worker")
+        try:
+            html = _make_client().get("/api/tasks/list").text
+        finally:
+            sessions.clear()
+        assert "task-card--live" in html
+        assert "engineer working" in html
+
+    def test_waiting_card_shows_question(self, db_path):
+        from core import store
+        t = store.create_task("g")
+        store.post_message(t["id"], "orchestrator", kind="question", text="Which repo should I use?")
+        store.set_status(t["id"], "waiting")
+        html = _make_client().get("/api/tasks/list").text
+        assert "Which repo should I use?" in html
+
+    def test_snippet_renders_goal_body(self, db_path):
+        from core import store
+        store.create_task("Title line\nThe body of the goal explains details")
+        html = _make_client().get("/api/tasks/list").text
+        assert "The body of the goal explains details" in html

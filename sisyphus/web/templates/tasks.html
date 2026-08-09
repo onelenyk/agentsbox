@@ -11,7 +11,7 @@
         <button class="btn btn--primary" hx-get="/api/tasks/new-form" hx-target="#modal-container">+ New Task</button>
     </div>
 </div>
-<div id="tasks-list" hx-get="/api/tasks/list" hx-trigger="load, taskCreated from:body, taskUpdated from:body" hx-swap="innerHTML">
+<div id="tasks-list" hx-get="/api/tasks/list" hx-trigger="load, taskCreated from:body, taskUpdated from:body, every 7s" hx-swap="innerHTML">
     <div class="empty">Loading…</div>
 </div>
 
