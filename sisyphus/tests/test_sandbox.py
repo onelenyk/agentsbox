@@ -38,9 +38,24 @@ def test_wrap_prefixes_sandbox_exec_when_enabled(monkeypatch, tmp_path):
     assert (tmp_path / "sandbox.sb").exists()
 
 
+def _sandbox_can_apply() -> bool:
+    """Seatbelt cannot nest: inside an existing sandbox-exec, sandbox_apply is
+    refused by the kernel. Probe with a trivial allow-all profile so the
+    enforcement test SKIPS in that environment instead of failing with a
+    misleading 'workspace write was blocked' assertion (workers running this
+    suite under the daemon's sandbox hit exactly that)."""
+    r = subprocess.run(
+        ["/usr/bin/sandbox-exec", "-p", "(version 1)(allow default)", "/usr/bin/true"],
+        capture_output=True, text=True,
+    )
+    return r.returncode == 0
+
+
 @pytest.mark.skipif(platform.system() != "Darwin" or not os.path.exists("/usr/bin/sandbox-exec"),
                     reason="Seatbelt only on macOS")
 def test_enforcement_blocks_protected_write_allows_workspace(tmp_path):
+    if not _sandbox_can_apply():
+        pytest.skip("nested sandbox — sandbox_apply refused, enforcement can't be probed here")
     """The real proof: under the profile a write into the workspace succeeds and
     a write into a protected 'repo source' is refused by the kernel — even though
     the workspace lives inside that same protected tree."""

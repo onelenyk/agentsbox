@@ -65,8 +65,11 @@ def cleanup_task(task_id: str, deep: bool = False) -> None:
     (its only registrar) is removed in the same sweep.
 
     *deep* (task deletion only) also removes the durable attachments/diff store
-    under tasks/<id>. It's kept for done/failed tasks so the change patch stays
-    retrievable, and only wiped when the task itself is deleted."""
+    under tasks/<id> and the run logs under runs/<id>. Both are kept for
+    done/failed tasks — the change patch stays retrievable, and the run logs
+    are the only forensic record of what a worker actually did (the one
+    "commit blocked by sandbox" incident was undiagnosable for days precisely
+    because cleanup had eaten them)."""
     import glob
     import shutil
     import subprocess
@@ -75,7 +78,6 @@ def cleanup_task(task_id: str, deep: bool = False) -> None:
     patterns = [
         f"{ws}/repos/worktrees/{task_id}_*",   # per-role worktrees
         f"{ws}/scratch/{task_id}*",            # repo-less + orchestrator scratch dirs
-        f"{ws}/runs/{task_id}",                # run logs
     ]
     # The per-task bare clone holds the branch a local Merge Request lands/merges
     # from — keep it while an MR is still open (unless this is a full delete).
@@ -84,6 +86,7 @@ def cleanup_task(task_id: str, deep: bool = False) -> None:
         patterns.append(f"{ws}/repos/{task_id}_*")   # per-task bare clone
     if deep:
         patterns.append(f"{ws}/tasks/{task_id}")   # attachments + saved patches
+        patterns.append(f"{ws}/runs/{task_id}")    # run logs (forensics)
 
     def _salvage(worktree_path: str) -> None:
         try:

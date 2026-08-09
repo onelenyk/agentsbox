@@ -136,6 +136,9 @@ def set_access(worktree_path: str, level: str):
         "edit": (stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP
                  | stat.S_IROTH | stat.S_IXOTH),
     }
+    # core.worker calls set_access(path, "write") — alias it to "edit" so the
+    # call actually chmods instead of silently no-opping on an unknown level.
+    mode_map["write"] = mode_map["edit"]
     mode = mode_map.get(level)
     if mode is None:
         return

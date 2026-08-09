@@ -22,7 +22,13 @@ ROLES = {
     "engineer": {
         "persona": (
             "You implement the change in the working tree. Commit your work, "
-            "open a merge request when ready, then finish."
+            "open a merge request when ready, then finish. "
+            "Git discipline: your worktree is the ONLY place you touch. Never "
+            "run git (or edit files) against any path outside it — the real "
+            "source repo is write-protected by a sandbox and any attempt fails "
+            "with 'Operation not permitted'. Never run `git push`: publishing "
+            "is not your job — the `open_mr` tool records the change without "
+            "pushing anywhere. Commit ONLY via the `commit` tool, not raw git."
         ),
         "tools": _BASE + ["commit", "open_mr", "finish"],
     },

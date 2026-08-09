@@ -221,7 +221,15 @@ async def launch_agent(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    env = {k: v for k, v in os.environ.items() if k != "WORKSPACE_ROOT"}
+    # The worker must not inherit the daemon's WORKSPACE_ROOT (its tool calls
+    # could then resolve — and its test runs open — the live daemon DB). But
+    # simply DELETING it made every agent-run pytest fall back to /workspace,
+    # which doesn't exist on macOS → hundreds of sqlite3.OperationalError noise
+    # lines that reviewers kept misreporting as "pre-existing sandbox issues".
+    # Point it at a private per-run dir instead: isolated AND functional.
+    env = dict(os.environ)
+    env["WORKSPACE_ROOT"] = str(output_path / "wsroot")
+    Path(env["WORKSPACE_ROOT"]).mkdir(parents=True, exist_ok=True)
     env["SISYPHUS_OUTPUT_DIR"] = str(output_dir)
     env["SISYPHUS_WORKTREE"] = str(worktree_path)
     env["SISYPHUS_DB_READONLY"] = "1"
