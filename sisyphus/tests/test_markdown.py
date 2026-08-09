@@ -98,3 +98,8 @@ def test_star_bullets_render_as_list():
 def test_interrupted_ordered_list_keeps_numbering():
     html = str(render_md("1. first\n\nprose between\n\n2. second"))
     assert '<ol start="2">' in html
+
+
+def test_indented_bullets_join_the_list():
+    html = str(render_md("- top\n  * nested one\n  - nested two"))
+    assert html.count("<li>") == 3
