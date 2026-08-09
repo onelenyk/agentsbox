@@ -24,18 +24,30 @@
             <span class="count tnum">{{ columns[col_key]|length }}</span>
         </div>
         <div class="board-col__body">
+            {% set icons = {'orchestrator':'🧭','engineer':'🔧','reviewer':'🔍','explorer':'🔭','planner':'🗺️','mr-reviewer':'🔍','human':'🧑'} %}
             {% for t in columns[col_key] %}
-            <a class="task-card {{ 'task-card--live' if t.live_role }}" href="/tasks/{{ t.id }}">
+            <a class="task-card task-card--rich {{ 'task-card--live' if t.live_role }}" href="/tasks/{{ t.id }}">
                 {% if t.live_role %}
-                <div class="task-card__live"><span class="live-dot"></span>{{ t.live_role }} working · {{ t.live_mins }}m</div>
+                <div class="task-card__live"><span class="live-dot"></span>{{ icons.get(t.live_role, '⚙️') }} {{ t.live_role }} working · {{ t.live_mins }}m</div>
                 {% endif %}
                 <div class="task-card__title">{{ task_display_title(t) }}</div>
-                {% if t.snippet %}<div class="task-card__snippet">{{ t.snippet }}</div>{% endif %}
                 {% if t.question %}<div class="task-card__q">❓ {{ t.question }}</div>{% endif %}
+                {% if t.stages %}
+                <div class="stagebar">
+                    {% for name, done in t.stages %}
+                    <span class="stg {{ 'on' if done }} {{ 'now' if name == t.stage_now }}" title="{{ name }}"></span>
+                    {% if not loop.last %}<span class="stg-link {{ 'on' if done }}"></span>{% endif %}
+                    {% endfor %}
+                    <span class="stagebar__label">{{ t.stage_now }}</span>
+                </div>
+                {% endif %}
+                {% if t.last_event and not t.question %}
+                <div class="task-card__event">{{ icons.get(t.last_author, '⚡') }} {{ t.last_event }}</div>
+                {% endif %}
                 <div class="task-card__meta">
                     {% if t.child_total %}<span class="chip">⑂ {{ t.child_done }}/{{ t.child_total }}</span>{% endif %}
                     {% if t.review_status == 'pending' %}<span class="badge badge--mono">⏳ review</span>{% elif t.review_status == 'approved' %}<span class="badge" style="color:var(--good);background:var(--good-bg);border-color:var(--good-bd)">✓ reviewed</span>{% elif t.review_status == 'changes_requested' %}<span class="badge" style="color:var(--bad);background:var(--bad-bg);border-color:var(--bad-bd)">✗ changes requested</span>{% endif %}
-                    <span class="task-card__when reltime" data-created="{{ t.created_at }}"></span>
+                    <span class="task-card__foot-info">🕐 <span class="reltime" data-created="{{ t.created_at }}"></span>{% if t.cost %} · 💰 {{ t.cost }}{% endif %}</span>
                 </div>
             </a>
             {% else %}
