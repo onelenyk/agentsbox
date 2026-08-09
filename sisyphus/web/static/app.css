@@ -281,6 +281,44 @@ body::before {
 .msg__body { font-size: 13px; color: var(--text-2); white-space: pre-wrap; word-break: break-word; }
 .msg__att { margin-top: 6px; font-size: 12px; }
 
+/* two-lane thread: collapsed machinery runs + thin commit lines */
+.msg-run {
+  border: 1px solid var(--border); border-radius: var(--r);
+  background: var(--inset);
+}
+.msg-run > summary {
+  cursor: pointer; list-style: none; user-select: none;
+  font-family: var(--mono); font-size: 11px; color: var(--muted);
+  padding: 6px 13px;
+}
+.msg-run > summary::-webkit-details-marker { display: none; }
+.msg-run > summary:hover { color: var(--text-2); }
+.msg-run[open] > summary { border-bottom: 1px solid var(--border); }
+.msg-run .row-line {
+  font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+  padding: 4px 13px; overflow-wrap: anywhere;
+}
+.msg-run .row-line:last-child { padding-bottom: 8px; }
+.msg--commit {
+  padding: 6px 13px; font-family: var(--mono); font-size: 12px;
+  color: var(--good); border-left-color: var(--good);
+}
+.badge--ok   { color: var(--good); background: var(--good-bg); border-color: rgba(70,209,127,.25); }
+.badge--warn { color: var(--warn); background: var(--warn-bg); border-color: rgba(224,168,58,.3); }
+
+/* markdown-rendered dialogue bodies (render_md output) */
+.msg__body--md { white-space: normal; }
+.msg__body--md p, .msg__body--md ul, .msg__body--md ol, .msg__body--md pre { margin: 0 0 8px; }
+.msg__body--md > :last-child { margin-bottom: 0; }
+.msg__body--md ul, .msg__body--md ol { padding-left: 20px; }
+.md-h { font-size: 13px; font-weight: 650; color: var(--text); margin: 6px 0 3px; }
+.msg__body--md pre {
+  background: var(--inset); border: 1px solid var(--border); border-radius: var(--r-sm);
+  padding: 8px 10px; overflow-x: auto;
+}
+.msg__body--md code { font-family: var(--mono); font-size: 12px; background: var(--inset); padding: 1px 4px; border-radius: 4px; }
+.msg__body--md pre code { background: none; padding: 0; }
+
 .tag {
   font-size: 11px; font-weight: 600; line-height: 1;
   padding: 3px 8px; border-radius: var(--r-pill);

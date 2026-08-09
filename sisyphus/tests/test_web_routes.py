@@ -163,6 +163,29 @@ def test_task_detail_view_shows_thread(db_path):
     assert "visible in thread" in response.text
 
 
+def test_task_detail_two_lane_thread(db_path):
+    """Machinery collapses into a <details> run, dialogue stays a bubble —
+    but the machinery text must remain in the DOM (untruncated)."""
+    from core import store
+
+    task = _make_task(goal="two lanes")
+    store.post_message(task["id"], "system", kind="worker_started",
+                       text="spawning engineer: do the thing")
+    store.post_message(task["id"], "engineer", kind="note",
+                       text="running the test suite now")
+    store.post_message(task["id"], "engineer", kind="result",
+                       text="APPROVED — all checks pass")
+    client = _make_client()
+    html = client.get(f"/api/tasks/{task['id']}/detail").text
+    # dialogue lane: the result renders (markdown pipeline) with its badge
+    assert "all checks pass" in html
+    assert "badge--ok" in html
+    # machinery lane: collapsed but full text still present in the DOM
+    assert "<details" in html
+    assert "spawning engineer: do the thing" in html
+    assert "running the test suite now" in html
+
+
 def test_new_task_form_allows_no_repo(db_path):
     """The New Task form offers a repo-less option (backend #3 support)."""
     client = _make_client()

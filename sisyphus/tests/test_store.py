@@ -249,3 +249,72 @@ class TestTaskAgent:
         from core.store import task_display_title
         t = create_task("the goal", title="")
         assert task_display_title(t) == "the goal"
+
+
+class TestMessageLane:
+    """Classification table for message_lane — the human-UI lane split."""
+
+    @staticmethod
+    def _m(author="engineer", kind="note", text="", attachment=None):
+        return {"author": author, "kind": kind, "text": text, "attachment": attachment}
+
+    def test_conversation_kinds_are_dialogue(self):
+        from core.store import message_lane
+        for kind in ("answer", "question", "result", "mr", "plan", "external",
+                     "child_finished"):
+            assert message_lane(self._m(kind=kind)) == "dialogue", kind
+
+    def test_commit_is_dialogue(self):
+        from core.store import message_lane
+        assert message_lane(self._m(kind="commit", text="add x (abc123)")) == "dialogue"
+
+    def test_worker_lifecycle_is_machinery(self):
+        from core.store import message_lane
+        for kind in ("worker_started", "worker_queued", "worker_finished"):
+            assert message_lane(self._m(author="system", kind=kind)) == "machinery", kind
+
+    def test_system_note_is_machinery(self):
+        from core.store import message_lane
+        assert message_lane(self._m(author="system", kind="note",
+                                    text="task reopened by human")) == "machinery"
+
+    def test_orchestrator_note_machinery_tags(self):
+        from core.store import message_lane
+        for tag in ("spawn_worker", "note", "noop"):
+            m = self._m(author="orchestrator", text=f"[{tag}] some reasoning")
+            assert message_lane(m) == "machinery", tag
+
+    def test_orchestrator_note_dialogue_tags(self):
+        from core.store import message_lane
+        for tag in ("done", "fail", "ask_human", "error", "spawn_task"):
+            m = self._m(author="orchestrator", text=f"[{tag}] some reasoning")
+            assert message_lane(m) == "dialogue", tag
+
+    def test_orchestrator_note_unrecognized_tag_is_dialogue(self):
+        from core.store import message_lane
+        m = self._m(author="orchestrator", text="[future_action] new thing")
+        assert message_lane(m) == "dialogue"
+
+    def test_orchestrator_note_untagged_is_dialogue(self):
+        from core.store import message_lane
+        m = self._m(author="orchestrator", text="plain untagged note")
+        assert message_lane(m) == "dialogue"
+
+    def test_worker_note_with_attachment_is_dialogue(self):
+        from core.store import message_lane
+        m = self._m(author="engineer", text="draft diff", attachment="change.patch")
+        assert message_lane(m) == "dialogue"
+
+    def test_worker_note_plain_progress_is_machinery(self):
+        from core.store import message_lane
+        assert message_lane(self._m(author="engineer", text="running tests…")) == "machinery"
+
+    def test_custom_agent_note_follows_worker_rule(self):
+        from core.store import message_lane
+        # the author set is open-ended — custom agents like mr-reviewer exist
+        assert message_lane(self._m(author="mr-reviewer", text="looking…")) == "machinery"
+        assert message_lane(self._m(author="mr-reviewer", attachment="x.patch")) == "dialogue"
+
+    def test_unknown_kind_fails_open_to_dialogue(self):
+        from core.store import message_lane
+        assert message_lane(self._m(kind="mystery_kind")) == "dialogue"

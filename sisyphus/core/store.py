@@ -247,6 +247,51 @@ def _keep_in_window(m: dict) -> bool:
     return bool(m["attachment"])
 
 
+# Orchestrator notes carry a leading "[action]" tag (see core/orchestrator.py
+# where decisions are posted as f"[{decision.action}] {decision.why}"). Only
+# the actions that are pure plumbing hide in the machinery lane — anything
+# else (done/fail/ask_human/error/spawn_task, or an untagged note) is shown.
+_ORCH_MACHINERY_TAGS = ("spawn_worker", "note", "noop")
+_ORCH_TAG_RE = re.compile(r"^\[([a-z_]+)\]")
+
+
+def message_lane(m: dict) -> str:
+    """Classify a thread message for the human UI: ``"dialogue"`` (styled
+    bubble) or ``"machinery"`` (lifecycle noise, collapsed into a thin run).
+
+    Sibling of :func:`_keep_in_window`, but for a different reader: that one
+    bounds the LLM prompt window; this one decides what a *human* sees
+    expanded. Kind-driven with an author fallback — the author set is
+    open-ended (custom agents like ``mr-reviewer`` exist), so unknown kinds
+    and authors fail open into dialogue: never hide what we don't recognize."""
+    kind = m.get("kind") or ""
+    author = m.get("author") or ""
+
+    # Conversation proper — plus "commit", which stays in the dialogue flow
+    # (the template renders it as a thin single line).
+    if kind in ("answer", "question", "result", "mr", "plan", "external",
+                "child_finished", "commit"):
+        return "dialogue"
+
+    # Worker lifecycle bookkeeping.
+    if kind in ("worker_started", "worker_queued", "worker_finished"):
+        return "machinery"
+
+    if kind == "note":
+        if author == "system":
+            return "machinery"          # merge/land/reopen bookkeeping
+        if author == "orchestrator":
+            tag = _ORCH_TAG_RE.match(m.get("text") or "")
+            if tag and tag.group(1) in _ORCH_MACHINERY_TAGS:
+                return "machinery"
+            return "dialogue"           # decisions, errors — and untagged notes
+        # A worker: a note carrying an artifact is part of its narrative;
+        # plain progress chatter collapses.
+        return "dialogue" if m.get("attachment") else "machinery"
+
+    return "dialogue"                   # unknown kind — fail open, never hide
+
+
 def render_thread(task_id: str, for_prompt: bool = False,
                   max_messages: int = 40, tail: int = 20) -> str:
     """Compact transcript of a task.
