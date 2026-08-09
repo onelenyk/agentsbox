@@ -19,8 +19,8 @@ _BOLD_RE = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*")           # **bold**
 # lone * (e.g. "3 * 4") never eats the rest of the line.
 _ITALIC_RE = re.compile(r"(?<![\w*])\*(?=[^\s*])([^*\n]+?)(?<=\S)\*(?![\w*])")
 _HEADING_RE = re.compile(r"^#{1,6}\s+(.+)$")                   # any # depth
-_UL_RE = re.compile(r"^[-*+]\s+(.+)$")                         # "- item" / "* item"
-_OL_RE = re.compile(r"^(\d+)\.\s+(.+)$")                       # "1. item"
+_UL_RE = re.compile(r"^\s{0,8}[-*+]\s+(.+)$")                  # "- item" / "  * item"
+_OL_RE = re.compile(r"^\s{0,8}(\d+)\.\s+(.+)$")                # "1. item" (nesting flattens)
 _FENCE_SLOT_RE = re.compile(r"^\x00(\d+)\x00$")
 
 
