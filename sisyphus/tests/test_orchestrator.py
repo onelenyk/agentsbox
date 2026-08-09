@@ -260,7 +260,12 @@ class TestRestartIsANoOp:
         kinds = [m["kind"] for m in store.get_thread(task["id"])]
         assert kinds.count("worker_finished") == 1
 
-    def test_reconcile_wakes_task_with_progress_since(self, db_path):
+    def test_reconcile_rescues_worker_that_posted_progress_notes(self, db_path):
+        # The worker posted a progress note after worker_started, so the thread
+        # TAIL is a note — but the worker itself died with the daemon. A bare
+        # "continue" would deadlock: dispatch sees the unclosed worker_started
+        # and waits forever for a report that will never come (live incident:
+        # task-a1a96df8). Reconcile must close the orphaned worker instead.
         task = store.create_task("do work")
         store.set_status(task["id"], "active")
         store.post_message(task["id"], "system", kind="worker_started", text="spawning")
@@ -270,10 +275,10 @@ class TestRestartIsANoOp:
             n = reconcile_on_boot()
 
         assert n == 1
-        mock_emit.assert_called_once_with(task["id"], "continue")
+        mock_emit.assert_called_once_with(task["id"], "worker_finished")
 
         kinds = [m["kind"] for m in store.get_thread(task["id"])]
-        assert "worker_finished" not in kinds  # not a worker_started rescue
+        assert kinds.count("worker_finished") == 1  # orphan closed on the thread
 
     @pytest.mark.asyncio
     async def test_reconcile_ignores_waiting_and_terminal_tasks(self, db_path):

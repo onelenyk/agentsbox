@@ -542,19 +542,21 @@ def reconcile_on_boot() -> int:
     """Daemon restart is a no-op. This single daemon is the ONLY process that
     ever runs a worker, so a restart always means any in-flight worker task is
     gone — no PID check is needed (unlike the old multi-process pipeline
-    system). Any task whose last message is worker_started with nothing since
-    is re-driven from its thread via a synthetic worker_finished event.
+    system). Any task with an in-flight worker (a worker_started/worker_queued
+    with no worker_finished after it — the worker may have posted progress
+    notes since, so the thread TAIL alone can't be trusted) is re-driven via a
+    synthetic worker_finished event; without it the dispatch guard would wait
+    forever for a report from a process that no longer exists.
 
-    Active tasks whose last message is anything else (a note, child_finished,
-    a fresh created task, …) are stuck with no pending event to wake them.
-    For those we queue a synthetic ``continue`` so the next dispatch pass
-    re-evaluates them.
+    Active tasks with no worker in flight (a note, child_finished, a fresh
+    created task, …) are stuck with no pending event to wake them. For those
+    we queue a synthetic ``continue`` so the next dispatch pass re-evaluates
+    them.
 
     Returns the number of tasks reconciled."""
     n = 0
     for task in store.list_tasks(status="active"):
-        thread = store.get_thread(task["id"])
-        if thread and thread[-1]["kind"] in ("worker_started", "worker_queued"):
+        if _worker_in_flight(task["id"]):
             # A queued spawn dies with the daemon just like a running one.
             store.post_message(
                 task["id"], "system", kind="worker_finished",
