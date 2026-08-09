@@ -653,6 +653,11 @@ async def tasks_list_view(request: Request):
         if tid not in task_latest_mr or mr["created_at"] > task_latest_mr[tid]["created_at"]:
             task_latest_mr[tid] = mr
 
+    # Board cards are read at a glance — enrich them with what a glance needs:
+    # who is working RIGHT NOW (live session), what a waiting task actually
+    # asks, and a snippet of the goal beyond the title line.
+    live_by_task = {s["task_id"]: s for s in _enrich_sessions(sessions.list_active())}
+
     cols = ("in-progress", "needs-you", "to-merge", "shipped", "done", "failed")
     columns = {c: [] for c in cols}
     for status in store.VALID_STATUSES:
@@ -664,6 +669,22 @@ async def tasks_list_view(request: Request):
                 t["child_done"] = sum(1 for c in kids if c["status"] == "done")
             mr = task_latest_mr.get(t["id"])
             t["review_status"] = mr.get("review_status") if mr and mr.get("review_status") else None
+
+            goal = t.get("goal", "")
+            rest = goal.split("\n", 1)[1].strip() if "\n" in goal else ""
+            t["snippet"] = (rest[:110] + "…") if len(rest) > 110 else rest
+
+            live = live_by_task.get(t["id"])
+            if live and status == "active":
+                t["live_role"] = live["role"]
+                t["live_mins"] = live["elapsed_mins"]
+
+            if status == "waiting":
+                qs = [m for m in store.get_thread(t["id"]) if m["kind"] == "question"]
+                if qs:
+                    q = qs[-1]["text"]
+                    t["question"] = (q[:90] + "…") if len(q) > 90 else q
+
             col = board_column(t, mr)
             columns[col].append(t)
     return _tmpl().TemplateResponse(request, "tasks_list.html", {"columns": columns})

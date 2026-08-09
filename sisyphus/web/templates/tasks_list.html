@@ -1,14 +1,26 @@
 <div class="board">
-    {% for col_key, col_label in [("in-progress", "In progress"), ("needs-you", "Needs you"), ("to-merge", "To merge"), ("shipped", "Shipped"), ("done", "Done"), ("failed", "Failed")] %}
+    {% for col_key, col_icon, col_label, col_empty in [
+        ("in-progress", "⚙", "In progress", "Nothing in flight"),
+        ("needs-you", "✋", "Needs you", "Nobody needs you"),
+        ("to-merge", "⇄", "To merge", "No open MRs"),
+        ("shipped", "🚀", "Shipped", "Nothing shipped yet"),
+        ("done", "✓", "Done", "—"),
+        ("failed", "✗", "Failed", "No failures"),
+    ] %}
     <div class="board-col board-col--{{ col_key }}">
         <div class="board-col__head">
-            <span class="label">{{ col_label }}</span>
+            <span class="label"><span class="col-ic">{{ col_icon }}</span>{{ col_label }}</span>
             <span class="count tnum">{{ columns[col_key]|length }}</span>
         </div>
         <div class="board-col__body">
             {% for t in columns[col_key] %}
-            <a class="task-card" href="/tasks/{{ t.id }}">
+            <a class="task-card {{ 'task-card--live' if t.live_role }}" href="/tasks/{{ t.id }}">
+                {% if t.live_role %}
+                <div class="task-card__live"><span class="live-dot"></span>{{ t.live_role }} working · {{ t.live_mins }}m</div>
+                {% endif %}
                 <div class="task-card__title">{{ task_display_title(t) }}</div>
+                {% if t.snippet %}<div class="task-card__snippet">{{ t.snippet }}</div>{% endif %}
+                {% if t.question %}<div class="task-card__q">❓ {{ t.question }}</div>{% endif %}
                 <div class="task-card__meta">
                     {% if t.repo %}<span class="badge">{{ t.repo }}</span>{% endif %}
                     <span class="badge badge--mono">{{ t.id }}</span>
@@ -18,7 +30,7 @@
                 <div class="task-card__foot"><span class="reltime" data-created="{{ t.created_at }}"></span></div>
             </a>
             {% else %}
-            <div class="empty">No tasks</div>
+            <div class="empty empty--col">{{ col_empty }}</div>
             {% endfor %}
         </div>
     </div>
