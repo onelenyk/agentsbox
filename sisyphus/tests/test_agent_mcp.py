@@ -322,6 +322,28 @@ def test_reviewer_approve_finishes(db_path):
     assert "worker_finished" in [m["kind"] for m in store.get_thread(task_id)]
 
 
+def test_approve_does_not_double_prefix(db_path):
+    task_id, token = _session(db_path, "reviewer")
+    _call(_client(), token, "approve", {"summary": "APPROVED -- all tests passed"})
+    results = [m for m in store.get_thread(task_id) if m["kind"] == "result"]
+    assert results
+    text = results[0]["text"]
+    assert text.startswith("APPROVED")
+    assert "APPROVED: APPROVED" not in text
+    assert text == "APPROVED -- all tests passed"
+
+
+def test_request_changes_does_not_double_prefix(db_path):
+    task_id, token = _session(db_path, "reviewer")
+    _call(_client(), token, "request_changes", {"reason": "CHANGES REQUESTED -- needs more test coverage"})
+    results = [m for m in store.get_thread(task_id) if m["kind"] == "result"]
+    assert results
+    text = results[0]["text"]
+    assert text.startswith("CHANGES REQUESTED")
+    assert "CHANGES REQUESTED: CHANGES REQUESTED" not in text
+    assert text == "CHANGES REQUESTED -- needs more test coverage"
+
+
 def test_propose_subtasks_posts_plan(db_path):
     task_id, token = _session(db_path, "explorer")
     out = _call(_client(), token, "propose_subtasks", {"items": [
