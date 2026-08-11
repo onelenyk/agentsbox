@@ -570,3 +570,65 @@ def reconcile_on_boot() -> int:
             emit(task["id"], "continue")
             n += 1
     return n
+
+
+# ── Stall watchdog ──────────────────────────────────────────────────────
+# A task only moves when an event is queued for it, and the queue lives in
+# memory. Anything that creates a task without emitting leaves it `active` with
+# nothing to wake it — a live review task sat that way for 2h13m, and only an
+# unrelated daemon restart rescued it, because reconcile_on_boot ran. Nothing
+# structural stops the next caller from making the same mistake, so treat a
+# missing event as a fault to recover from rather than one to prevent
+# call-site by call-site.
+
+STALL_AFTER_SECONDS = 600
+WATCHDOG_INTERVAL_SECONDS = 120
+
+
+def find_stalled(stall_after: int = STALL_AFTER_SECONDS) -> list:
+    """Active tasks with no worker running and no thread activity for
+    *stall_after* seconds. ``updated_at`` is bumped by every post_message, so a
+    frozen one means genuinely nothing is happening — not merely a quiet worker.
+    """
+    import datetime as _dt
+    now = _dt.datetime.now(_dt.timezone.utc)
+    stalled = []
+    for task in store.list_tasks(status="active"):
+        try:
+            seen = _dt.datetime.fromisoformat(task["updated_at"])
+        except (ValueError, KeyError, TypeError):
+            continue
+        if seen.tzinfo is None:
+            seen = seen.replace(tzinfo=_dt.timezone.utc)
+        if (now - seen).total_seconds() < stall_after:
+            continue
+        if _worker_in_flight(task["id"]):
+            continue          # a worker IS running; quiet is not stalled
+        stalled.append(task["id"])
+    return stalled
+
+
+def rescue_stalled(stall_after: int = STALL_AFTER_SECONDS) -> int:
+    """Queue a `continue` for every stalled task. Logs at WARNING: a rescue
+    means some path created work without an event, and that is worth seeing
+    rather than silently papering over."""
+    ids = find_stalled(stall_after)
+    for task_id in ids:
+        logger.warning(
+            "watchdog: %s has been active with no worker and no activity for "
+            "%ds — queueing `continue`. Some path created it without emitting.",
+            task_id, stall_after,
+        )
+        emit(task_id, "continue")
+    return len(ids)
+
+
+async def watchdog_forever(interval: int = WATCHDOG_INTERVAL_SECONDS,
+                           stall_after: int = STALL_AFTER_SECONDS) -> None:
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            rescue_stalled(stall_after)
+        except Exception:
+            # a watchdog that dies on one bad row stops guarding everything
+            logger.warning("watchdog pass failed", exc_info=True)
