@@ -294,7 +294,9 @@ async def repos_health():
     repos = list_repos()
     total = len(repos)
     cloned = sum(1 for r in repos if r.get("cloned"))
-    return {"total": total, "cloned": cloned, "pending": total - cloned}
+    unreachable = sum(1 for r in repos if r.get("reach") == "missing")
+    return {"total": total, "cloned": cloned, "pending": total - cloned,
+            "unreachable": unreachable}
 
 
 

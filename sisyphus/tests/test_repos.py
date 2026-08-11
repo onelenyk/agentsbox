@@ -88,6 +88,30 @@ class TestListRepos:
         for r in result:
             assert r["cloned"] is True
 
+    def test_reach_is_ok_for_a_real_local_checkout(self, tmp_path):
+        """A repo whose source is a live git checkout is ready to work in —
+        regardless of whether a persistent bare clone happens to exist, since
+        workers clone per task and delete it again on cleanup."""
+        src = tmp_path / "proj"
+        (src / ".git").mkdir(parents=True)
+        with patch("core.repos.load_repos",
+                   return_value=[{"name": "p", "source": str(src), "branch": "main"}]):
+            r = core.repos.list_repos()[0]
+        assert r["reach"] == "ok"
+        assert r["cloned"] is False   # and that must not be what the UI reports
+
+    def test_reach_is_missing_when_the_source_is_gone(self, tmp_path):
+        with patch("core.repos.load_repos",
+                   return_value=[{"name": "p", "source": str(tmp_path / "nope"),
+                                  "branch": "main"}]):
+            assert core.repos.list_repos()[0]["reach"] == "missing"
+
+    def test_reach_is_remote_for_a_url(self):
+        for url in ("https://github.com/o/r.git", "git@github.com:o/r.git"):
+            with patch("core.repos.load_repos",
+                       return_value=[{"name": "p", "source": url, "branch": "main"}]):
+                assert core.repos.list_repos()[0]["reach"] == "remote"
+
     def test_does_not_mutate_load_repos_result_in_place(self):
         """list_repos adds 'cloned' to the same list objects returned by load_repos."""
         original = [{"name": "x", "source": "s", "branch": "b"}]

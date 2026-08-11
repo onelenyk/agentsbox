@@ -30,7 +30,30 @@ def list_repos():
     for r in repos:
         bare_path = REPOS_DIR / r["name"]
         r["cloned"] = bare_path.exists() and (bare_path / "HEAD").exists()
+        r["reach"] = source_reach(r.get("source", ""))
     return repos
+
+
+def source_reach(source: str) -> str:
+    """Whether work can actually start against this repo: ``ok``, ``missing``
+    or ``remote``.
+
+    Not the same question as ``cloned``. Workers clone per task into
+    ``repos/<task_id>_<name>`` and cleanup_task deletes it, so the persistent
+    ``repos/<name>`` bare clone that ``cloned`` looks for exists only if
+    add_repo made one — leaving every repo reading "pending" forever, including
+    ones that have run dozens of tasks. What decides whether the next task can
+    run is the source being reachable.
+    """
+    source = (source or "").strip()
+    if not source:
+        return "missing"
+    if "://" in source or source.startswith("git@"):
+        return "remote"        # can't verify without a network round-trip
+    p = Path(source).expanduser()
+    if not p.exists():
+        return "missing"
+    return "ok" if (p / ".git").exists() or (p / "HEAD").exists() else "missing"
 
 def update_repo(name):
     bare_path = REPOS_DIR / name
