@@ -98,6 +98,10 @@ async def startup():
         logger.warning("preflight: NOT ready to run work — %s", pf["reason"])
 
     asyncio.create_task(orchestrator.dispatch_forever())
+    # reconcile_on_boot only covers the restart. Keep guarding at runtime, so a
+    # task created without an event recovers in minutes instead of waiting for
+    # the next daemon restart.
+    asyncio.create_task(orchestrator.watchdog_forever())
 
     from core import autopilot
     asyncio.create_task(autopilot.run_forever())

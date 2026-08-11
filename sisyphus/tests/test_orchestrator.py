@@ -319,6 +319,74 @@ class TestRestartIsANoOp:
         mock_emit.assert_not_called()
 
 
+class TestStallWatchdog:
+    """reconcile_on_boot only runs at startup. A task created without an event
+    used to wait for the next restart to move — one waited 2h13m. The watchdog
+    catches the same condition while the daemon keeps running.
+    """
+
+    def _age(self, task_id, seconds):
+        """Backdate updated_at, as if nothing had touched the task since."""
+        import datetime as dt
+        from core.db import get_conn
+        old = (dt.datetime.now(dt.timezone.utc)
+               - dt.timedelta(seconds=seconds)).isoformat()
+        conn = get_conn()
+        conn.execute("UPDATE tasks SET updated_at = ? WHERE id = ?", (old, task_id))
+        conn.commit()
+        conn.close()
+
+    def test_rescues_a_task_created_without_an_event(self, db_path):
+        task = store.create_task("auto-review that nobody dispatched")
+        self._age(task["id"], 3600)
+
+        with patch("core.orchestrator.emit") as mock_emit:
+            n = orchestrator.rescue_stalled(stall_after=600)
+
+        assert n == 1
+        mock_emit.assert_called_once_with(task["id"], "continue")
+
+    def test_leaves_a_recently_touched_task_alone(self, db_path):
+        # freshly created: something may still be about to dispatch it
+        store.create_task("just created")
+
+        with patch("core.orchestrator.emit") as mock_emit:
+            assert orchestrator.rescue_stalled(stall_after=600) == 0
+        mock_emit.assert_not_called()
+
+    def test_does_not_touch_a_task_whose_worker_is_running(self, db_path):
+        """The important false positive: a worker can be quiet for a long time.
+        Rescuing it would drive a second decision behind its back."""
+        task = store.create_task("long build")
+        store.post_message(task["id"], "system", kind="worker_started",
+                           text="spawning engineer")
+        self._age(task["id"], 7200)
+
+        with patch("core.orchestrator.emit") as mock_emit:
+            assert orchestrator.rescue_stalled(stall_after=600) == 0
+        mock_emit.assert_not_called()
+
+    def test_rescues_once_the_worker_has_reported_back(self, db_path):
+        task = store.create_task("worker done, then silence")
+        store.post_message(task["id"], "system", kind="worker_started", text="go")
+        store.post_message(task["id"], "system", kind="worker_finished", text="done")
+        self._age(task["id"], 3600)
+
+        with patch("core.orchestrator.emit") as mock_emit:
+            assert orchestrator.rescue_stalled(stall_after=600) == 1
+        mock_emit.assert_called_once_with(task["id"], "continue")
+
+    def test_ignores_waiting_and_terminal_tasks(self, db_path):
+        for status in ("waiting", "done", "failed"):
+            t = store.create_task(f"parked in {status}")
+            store.set_status(t["id"], status)
+            self._age(t["id"], 7200)
+
+        with patch("core.orchestrator.emit") as mock_emit:
+            assert orchestrator.rescue_stalled(stall_after=600) == 0
+        mock_emit.assert_not_called()
+
+
 class TestDecisionValidation:
     @pytest.mark.asyncio
     async def test_malformed_decision_fails_the_task_instead_of_crashing(self, db_path):
