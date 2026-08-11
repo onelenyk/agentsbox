@@ -8,7 +8,9 @@
                 <div class="ecard__name"><a href="/repos/{{ r.name }}">{{ r.name }}</a></div>
                 <div class="ecard__sub">⎇ {{ r.branch }}{% if r.task_total %} · {{ r.task_done }}/{{ r.task_total }} tasks{% endif %}</div>
             </div>
-            {% if r.cloned %}<span class="status status--done right">cloned</span>{% else %}<span class="status status--waiting right">pending</span>{% endif %}
+            {% if r.reach == 'ok' %}<span class="status status--done right">ready</span>
+            {% elif r.reach == 'remote' %}<span class="status status--active right">remote</span>
+            {% else %}<span class="status status--failed right" title="source path not found or not a git repo">unreachable</span>{% endif %}
         </div>
         <a href="/repos/{{ r.name }}" class="term wrap" style="display:block;color:var(--text-2)">{{ r.source }}</a>
         <div class="ecard__foot">
