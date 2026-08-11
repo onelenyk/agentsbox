@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import datetime
 import logging
+import pathlib as _pathlib
 import subprocess as _subprocess
 
 logger = logging.getLogger(__name__)
@@ -17,13 +18,25 @@ _PROCESS_START_TIME = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 def _read_git_commit():
+    """Short SHA of the code this process is running, for the ghost-daemon check.
+
+    Pinned to the source tree, not the process CWD — the daemon may be started
+    from anywhere (launchd runs it with no shell). A failure is logged rather
+    than swallowed: a silently empty field defeats the whole point of exposing it.
+    """
     try:
         r = _subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
             capture_output=True, text=True, timeout=5,
+            cwd=_pathlib.Path(__file__).resolve().parent.parent,
         )
+        if r.returncode != 0:
+            logger.warning("health: git rev-parse failed (rc=%s): %s",
+                           r.returncode, r.stderr.strip())
+            return ""
         return r.stdout.strip()
     except Exception:
+        logger.warning("health: could not read git commit", exc_info=True)
         return ""
 
 
