@@ -23,6 +23,24 @@ def test_health(db_path):
     assert r.json()["ok"] is True
 
 
+def test_health_git_commit_is_populated():
+    """The ghost-daemon check is 'curl /health and compare the SHA' — an empty
+    git_commit silently defeats it. Must not depend on the process CWD: the
+    daemon is started from anywhere (launchd has no shell).
+    """
+    import os
+    from web.api import _read_git_commit
+
+    cwd = os.getcwd()
+    try:
+        os.chdir("/")
+        sha = _read_git_commit()
+    finally:
+        os.chdir(cwd)
+    assert sha, "git_commit is empty — /health cannot identify the running code"
+    assert len(sha) >= 7
+
+
 # ── Repos ───────────────────────────────────────────────────────────────
 
 
