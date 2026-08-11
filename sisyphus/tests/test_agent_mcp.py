@@ -158,6 +158,38 @@ def test_finish_requires_summary(db_path):
     assert out["result"]["isError"] is True
 
 
+def test_finish_refused_on_a_review_task(db_path):
+    """A verdict only reaches the MR through approve/request_changes. Finishing
+    with prose left mr-1dc636dd stranded at "pending" while its review task sat
+    done — so the tool refuses instead of trusting the prompt.
+    """
+    sessions.clear()
+    task = store.create_task(
+        "Review-of-MR: mr-abc123\nOrigin-task: task-xyz\n\nReview it.",
+        repo="sisyphus")
+    # the guard keys off the task's goal, not the agent — any role holding
+    # `finish` must be refused on a review task
+    token = sessions.mint(task["id"], "explorer")
+    out = _call(_client(), token, "finish", {"summary": "looks good to me"})
+    assert out["result"]["isError"] is True
+    assert "approve" in out["result"]["content"][0]["text"]
+    # and the task is NOT quietly finished
+    assert "result" not in [m["kind"] for m in store.get_thread(task["id"])]
+
+
+def test_finish_still_works_for_a_multi_mr_sweep(db_path):
+    """The daily autopilot reviews every open MR at once — no single verdict to
+    write, so that task must still be able to finish with a report.
+    """
+    sessions.clear()
+    task = store.create_task("Review all open merge-request branches and report",
+                             repo="sisyphus")
+    token = sessions.mint(task["id"], "explorer")
+    out = _call(_client(), token, "finish", {"summary": "3 MRs scanned, 1 stale"})
+    assert out["result"]["isError"] is False
+    assert "result" in [m["kind"] for m in store.get_thread(task["id"])]
+
+
 def test_finish_hook_fires(db_path):
     import web.agent_mcp as amcp
     fired = []
@@ -553,7 +585,9 @@ def test_open_mr_fires_review_hook(db_path):
          patch("core.git_ops.commit_all", return_value="a" * 40):
         _call(c, token, "commit", {"message": "fix: review hook"})
 
-    with patch("core.providers.publish_change", side_effect=_pub):
+    emitted = []
+    with patch("core.providers.publish_change", side_effect=_pub), \
+         patch("core.orchestrator.emit", side_effect=lambda t, e: emitted.append((t, e))):
         ok = _call(c, token, "open_mr", {"title": "Review Hook Test"})
     assert ok["result"]["isError"] is False
 
@@ -564,6 +598,11 @@ def test_open_mr_fires_review_hook(db_path):
                     if t.get("agent") == "mr-reviewer"
                     and f"Review-of-MR: {published_mr_id}" in t["goal"]]
     assert len(review_tasks) == 1
+
+    # Created is not enough — an un-emitted task never reaches the dispatch
+    # queue and sits `active` with an empty thread forever (live incident
+    # task-246eb605). The hook must put it on the queue.
+    assert (review_tasks[0]["id"], "created") in emitted
 
 
 def test_second_decision_in_one_pass_is_rejected(db_path):

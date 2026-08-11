@@ -84,6 +84,15 @@ def _propose_subtasks(session, items=None, **_):
 def _finish(session, summary="", **_):
     if not summary.strip():
         return {"error": "summary required"}
+    # A review task carries a verdict for a specific MR, and only approve /
+    # request_changes write it back. Finishing with prose strands the MR at
+    # "pending" forever, so refuse here rather than trust the prompt — the
+    # agent gets told which tool to use instead.
+    task = store.get_task(session["task_id"])
+    if task and reviews.parse_review_marker(task.get("goal", "")):
+        return {"error": "this is a review task — finish it with "
+                         "approve(summary=...) or request_changes(reason=...) "
+                         "so the verdict reaches the merge request"}
     store.post_message(session["task_id"], session["role"], kind="result", text=summary)
     _end_worker(session)
     return {"ok": True}
@@ -133,6 +142,10 @@ def _open_mr(session, title="", description="", **_):
             task = reviews.ensure_review_task(mr)
             if task:
                 mergerequests.set_review_status(mr["id"], "pending")
+                # A created task is inert until an event puts it on the dispatch
+                # queue — without this the review task sits `active` forever.
+                from core.orchestrator import emit
+                emit(task["id"], "created")
     except Exception:
         logger.warning("review hook failed for open_mr on task %s", session["task_id"], exc_info=True)
 
