@@ -14,11 +14,26 @@ from web.markdown import render_md
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+def _asset_v(name: str) -> str:
+    """Cache-busting stamp for a static asset — its mtime.
+
+    Static files are served with an ETag, but a browser is free to reuse a
+    cached copy without revalidating; editing app.css then shows nothing until
+    a manual hard reload. Putting the mtime in the URL makes an edited file a
+    different URL, so the change lands on an ordinary refresh.
+    """
+    try:
+        return str(int((Path(__file__).parent / "static" / name).stat().st_mtime))
+    except OSError:
+        return "0"
+
+
 def _tmpl():
     from core.store import task_display_title, message_lane
     tmpl = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
     tmpl.env.globals["task_display_title"] = task_display_title
     tmpl.env.globals["message_lane"] = message_lane
+    tmpl.env.globals["asset_v"] = _asset_v
     tmpl.env.filters["md"] = render_md
     return tmpl
 
@@ -181,6 +196,25 @@ async def runtime_page(request: Request):
         if url:
             integrations[key] = url
 
+    # This is the page you open when something looks wrong, so it has to answer
+    # "is the process I'm talking to actually running my current code?" — the
+    # ghost-daemon question. Config alone can't: a stale process serves stale
+    # config just as confidently.
+    import datetime as _dt, os as _os
+    from web.api import _GIT_COMMIT, _PROCESS_START_TIME
+    started = _dt.datetime.fromisoformat(_PROCESS_START_TIME)
+    uptime_s = int((_dt.datetime.now(_dt.timezone.utc) - started).total_seconds())
+    d, rem = divmod(uptime_s, 86400)
+    h, rem = divmod(rem, 3600)
+    m = rem // 60
+    process = {
+        "pid": _os.getpid(),
+        "git_commit": _GIT_COMMIT or "unknown",
+        "started": _PROCESS_START_TIME[:19].replace("T", " "),
+        "uptime": (f"{d}d {h}h" if d else (f"{h}h {m}m" if h else f"{m}m")),
+        "workers_in_flight": len(sessions.list_active()),
+    }
+
     return _tmpl().TemplateResponse(
         request,
         "runtime.html",
@@ -190,6 +224,7 @@ async def runtime_page(request: Request):
             "workspace_root": workspace_root,
             "default_runner": default_runner,
             "integrations": integrations,
+            "process": process,
         },
     )
 
@@ -1030,8 +1065,26 @@ async def task_page(request: Request, task_id: str):
         "children": store.list_children(task_id),
         "parent": store.get_task(task["parent_id"]) if task.get("parent_id") else None,
         "mr": mergerequests.latest_for_task(task_id),
+        "review_of": _review_of(task),
         "usage": usage.task_usage(task_id),
     })
+
+def _review_of(task) -> dict:
+    """For a review task, the MR it reviews and the task that opened it.
+
+    A review task doesn't *own* an MR, so ``latest_for_task`` finds nothing and
+    the detail page offers no way to reach the thing under review — the one
+    object the task is entirely about. The link lives in the goal marker.
+    """
+    from core import reviews, mergerequests, store
+    marker = reviews.parse_review_marker(task.get("goal", ""))
+    if not marker:
+        return {}
+    return {
+        "mr": mergerequests.get_mr(marker["mr_id"]),
+        "origin": store.get_task(marker["origin_task"]) if marker["origin_task"] else None,
+    }
+
 
 def _classify_diff(text: str):
     """Split a unified diff into (class, line) pairs + add/del counts, for
@@ -1205,6 +1258,7 @@ async def task_detail_view(request: Request, task_id: str):
         "children": store.list_children(task_id),
         "parent": store.get_task(task["parent_id"]) if task.get("parent_id") else None,
         "mr": mergerequests.latest_for_task(task_id),
+        "review_of": _review_of(task),
         "usage": usage.task_usage(task_id),
     })
 

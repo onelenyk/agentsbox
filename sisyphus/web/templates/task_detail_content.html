@@ -175,6 +175,17 @@
     </div>
     {% endif %}
 
+    {# a review task is entirely about someone else's MR — reach it from here #}
+    {% if review_of and review_of.mr %}
+    <div class="rail-sec">
+        <div class="rail-h">Reviewing</div>
+        <button type="button" class="btn btn--ghost btn--sm" style="width:100%;justify-content:center"
+                hx-get="/api/mr/{{ review_of.mr.id }}/view" hx-target="#modal-container" hx-swap="innerHTML">⇄ {{ review_of.mr.source_branch }} → {{ review_of.mr.target_branch }} ({{ review_of.mr.status }})</button>
+        <div class="prop" style="margin-top:8px"><span class="k">Verdict</span><span class="v">{{ review_of.mr.review_status or 'pending' }}</span></div>
+        {% if review_of.origin %}<div class="prop"><span class="k">Opened by</span><a class="v" href="/tasks/{{ review_of.origin.id }}">{{ task_display_title(review_of.origin)[:34] }}</a></div>{% endif %}
+    </div>
+    {% endif %}
+
     <div class="rail-sec">
         <div class="rail-h">Usage</div>
         <div class="prop"><span class="k">Cost</span><span class="v mono" style="color:var(--accent-hi)">${{ '%.4f'|format(usage.cost) }}</span></div>

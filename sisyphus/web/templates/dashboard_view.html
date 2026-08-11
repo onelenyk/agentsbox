@@ -2,7 +2,9 @@
 {% set icons = {'orchestrator':'🧭','engineer':'🔧','reviewer':'🔍','explorer':'🔭','planner':'🗺️','human':'🧑'} %}
 <div class="kpis">
     <div class="kpi kpi--live"><div class="l">Active</div><div class="v">{{ t.by_status.get('active', 0) }}</div><div class="d">{{ t.by_status.get('waiting', 0) }} waiting</div></div>
-    <div class="kpi"><div class="l">Done</div><div class="v">{{ t.done }}</div><div class="d">{{ t.completion_rate ~ '% completion' if t.completion_rate is not none else '—' }}</div></div>
+    {# not "% completion" — the rate is done/(done+failed), which says nothing
+       about work still in flight and read as "everything is finished" #}
+    <div class="kpi"><div class="l">Done</div><div class="v">{{ t.done }}</div><div class="d">{{ t.failed }} failed</div></div>
     <div class="kpi kpi--violet"><div class="l">Orchestrator passes</div><div class="v">{{ a.orchestrator_passes }}</div><div class="d">across {{ t.total }} tasks</div></div>
     <div class="kpi kpi--amber"><div class="l">Total cost</div><div class="v">${{ '%.4f'|format(u.totals.cost) }}</div><div class="d">{{ '{:,}'.format(u.totals.tokens) }} tokens</div></div>
 </div>
@@ -57,11 +59,15 @@
 
         {% if ov.created_by_day %}
         <section class="panel">
-            <div class="panel__h"><span class="t">Throughput</span><span class="c">tasks/day</span></div>
+            {% set dmax = (ov.created_by_day|map(attribute='n')|list|max) or 1 %}
+            <div class="panel__h"><span class="t">Throughput</span><span class="c">tasks/day · peak {{ dmax }}</span></div>
             <div class="panel__b" style="padding:12px 14px">
-                {% set dmax = (ov.created_by_day|map(attribute='n')|list|max) or 1 %}
                 <div class="spark">
                     {% for day in ov.created_by_day %}<div class="col" title="{{ day.day }}: {{ day.n }}"><span style="--h:{{ (100*day.n/dmax)|round }}%"></span></div>{% endfor %}
+                </div>
+                {# bare bars are unreadable without a scale: label the day and the count #}
+                <div class="spark-labels">
+                    {% for day in ov.created_by_day %}<span>{{ day.n }}<br>{{ day.day[8:] }}</span>{% endfor %}
                 </div>
             </div>
         </section>
