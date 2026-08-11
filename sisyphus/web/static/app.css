@@ -120,6 +120,15 @@ body::before {
 .sys .line .val { margin-left: auto; color: var(--muted); }
 
 .main { position: relative; z-index: 2; max-width: var(--maxw); padding: 24px 26px 56px; }
+/* The board wants every pixel of width and a page that doesn't scroll. A flex
+   column hands it whatever height the head and tabstrip leave over — no magic
+   offset to drift out of sync when the header changes. */
+.main--board {
+  max-width: none; padding-bottom: 20px;
+  height: 100vh; overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.main--board > #tasks-list { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; }
@@ -195,36 +204,35 @@ body::before {
 .badge--accent { color: var(--accent); background: var(--accent-bg); border-color: var(--accent-bd); }
 
 /* ── Board ───────────────────────────────────────────────────────────── */
-.board { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; }
-.board--now { grid-template-columns: repeat(3, 1fr); margin-bottom: 20px; }
-.board--history { grid-template-columns: repeat(3, 1fr); align-items: start; }
+/* One row of columns filling the viewport: the page itself never scrolls, each
+   column scrolls its own stack. Below the min track width the board scrolls
+   sideways rather than shaving columns down to slivers. */
+.board { display: grid; gap: 14px; }
+.board--flow {
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(260px, 1fr);
+  flex: 1 1 auto; min-height: 0;
+  overflow-x: auto; overflow-y: hidden;
+  padding-bottom: 2px;        /* room for the horizontal scrollbar */
+}
 .board-quiet {
   border: 1px dashed var(--border); border-radius: var(--r-lg);
   padding: 16px 20px; margin-bottom: 20px;
   font-size: 13px; color: var(--muted); text-align: center;
 }
-.board-col--quiet { opacity: .85; }
-.board-col__body--rows { padding: 6px; gap: 1px; }
-.task-row {
-  display: flex; align-items: baseline; gap: 8px;
-  padding: 7px 9px; border-radius: var(--r-sm);
-  font-size: 12.5px; color: var(--text-2); line-height: 1.35;
-}
-.task-row:hover { background: var(--hover); color: var(--text); }
-.task-row__title {
-  flex: 1 1 auto; min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.task-row__mark { flex-shrink: 0; font-size: 11px; }
-.task-row__when { flex-shrink: 0; font-size: 11px; color: var(--muted); }
+/* finished work is present but not loud */
+.board-col--archive { opacity: .9; }
+.board-col--archive .task-card { background: var(--panel); }
 .task-card__when { margin-left: auto; font-size: 11px; color: var(--muted); }
 .board-col {
   background: var(--panel); border: 1px solid var(--border);
-  border-radius: var(--r-lg); min-height: 220px; display: flex; flex-direction: column;
+  border-radius: var(--r-lg); display: flex; flex-direction: column;
+  min-height: 0;              /* let the body, not the column, do the scrolling */
 }
 .board-col__head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 14px; border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
 }
 .board-col__head .label {
   font-size: 12px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--text-2);
@@ -233,7 +241,12 @@ body::before {
   font-family: var(--mono); font-size: 11px; color: var(--muted);
   background: var(--panel-2); border-radius: var(--r-pill); padding: 2px 8px;
 }
-.board-col__body { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.board-col__body {
+  padding: 10px; display: flex; flex-direction: column; gap: 8px;
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+}
+/* a clipped stack must not read as the whole list */
+.board-col__body.is-scrollable { mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); }
 
 /* per-status column color */
 .board-col--active       { --col: var(--accent); --col-bg: var(--accent-bg); }
@@ -291,8 +304,8 @@ body::before {
 }
 .board-col__head .col-ic { margin-right: 6px; opacity: .9; }
 
-/* rich NOW-zone cards: status stripe, stage dots, last event */
-.board--now .task-card--rich { border-left: 3px solid var(--col, var(--border)); }
+/* live cards: status stripe, stage dots, last event */
+.task-card--rich { border-left: 3px solid var(--col, var(--border)); }
 .stagebar { display: flex; align-items: center; gap: 0; margin: 9px 0 8px; }
 .stg {
   width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
@@ -311,7 +324,6 @@ body::before {
   margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .task-card__foot-info { margin-left: auto; font-size: 11px; color: var(--muted); }
-.board-col__body { max-height: calc(100vh - 190px); overflow-y: auto; }
 .empty--col { font-size: 11.5px; padding: 14px 6px; text-align: center; }
 
 /* ── Panels / detail ─────────────────────────────────────────────────── */
@@ -606,12 +618,16 @@ select { cursor: pointer; appearance: none;
 .bar-row { display: grid; grid-template-columns: 92px 1fr auto; align-items: center; gap: 10px; font-size: 12px; }
 .bar-row .cap { color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bar-track { height: 8px; background: var(--inset); border-radius: var(--r-pill); overflow: hidden; }
-.bar-fill { height: 100%; background: var(--accent); border-radius: var(--r-pill); min-width: 2px; }
+/* display:block is load-bearing — the fill is a <span>, and width/height are
+   ignored on an inline box, so without it every bar renders at zero size. */
+.bar-fill { display: block; height: 100%; background: var(--accent); border-radius: var(--r-pill); min-width: 2px; }
 .bar-fill.good { background: var(--good); }
 .bar-row .val { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
-.spark { display: flex; align-items: flex-end; justify-content: center; gap: 3px; height: 64px; }
-.spark .col { flex: 1 1 0; max-width: 56px; background: var(--accent-bg); border-radius: 3px 3px 0 0; min-height: 2px; position: relative; }
+/* Columns must stretch to the track: with align-items:flex-end they collapse to
+   their own min-height and every bar renders as a 2px dash whatever the data. */
+.spark { display: flex; align-items: stretch; justify-content: center; gap: 3px; height: 64px; }
+.spark .col { flex: 1 1 0; max-width: 56px; background: var(--accent-bg); border-radius: 3px 3px 0 0; position: relative; }
 .spark .col > span { position: absolute; inset: 0; top: auto; height: var(--h, 0%); background: var(--accent); border-radius: 3px 3px 0 0; }
 .spark-labels { display: flex; justify-content: center; gap: 3px; margin-top: 5px; }
 .spark-labels span { flex: 1 1 0; max-width: 56px; text-align: center; font-size: 9px; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -680,11 +696,17 @@ select { cursor: pointer; appearance: none;
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
 @media (max-width: 820px) {
-  .board { grid-template-columns: 1fr 1fr; }
   .container { padding: 20px 16px 48px; }
 }
-@media (max-width: 520px) {
-  .board { grid-template-columns: 1fr; }
+/* Narrow: stop pretending it's a wall of columns — stack them and let the page
+   scroll, so a phone gets full-width cards instead of six 240px slivers. */
+@media (max-width: 720px) {
+  .main--board { height: auto; overflow: visible; display: block; }
+  .board--flow {
+    grid-auto-flow: row; grid-auto-columns: auto;
+    overflow: visible;
+  }
+  .board--flow .board-col { max-height: 60vh; }
 }
 
 .ecard.is-off { opacity: .5; }

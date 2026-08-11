@@ -4,8 +4,11 @@
 <div class="coplan-head">
     <div class="plan-switch">
         {% for p in plans %}
-        <button class="chip-btn {{ 'is-on' if p.id == plan.id else '' }}"
-                hx-get="/api/plans/{{ p.id }}" hx-target="#plan-body" hx-swap="innerHTML">{{ (p.title or 'plan')[:24] }}</button>
+        {# a hard slice cuts mid-word with no ellipsis, so "E2E: conflict resolve (p"
+           reads as broken markup rather than a shortened title #}
+        {% set ptitle = p.title or 'plan' %}
+        <button class="chip-btn {{ 'is-on' if p.id == plan.id else '' }}" title="{{ ptitle }}"
+                hx-get="/api/plans/{{ p.id }}" hx-target="#plan-body" hx-swap="innerHTML">{{ ptitle if ptitle|length <= 24 else ptitle[:23] ~ '…' }}</button>
         {% endfor %}
         <button class="chip-btn chip-btn--ghost" hx-post="/api/plans/new" hx-target="#plan-body" hx-swap="innerHTML">+ new</button>
     </div>
