@@ -366,19 +366,14 @@ async def handle_event(
     """One cold pass. Returns (decision, background_task_or_None) — the task
     is only non-None for spawn_worker, exposed so tests can await it."""
     task = store.get_task(task_id)
-    if not task or task["status"] in ("done", "failed"):
-        return Decision(action="noop", why="task missing or already terminal"), None
-
-    # A worker is still running — don't start a second one. Its worker_finished
-    # event drives the next decision, which will see anything posted meanwhile
-    # (e.g. a human reply). This makes mid-run events safe no-ops.
-    if _worker_in_flight(task_id):
-        return Decision(action="noop", why="worker already in flight"), None
-
-    # Fanned out and children are still running — wait. Their child_finished
-    # events wake this parent; the last one to finish lets the pass proceed.
-    if _children_pending(task_id):
-        return Decision(action="noop", why="waiting on child tasks"), None
+    # One statement of "may the loop act on this" (see pass_blocked_by): a
+    # running worker must not get a second one spawned behind it, and a parent
+    # mid-fan-out waits for its children's child_finished roll-ups. Not
+    # spontaneous — an event brought us here, so a parked `waiting` task is
+    # allowed to proceed; that is how a human reply resumes it.
+    blocked = pass_blocked_by(task, spontaneous=False)
+    if blocked:
+        return Decision(action="noop", why=blocked), None
 
     # Budget guard: stop spending on a task (or for the day) once a configured
     # cap is hit — park it as waiting so a human decides. A human reply bypasses
@@ -585,8 +580,36 @@ STALL_AFTER_SECONDS = 600
 WATCHDOG_INTERVAL_SECONDS = 120
 
 
+def pass_blocked_by(task: dict, spontaneous: bool = False) -> Optional[str]:
+    """Why this task is NOT owed an orchestrator pass, or None if it is.
+
+    The single statement of "should the loop act on this". It was previously
+    written twice — inline in handle_event and again in find_stalled — and the
+    copies had already drifted: find_stalled did not check for pending children,
+    so a parent waiting on its fan-out could be reported as stalled and logged as
+    a fault.
+
+    ``spontaneous`` is the distinction the two callers genuinely need, and it is
+    not cosmetic. A `waiting` task is parked ON PURPOSE, so nothing may wake it
+    of its own accord — but a human reply must resume it, and task_reply emits
+    `human_replied` WITHOUT first setting the status back to active
+    (web/routes.py). So an event-driven pass has to accept a waiting task, while
+    a scan must skip it. Collapsing the two would silently kill every
+    human-answers-a-question resume.
+    """
+    if not task or task["status"] in ("done", "failed"):
+        return "task missing or already terminal"
+    if spontaneous and task["status"] != "active":
+        return f"parked as {task['status']} — only an explicit event resumes it"
+    if _worker_in_flight(task["id"]):
+        return "worker already in flight"
+    if _children_pending(task["id"]):
+        return "waiting on child tasks"
+    return None
+
+
 def find_stalled(stall_after: int = STALL_AFTER_SECONDS) -> list:
-    """Active tasks with no worker running and no thread activity for
+    """Active tasks owed a pass that have had no thread activity for
     *stall_after* seconds. ``updated_at`` is bumped by every post_message, so a
     frozen one means genuinely nothing is happening — not merely a quiet worker.
     """
@@ -602,8 +625,8 @@ def find_stalled(stall_after: int = STALL_AFTER_SECONDS) -> list:
             seen = seen.replace(tzinfo=_dt.timezone.utc)
         if (now - seen).total_seconds() < stall_after:
             continue
-        if _worker_in_flight(task["id"]):
-            continue          # a worker IS running; quiet is not stalled
+        if pass_blocked_by(task, spontaneous=True) is not None:
+            continue          # a worker or a child IS running; quiet is not stalled
         stalled.append(task["id"])
     return stalled
 

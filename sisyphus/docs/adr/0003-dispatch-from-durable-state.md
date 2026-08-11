@@ -60,15 +60,30 @@ event space — the thing our own code chooses from — is a convention.
 **A pass is owed when a predicate over durable state says so. `emit` becomes a
 latency hint, not a correctness requirement.**
 
-The predicate is not new logic. It is already written twice, inline in
-`handle_event` and again in `find_stalled`:
+The predicate is not new logic. It was already written twice, inline in
+`handle_event` and again in `find_stalled` — and the copies had drifted:
+`find_stalled` omitted the pending-children check, so a parent mid-fan-out could
+be reported as stalled and logged as a fault.
 
-```python
-def needs_pass(task) -> bool:
-    return (task["status"] == "active"
-            and not _worker_in_flight(task["id"])
-            and not _children_pending(task["id"]))
-```
+Phase 2 extracted it as `pass_blocked_by(task, spontaneous=False)`, returning the
+reason a pass is *not* owed, or `None` if it is.
+
+**The `spontaneous` flag is load-bearing, not cosmetic.** Writing this ADR I
+first stated the predicate as a single condition including `status == "active"`,
+and implementing it that way broke a path immediately: `task_reply` emits
+`human_replied` *without* setting the status back to `active`
+(`web/routes.py`), so a parked task arrives at `handle_event` still `waiting`.
+A predicate that requires `active` silently kills every
+human-answers-a-question resume. The two callers need genuinely different
+questions:
+
+- **event-driven** (`spontaneous=False`) — an event brought us here, so a
+  `waiting` task may proceed. That *is* the resume.
+- **scan-driven** (`spontaneous=True`) — parked means parked; nothing may wake a
+  `waiting` task of its own accord.
+
+Both cases now have a test, because the distinction is invisible in the code and
+expensive to rediscover.
 
 Check it against every way a pass can end, and note that no fourth clause is
 required — the existing guards already partition the space:
@@ -130,10 +145,19 @@ restart, but after a restart there is no in-flight worker to protect against.
 
 Only once that holds can the staleness threshold be deleted.
 
-**Phase 4 — drop `event_type` from the decision path.** It already influences
-exactly one thing: `handle_event` bypasses the budget guard when the type is
-`human_replied`. Replace that with a thread-derived check (the last message is
-authored by `human`), which is what the type was standing in for anyway.
+**Phase 4 — drop `event_type` from the decision path.** Two things depend on it,
+not one, and the second was missed on the first writing of this ADR:
+
+1. `handle_event` bypasses the budget guard when the type is `human_replied`.
+2. More importantly, the *existence* of that event is the only thing that
+   resumes a `waiting` task. A scan will never wake one, by design.
+
+Both are recoverable from the thread: "the last message is authored by `human`
+and the orchestrator has not acted since" answers the budget bypass and the
+resume together, and it is durable, where the event is not. That check has to
+land before the event vocabulary can go — otherwise the first parked task after
+a daemon restart never resumes, which is a worse bug than the one this ADR
+fixes.
 
 **Phase 5 — retire the vocabulary.** With nothing branching on it, `Event`
 collapses to a task id, or disappears. `reconcile_on_boot` becomes redundant:

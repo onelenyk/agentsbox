@@ -376,6 +376,39 @@ class TestStallWatchdog:
             assert orchestrator.rescue_stalled(stall_after=600) == 1
         mock_emit.assert_called_once_with(task["id"], "continue")
 
+    def test_a_human_reply_may_resume_a_parked_task(self, db_path):
+        """task_reply emits `human_replied` WITHOUT setting the status back to
+        active, so an event-driven pass must accept a `waiting` task. Blocking on
+        status here would kill every human-answers-a-question resume — which a
+        naive single-predicate refactor does.
+        """
+        task = store.create_task("parked on a question")
+        store.post_message(task["id"], "orchestrator", kind="question", text="which branch?")
+        store.set_status(task["id"], "waiting")
+        store.post_message(task["id"], "human", kind="answer", text="main")
+
+        assert orchestrator.pass_blocked_by(store.get_task(task["id"])) is None
+
+    def test_a_scan_must_not_wake_a_parked_task_on_its_own(self, db_path):
+        """The other half: parked means parked. Only an explicit event resumes."""
+        task = store.create_task("parked on a question")
+        store.set_status(task["id"], "waiting")
+
+        blocked = orchestrator.pass_blocked_by(store.get_task(task["id"]),
+                                               spontaneous=True)
+        assert blocked and "parked" in blocked
+
+    def test_a_parent_awaiting_children_is_not_stalled(self, db_path):
+        """find_stalled used to skip the children check that handle_event had, so
+        a parent mid-fan-out could be reported as a fault and logged as one."""
+        parent = store.create_task("fan out across repos")
+        store.create_task("child work", parent_id=parent["id"])
+        self._age(parent["id"], 7200)
+
+        with patch("core.orchestrator.emit") as mock_emit:
+            assert orchestrator.rescue_stalled(stall_after=600) == 0
+        mock_emit.assert_not_called()
+
     def test_ignores_waiting_and_terminal_tasks(self, db_path):
         for status in ("waiting", "done", "failed"):
             t = store.create_task(f"parked in {status}")
