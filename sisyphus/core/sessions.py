@@ -3,8 +3,16 @@ to one (task, role).
 
 In-memory on purpose: a session only matters while its worker subprocess runs,
 inside the same daemon process that both mints and resolves it. Durable state
-lives on the task thread; if the daemon restarts, its workers die with it and
-the liveness check re-drives the task from the thread (no session to persist).
+lives on the task thread, and reconcile_on_boot re-drives an interrupted task
+from that thread, so there is nothing to persist here.
+
+Correction (2026-08-12): a worker does NOT reliably die with the daemon. An
+opencode subprocess survived a restart, was reparented to PID 1, and kept
+running for minutes. It can no longer reach the agent-MCP (its token died with
+this dict), so it is invisible in the UI while still spending the API key. The
+absence of a session is therefore a useful signal in the other direction too:
+a task whose thread says a worker is in flight, with no session backing it, has
+a worker that will never report — see orchestrator.find_stalled.
 """
 import secrets
 from datetime import datetime, timezone
