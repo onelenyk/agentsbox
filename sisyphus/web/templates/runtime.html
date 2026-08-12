@@ -14,7 +14,7 @@
     <div class="result__label">Configuration</div>
     <pre class="mono" style="font-size:12px;white-space:pre-wrap;color:var(--text-2);line-height:1.7;margin-top:6px">workspace_root:   {{ workspace_root }}
 default_runtime:  {% if default_runner %}{{ default_runner.name }}{% if default_runner.model %} · {{ default_runner.model }}{% endif %}{% else %}(none configured){% endif %}
-default_timeout:  {{ config.default_timeout or 300 }}s
+worker_timeout:   {{ limits.worker_timeout }}s total · {{ limits.worker_idle_timeout }}s idle
 max_review_loops: {{ config.max_review_loops or 3 }}
 log_level:        {{ config.log_level or 'info' }}
 {% if integrations %}

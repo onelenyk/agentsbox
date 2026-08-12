@@ -141,6 +141,19 @@ class TestIndicatorsTrackTheData:
         assert "Running code" in body
         assert "unknown" not in body.split("Running code", 1)[1][:120]
 
+    def test_daemon_page_shows_the_timeouts_that_are_actually_enforced(self, db_path):
+        """The page advertised `default_timeout: 300` from a config key no code
+        has ever read, while workers actually get 1800s. Sizing a long job off
+        that page was wrong by 6x — it misled a reader the day this was found.
+        Tie the displayed number to the constant that enforces it.
+        """
+        from core.worker import WORKER_TIMEOUT_SECONDS, WORKER_IDLE_TIMEOUT_SECONDS
+
+        body = _text(_client().get("/runtime"))
+        assert str(WORKER_TIMEOUT_SECONDS) in body
+        assert str(WORKER_IDLE_TIMEOUT_SECONDS) in body
+        assert "default_timeout" not in body, "dead config key is back on the page"
+
     def test_review_task_links_to_the_mr_it_reviews(self, db_path):
         origin = store.create_task("build the feature", repo="sisyphus")
         mr = mergerequests.create_mr(task_id=origin["id"], repo="sisyphus",

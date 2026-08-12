@@ -205,6 +205,7 @@ async def runtime_page(request: Request):
     # ghost-daemon question. Config alone can't: a stale process serves stale
     # config just as confidently.
     import datetime as _dt, os as _os
+    from core import worker as _worker
     from web.api import _GIT_COMMIT, _PROCESS_START_TIME
     started = _dt.datetime.fromisoformat(_PROCESS_START_TIME)
     uptime_s = int((_dt.datetime.now(_dt.timezone.utc) - started).total_seconds())
@@ -229,6 +230,10 @@ async def runtime_page(request: Request):
             "default_runner": default_runner,
             "integrations": integrations,
             "process": process,
+            # from the code that enforces them, not from a config key — see
+            # core.worker for why this page used to advertise a 6x-wrong number
+            "limits": {"worker_timeout": _worker.WORKER_TIMEOUT_SECONDS,
+                       "worker_idle_timeout": _worker.WORKER_IDLE_TIMEOUT_SECONDS},
         },
     )
 
