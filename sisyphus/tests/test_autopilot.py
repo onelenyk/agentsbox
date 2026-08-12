@@ -165,3 +165,55 @@ def test_reconcile_skips_missed(db_path):
     ap.reconcile_next_runs()
     now = datetime.now(timezone.utc).isoformat()
     assert ap.get_autopilot(a["id"])["next_run"] > now  # recomputed to the future, not replayed
+
+
+# ── display title ───────────────────────────────────────────────────────
+
+def test_fire_sets_title_for_schedule(db_path, monkeypatch):
+    _emit_recorder(monkeypatch)
+    a = ap.create_autopilot(name="Nightly Scan", trigger_type="schedule",
+                            interval_seconds=3600, goal_template="scan all")
+    tid = ap.fire(a)
+    t = store.get_task(tid)
+    assert t["title"]
+    assert t["title"].startswith("Nightly Scan")
+    assert "·" in t["title"]
+    assert len(t["title"]) <= 60
+
+
+def test_fire_sets_title_for_webhook(db_path, monkeypatch):
+    _emit_recorder(monkeypatch)
+    a = ap.create_autopilot(name="Jira Bot", trigger_type="webhook",
+                            webhook_platform="jira", webhook_event="issue_created",
+                            goal_template="handle {{ issue.key }}")
+    payload = {"webhookEvent": "jira:issue_created", "issue": {"key": "SLN-1"}}
+    tid = ap.fire(a, context=payload)
+    t = store.get_task(tid)
+    assert t["title"]
+    assert "Jira Bot" in t["title"]
+    assert len(t["title"]) <= 60
+
+
+def test_display_title_falls_back_when_no_title(db_path):
+    from core.store import task_display_title
+    t = store.create_task("Do the thing\nsecond line item")
+    assert task_display_title(t) == "Do the thing"
+    assert "second" not in task_display_title(t)
+
+
+def test_display_title_uses_explicit_title(db_path):
+    from core.store import task_display_title
+    t = store.create_task("Long goal that spans\nmultiple lines", title="Short Title")
+    assert task_display_title(t) == "Short Title"
+
+
+def test_fire_sets_title_for_schedule_via_webhook_path(db_path, monkeypatch):
+    _emit_recorder(monkeypatch)
+    a = ap.create_autopilot(name="MR Monitor", trigger_type="schedule",
+                            interval_seconds=3600, goal_template="review MRs")
+    ap._set_next_run(a["id"], "2000-01-01T00:00:00+00:00")
+    ap.tick_once()
+    tasks = store.list_tasks()
+    assert len(tasks) == 1
+    assert tasks[0]["title"]
+    assert tasks[0]["title"].startswith("MR Monitor")
