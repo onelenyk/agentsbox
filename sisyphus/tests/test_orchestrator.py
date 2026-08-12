@@ -356,10 +356,17 @@ class TestStallWatchdog:
 
     def test_does_not_touch_a_task_whose_worker_is_running(self, db_path):
         """The important false positive: a worker can be quiet for a long time.
-        Rescuing it would drive a second decision behind its back."""
+        Rescuing it would drive a second decision behind its back.
+
+        A live worker means BOTH a thread marker and a session — the marker
+        alone is what a killed worker leaves behind, which find_abandoned now
+        (correctly) treats as dead.
+        """
+        sessions.clear()
         task = store.create_task("long build")
         store.post_message(task["id"], "system", kind="worker_started",
                            text="spawning engineer")
+        sessions.mint(task["id"], "engineer")
         self._age(task["id"], 7200)
 
         with patch("core.orchestrator.emit") as mock_emit:
@@ -375,6 +382,38 @@ class TestStallWatchdog:
         with patch("core.orchestrator.emit") as mock_emit:
             assert orchestrator.rescue_stalled(stall_after=600) == 1
         mock_emit.assert_called_once_with(task["id"], "continue")
+
+    def test_a_killed_worker_stops_blocking_its_task(self, db_path):
+        """Killing the subprocess is the only way to cancel today, and it leaves
+        worker_started with no worker_finished — so _worker_in_flight stays true
+        and every later pass is a no-op. The task became unrecoverable without a
+        daemon restart; this happened for real while cancelling one.
+        """
+        sessions.clear()
+        task = store.create_task("was cancelled by hand")
+        store.post_message(task["id"], "system", kind="worker_started", text="go")
+        self._age(task["id"], 3600)          # no session was ever minted
+
+        with patch("core.orchestrator.emit") as mock_emit:
+            assert orchestrator.rescue_stalled(stall_after=600) == 1
+
+        assert not orchestrator._worker_in_flight(task["id"])
+        mock_emit.assert_called_once_with(task["id"], "worker_finished")
+
+    def test_a_slow_but_live_worker_is_left_alone(self, db_path):
+        """The false positive that matters: a Gradle build can be silent for far
+        longer than the stall threshold. Elapsed time cannot tell it apart from
+        a killed worker — the live session can."""
+        sessions.clear()
+        task = store.create_task("running a long android build")
+        store.post_message(task["id"], "system", kind="worker_started", text="go")
+        sessions.mint(task["id"], "engineer")
+        self._age(task["id"], 7200)
+
+        with patch("core.orchestrator.emit") as mock_emit:
+            assert orchestrator.rescue_stalled(stall_after=600) == 0
+        mock_emit.assert_not_called()
+        assert orchestrator._worker_in_flight(task["id"])
 
     def test_a_human_reply_may_resume_a_parked_task(self, db_path):
         """task_reply emits `human_replied` WITHOUT setting the status back to

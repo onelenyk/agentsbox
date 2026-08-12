@@ -631,10 +631,47 @@ def find_stalled(stall_after: int = STALL_AFTER_SECONDS) -> list:
     return stalled
 
 
+def find_abandoned(stall_after: int = STALL_AFTER_SECONDS) -> list:
+    """Active tasks whose thread says a worker is running, but whose worker is
+    gone and will never report back.
+
+    The stall watchdog deliberately skips anything with a worker in flight, so
+    a worker that dies without reporting leaves a task that looks identical to
+    one that is merely busy — and stays that way forever, since every pass is a
+    no-op while the marker stands. Only a daemon restart clears it, via
+    reconcile_on_boot. This is not hypothetical: cancelling a task by killing
+    the subprocess (the only way to cancel today) produces exactly this state.
+
+    A live worker holds a session; a dead one does not. That is what separates
+    "quietly running a 15-minute Gradle build" from "killed" — the elapsed-time
+    check alone cannot, and would abandon the slow build.
+    """
+    import datetime as _dt
+    from . import sessions
+    now = _dt.datetime.now(_dt.timezone.utc)
+    abandoned = []
+    for task in store.list_tasks(status="active"):
+        if not _worker_in_flight(task["id"]):
+            continue
+        if sessions.list_for_task(task["id"]):
+            continue          # a session backs it — the worker is alive
+        try:
+            seen = _dt.datetime.fromisoformat(task["updated_at"])
+        except (ValueError, KeyError, TypeError):
+            continue
+        if seen.tzinfo is None:
+            seen = seen.replace(tzinfo=_dt.timezone.utc)
+        if (now - seen).total_seconds() < stall_after:
+            continue          # may simply not have minted its session yet
+        abandoned.append(task["id"])
+    return abandoned
+
+
 def rescue_stalled(stall_after: int = STALL_AFTER_SECONDS) -> int:
-    """Queue a `continue` for every stalled task. Logs at WARNING: a rescue
-    means some path created work without an event, and that is worth seeing
-    rather than silently papering over."""
+    """Queue a `continue` for every stalled task, and close the marker on any
+    task whose worker died without reporting. Logs at WARNING: either case
+    means work was lost somewhere, and that is worth seeing rather than
+    silently papering over."""
     ids = find_stalled(stall_after)
     for task_id in ids:
         logger.warning(
@@ -643,6 +680,20 @@ def rescue_stalled(stall_after: int = STALL_AFTER_SECONDS) -> int:
             task_id, stall_after,
         )
         emit(task_id, "continue")
+
+    for task_id in find_abandoned(stall_after):
+        logger.warning(
+            "watchdog: %s is marked worker-in-flight but has no session and has "
+            "been silent for %ds — its worker died without reporting. Closing "
+            "the marker so the task can move.",
+            task_id, stall_after,
+        )
+        store.post_message(
+            task_id, "system", kind="worker_finished",
+            text="worker vanished without reporting (no live session) — resuming",
+        )
+        emit(task_id, "worker_finished")
+        ids.append(task_id)
     return len(ids)
 
 
