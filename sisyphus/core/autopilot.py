@@ -208,6 +208,33 @@ def render_template(tmpl: str, context: dict) -> str:
     return re.sub(r"\{\{\s*([^}]+?)\s*\}\}", repl, tmpl or "")
 
 
+def _make_title(ap: dict, context: Optional[dict] = None) -> Optional[str]:
+    """Build a human-readable display title for a task fired by this autopilot.
+
+    Schedule: ``"name · 2026-08-09"``.
+    Webhook:  ``"name: event"``, or just the name if no event key.
+    Truncated to 60 chars."""
+    name = (ap.get("name") or "").strip()
+    if not name:
+        return None
+    tp = ap.get("trigger_type", "")
+    if tp == "schedule":
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        title = f"{name} · {date_str}"
+    elif tp == "webhook":
+        if context:
+            platform = ap.get("webhook_platform", "")
+            key = event_key(platform, context)
+        else:
+            key = ""
+        title = f"{name}: {key}" if key else name
+    else:
+        return None
+    if len(title) > 60:
+        title = title[:59] + "…"
+    return title
+
+
 def fire(ap: dict, context: Optional[dict] = None) -> Optional[str]:
     """Create a task from the autopilot and wake the orchestrator. Returns the
     task id, or None if skipped (previous run still in flight)."""
@@ -223,7 +250,9 @@ def fire(ap: dict, context: Optional[dict] = None) -> Optional[str]:
             return None
 
     goal = render_template(ap.get("goal_template", ""), context).strip() or ap["name"]
-    task = store.create_task(goal, ap.get("repo") or "", agent=ap.get("agent") or None)
+    title = _make_title(ap, context)
+    task = store.create_task(goal, ap.get("repo") or "", agent=ap.get("agent") or None,
+                             title=title)
     emit(task["id"], "created")
     record_fire(ap["id"], task["id"])
     logger.info("autopilot %s fired -> task %s", ap["name"], task["id"])
