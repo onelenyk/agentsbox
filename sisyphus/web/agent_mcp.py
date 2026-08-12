@@ -153,8 +153,9 @@ def _open_mr(session, title="", description="", **_):
 
 
 def _approve(session, summary="", **_):
+    text = summary.strip() if summary.strip().startswith("APPROVED") else f"APPROVED: {summary}".strip()
     store.post_message(session["task_id"], session["role"], kind="result",
-                       text=f"APPROVED: {summary}".strip())
+                       text=text)
     try:
         task = store.get_task(session["task_id"])
         if task:
@@ -236,8 +237,9 @@ def _decide_note(session, text="", why="", **_):
 def _request_changes(session, reason="", **_):
     if not reason.strip():
         return {"error": "reason required for request_changes"}
+    text = reason.strip() if reason.strip().startswith("CHANGES REQUESTED") else f"CHANGES REQUESTED: {reason}"
     store.post_message(session["task_id"], session["role"], kind="result",
-                       text=f"CHANGES REQUESTED: {reason}")
+                       text=text)
     try:
         task = store.get_task(session["task_id"])
         if task:
