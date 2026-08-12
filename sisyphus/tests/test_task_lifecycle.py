@@ -77,6 +77,34 @@ class TestStop:
     def test_stop_on_a_missing_task_is_404(self, db_path):
         assert _client().post("/api/tasks/task-nope/stop").status_code == 404
 
+    def test_stopping_a_parent_stops_its_fan_out(self, db_path):
+        """Children run their own workers. Parking only the root leaves them
+        spending and rolling results up into a task the human already stopped."""
+        cancellation.clear()
+        parent = store.create_task("fan out across repos")
+        kid_a = store.create_task("child a", parent_id=parent["id"])
+        kid_b = store.create_task("child b", parent_id=parent["id"])
+        ev_a = cancellation.register(kid_a["id"], "engineer")
+        ev_b = cancellation.register(kid_b["id"], "engineer")
+
+        assert _client().post(f"/api/tasks/{parent['id']}/stop").status_code == 200
+
+        assert ev_a.is_set() and ev_b.is_set(), "children kept working"
+        assert store.get_task(kid_a["id"])["status"] == "waiting"
+        assert store.get_task(kid_b["id"])["status"] == "waiting"
+        assert any("parent" in m["text"] for m in store.get_thread(kid_a["id"]))
+
+    def test_stopping_a_parent_leaves_finished_children_alone(self, db_path):
+        """A child that already succeeded must not be dragged back to waiting."""
+        cancellation.clear()
+        parent = store.create_task("fan out")
+        done_kid = store.create_task("already finished", parent_id=parent["id"])
+        store.set_status(done_kid["id"], "done")
+
+        _client().post(f"/api/tasks/{parent['id']}/stop")
+
+        assert store.get_task(done_kid["id"])["status"] == "done"
+
 
 class TestStopActuallyHolds:
     """The subtle half. A cancelled worker posts worker_finished on its way out,
