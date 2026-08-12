@@ -29,6 +29,12 @@
             <button class="btn btn--sm"
                     hx-post="/api/tasks/{{ task.id }}/reopen"
                     hx-swap="none">Reopen</button>
+            {% else %}
+            {# the only way to stop work; without it a human had to find the pid #}
+            <button class="btn btn--sm"
+                    hx-post="/api/tasks/{{ task.id }}/stop"
+                    hx-confirm="Stop this task? Its running worker is killed; the task parks as waiting and a reply resumes it."
+                    hx-swap="none">Stop</button>
             {% endif %}
             <button class="btn btn--danger btn--sm"
                     hx-post="/api/tasks/{{ task.id }}/delete"
