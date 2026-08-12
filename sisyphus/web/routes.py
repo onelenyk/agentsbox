@@ -1314,16 +1314,33 @@ async def task_stop(task_id: str):
     if task["status"] in ("done", "failed"):
         return Response(status_code=409)
 
-    signalled = cancellation.request(task_id)
-    store.set_status(task_id, "waiting")
+    # Stop the whole fan-out, not just the parent. Children run their own
+    # workers; parking only the root leaves them burning the API key and rolling
+    # their results up into a task the human already stopped. Park them too, or
+    # their cancelled worker's event drives a pass and the orchestrator simply
+    # spawns the next one.
+    tree = store.task_tree(task_id)
+    signalled = 0
+    for tid in tree:
+        signalled += cancellation.request(tid)
+        t = store.get_task(tid)
+        if t and t["status"] not in ("done", "failed"):
+            store.set_status(tid, "waiting")
+            if tid != task_id:
+                store.post_message(
+                    tid, "system", kind="note",
+                    text=f"stopped because its parent {task_id} was stopped by the human",
+                )
     store.post_message(
         task_id, "system", kind="note",
         text=("stopped by the human — "
               + (f"{signalled} worker(s) signalled to stop. " if signalled
                  else "no worker was running. ")
+              + (f"{len(tree) - 1} child task(s) stopped too. " if len(tree) > 1 else "")
               + "Reply below to resume."),
     )
-    logger.info("task %s stopped by the human (%d worker(s) signalled)", task_id, signalled)
+    logger.info("task %s stopped by the human (%d worker(s) across %d task(s))",
+                task_id, signalled, len(tree))
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "taskUpdated"
     return resp
