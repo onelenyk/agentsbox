@@ -252,13 +252,22 @@ def _build_prompt(role_def: dict, goal: str, instruction: str, thread: str) -> s
     )
 
 
+# The real limits a worker runs under. Named, so the Daemon page can show what
+# is actually enforced instead of a config key that enforces nothing — the page
+# advertised `default_timeout: 300` from config.yaml, which no code has ever
+# read, while workers in fact get 1800s. Anyone sizing a long job off that page
+# would have been off by 6x.
+WORKER_TIMEOUT_SECONDS = 1800       # total wall-clock for one worker run
+WORKER_IDLE_TIMEOUT_SECONDS = 300   # silence before the run is abandoned
+
+
 async def spawn_worker(
     task_id: str,
     role: str,
     instruction: str,
     repo_name: Optional[str] = None,
-    timeout: Optional[int] = 1800,
-    idle_timeout: Optional[int] = 300,
+    timeout: Optional[int] = WORKER_TIMEOUT_SECONDS,
+    idle_timeout: Optional[int] = WORKER_IDLE_TIMEOUT_SECONDS,
 ) -> None:
     """Launch one worker for *task_id*. Fire-and-forget: the outcome lands on
     the thread via the agent's own tool calls, not in a return value."""

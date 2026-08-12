@@ -1,19 +1,9 @@
 api:
   allow_localhost: true
   token: ${SISYPHUS_API_TOKEN}
-webhooks:
-  secret: ${SISYPHUS_WEBHOOK_SECRET}
-default_model: deepseek
-default_timeout: 300
-# Max worker subprocesses running at once (bounds fan-out resource use).
-max_concurrent_workers: 2
-# Per-task $ cap — park the task for a human once hit (0 = disabled). A normal
-# task costs ~$0.14, so 5.0 only trips on a genuine runaway.
-task_budget_usd: 5.0
-# Daily $ cap across all tasks (0 = disabled).
-daily_budget_usd: 0
-# How often the autopilot loop checks for due scheduled automations.
 autopilot_tick_seconds: 30
+daily_budget_usd: 0
+default_model: deepseek
 github:
   base_url: ${GITHUB_BASE_URL}
   token: ${GITHUB_TOKEN}
@@ -25,6 +15,7 @@ jira:
   email: ${JIRA_EMAIL}
   token: ${JIRA_API_TOKEN}
 log_level: info
+max_concurrent_workers: 2
 max_review_loops: 3
 openrouter:
   api_key: ${OPENROUTER_API_KEY}
@@ -42,3 +33,9 @@ repos:
 - branch: main
   name: testrepo-bug
   source: /Users/lenyk/workproject/agentsbox/testrepo-bug
+- branch: staging
+  name: android-driver
+  source: /Users/lenyk/workproject/android-driver
+task_budget_usd: 5.0
+webhooks:
+  secret: ${SISYPHUS_WEBHOOK_SECRET}
