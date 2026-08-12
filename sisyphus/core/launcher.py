@@ -228,6 +228,19 @@ async def launch_agent(
     # lines that reviewers kept misreporting as "pre-existing sandbox issues".
     # Point it at a private per-run dir instead: isolated AND functional.
     env = dict(os.environ)
+    # launchd hands the daemon a nearly empty environment, and the worker
+    # inherits it — so a project needing a real toolchain dies on its first
+    # command. Apply the configured extras BEFORE the daemon's own variables
+    # below, so config can supply PATH/JAVA_HOME/ANDROID_HOME but can never
+    # override the isolation this function sets up.
+    from .config import worker_env as _worker_env, worker_env_rejected
+    extras = _worker_env()
+    if extras:
+        env.update(extras)
+        logger.info("worker env: applied %s from config", ", ".join(sorted(extras)))
+    for name in worker_env_rejected():
+        logger.warning("worker_env: ignoring %r — the daemon owns that variable", name)
+
     env["WORKSPACE_ROOT"] = str(output_path / "wsroot")
     Path(env["WORKSPACE_ROOT"]).mkdir(parents=True, exist_ok=True)
     env["SISYPHUS_OUTPUT_DIR"] = str(output_dir)
