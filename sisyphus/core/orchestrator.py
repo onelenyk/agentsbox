@@ -371,7 +371,7 @@ async def handle_event(
     # mid-fan-out waits for its children's child_finished roll-ups. Not
     # spontaneous — an event brought us here, so a parked `waiting` task is
     # allowed to proceed; that is how a human reply resumes it.
-    blocked = pass_blocked_by(task, spontaneous=False)
+    blocked = pass_blocked_by(task, spontaneous=False, event_type=event_type)
     if blocked:
         return Decision(action="noop", why=blocked), None
 
@@ -456,13 +456,22 @@ async def _handle_single_agent(task: dict) -> tuple:
     task_id = task["id"]
     thread = store.get_thread(task_id)
 
-    if not any(m["kind"] == "worker_started" for m in thread):
+    from .worker import was_stopped_by_a_human
+
+    # A run that a human stopped produced no result, but that is not the same as
+    # having nothing to show — the work was interrupted mid-instruction. Failing
+    # it here made a stopped pinned task permanently unresumable: replying
+    # re-entered this branch and failed it again. Re-run instead; the worker
+    # sees the whole thread, so the human's new instruction comes with it.
+    stopped = was_stopped_by_a_human(thread)
+    if stopped or not any(m["kind"] == "worker_started" for m in thread):
         store.set_status(task_id, "active")
         bg = asyncio.create_task(
             _spawn_worker_safe(task_id, task["agent"], task["goal"], task.get("repo"))
         )
-        return Decision(action="spawn_worker", role=task["agent"],
-                        why=f"single-agent task — running {task['agent']}"), bg
+        why = (f"single-agent task — re-running {task['agent']} after a human stop"
+               if stopped else f"single-agent task — running {task['agent']}")
+        return Decision(action="spawn_worker", role=task["agent"], why=why), bg
 
     # The agent has run. A reported result (finish/approve) → done; none → failed.
     if any(m["kind"] == "result" for m in thread):
@@ -580,7 +589,11 @@ STALL_AFTER_SECONDS = 600
 WATCHDOG_INTERVAL_SECONDS = 120
 
 
-def pass_blocked_by(task: dict, spontaneous: bool = False) -> Optional[str]:
+RESUMES_A_PARKED_TASK = ("human_replied", "external")
+
+
+def pass_blocked_by(task: dict, spontaneous: bool = False,
+                    event_type: Optional[str] = None) -> Optional[str]:
     """Why this task is NOT owed an orchestrator pass, or None if it is.
 
     The single statement of "should the loop act on this". It was previously
@@ -601,6 +614,13 @@ def pass_blocked_by(task: dict, spontaneous: bool = False) -> Optional[str]:
         return "task missing or already terminal"
     if spontaneous and task["status"] != "active":
         return f"parked as {task['status']} — only an explicit event resumes it"
+    # `waiting` means waiting on a HUMAN, so only a human (or an external
+    # signal) may restart it. Without this, stopping a task cannot hold: the
+    # cancelled worker posts worker_finished on its way out, that event drives
+    # a pass, and the orchestrator immediately spawns the next worker.
+    if (not spontaneous and task["status"] == "waiting"
+            and event_type is not None and event_type not in RESUMES_A_PARKED_TASK):
+        return f"parked for a human — {event_type!r} does not resume it"
     if _worker_in_flight(task["id"]):
         return "worker already in flight"
     if _children_pending(task["id"]):

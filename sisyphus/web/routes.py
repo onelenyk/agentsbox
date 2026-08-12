@@ -1291,6 +1291,44 @@ async def task_reply(task_id: str, text: str = Form(...)):
     resp.headers["HX-Trigger"] = "taskUpdated"
     return resp
 
+@router.post("/api/tasks/{task_id}/stop")
+async def task_stop(task_id: str):
+    """Stop a running task: signal its worker to die, then park it as *waiting*.
+
+    Parking as `waiting` rather than `failed` is deliberate — the work did not
+    fail, a human interrupted it, and a human decides what happens next. It is
+    also the state a reply resumes, so stop/resume is symmetric with every other
+    human interruption.
+
+    The cancelled worker still posts its own worker_finished on the way out
+    (spawn_worker's "ended without reporting" path), so the thread marker closes
+    itself and the task stays runnable — unlike killing the pid by hand, which
+    leaves it stuck until a daemon restart.
+    """
+    from core import cancellation, store
+    from fastapi.responses import Response
+
+    task = store.get_task(task_id)
+    if not task:
+        return Response(status_code=404)
+    if task["status"] in ("done", "failed"):
+        return Response(status_code=409)
+
+    signalled = cancellation.request(task_id)
+    store.set_status(task_id, "waiting")
+    store.post_message(
+        task_id, "system", kind="note",
+        text=("stopped by the human — "
+              + (f"{signalled} worker(s) signalled to stop. " if signalled
+                 else "no worker was running. ")
+              + "Reply below to resume."),
+    )
+    logger.info("task %s stopped by the human (%d worker(s) signalled)", task_id, signalled)
+    resp = Response(status_code=200)
+    resp.headers["HX-Trigger"] = "taskUpdated"
+    return resp
+
+
 @router.post("/api/tasks/{task_id}/reopen")
 async def task_reopen(task_id: str):
     """Reopen a terminal task as *waiting*: the follow-up work continues on the
@@ -1314,7 +1352,7 @@ async def task_reopen(task_id: str):
 
 @router.post("/api/tasks/{task_id}/delete")
 async def task_delete(task_id: str):
-    from core import sessions, store
+    from core import cancellation, sessions, store
     from core.worker import cleanup_task
     from fastapi.responses import Response
 
@@ -1322,6 +1360,10 @@ async def task_delete(task_id: str):
         return Response(status_code=404)
     tree = store.task_tree(task_id)   # root + fan-out descendants
     for tid in tree:
+        # Revoking the token only makes the worker's tool calls fail; the
+        # subprocess keeps running against a task that no longer exists, and
+        # keeps spending. Signal it to stop as well.
+        cancellation.request(tid)
         sessions.revoke_task(tid)
     store.delete_task(task_id)        # cascades the whole subtree in the DB
     for tid in tree:

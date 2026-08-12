@@ -261,6 +261,49 @@ WORKER_TIMEOUT_SECONDS = 1800       # total wall-clock for one worker run
 WORKER_IDLE_TIMEOUT_SECONDS = 300   # silence before the run is abandoned
 
 
+# Written into the thread when a run is cancelled, and matched when deciding
+# whether a run merely stopped or genuinely produced nothing. Shared so the two
+# sides cannot drift apart.
+STOPPED_MARKER = "STOPPED BY A HUMAN"
+
+
+def was_stopped_by_a_human(thread: list) -> bool:
+    """True if the most recent finished run was cancelled rather than failed.
+
+    A pinned (single-agent) task is driven by plain code, not by a model: no
+    result on the thread means fail. So a stopped pinned task was failed on the
+    spot, and stayed unfailable-but-unresumable — replying re-ran the same
+    branch and failed it again. The distinction has to be readable from the
+    thread, because the thread is the only state.
+    """
+    for m in reversed(thread):
+        if m.get("kind") == "worker_finished":
+            return STOPPED_MARKER in (m.get("text") or "")
+        if m.get("kind") in ("result", "worker_started"):
+            return False
+    return False
+
+
+def worker_end_message(role: str, result) -> str:
+    """What goes on the thread when a worker stops without reporting a result.
+
+    The orchestrator reads exactly this line to choose the next action, so the
+    wording is behaviour, not prose. A cancelled worker used to report with the
+    same phrasing as a crashed one — "ended without reporting a result" — and
+    the moment a stopped task was resumed the orchestrator answered
+    "[fail] explorer ended without a result", failing work that was merely
+    interrupted by a human.
+    """
+    if getattr(result, "status", "") == "cancelled":
+        return (f"{role} was {STOPPED_MARKER} before it reported. This is not a "
+                f"failure and nothing is known to be wrong with the work — the "
+                f"instruction was interrupted part-way. Do not fail the task for "
+                f"this; continue from the human's next instruction.")
+    detail = getattr(result, "error", "") or getattr(result, "summary", "") or "no output"
+    return (f"{role} ended without reporting a result "
+            f"(status={getattr(result, 'status', '?')}): {detail}")
+
+
 async def spawn_worker(
     task_id: str,
     role: str,
@@ -355,16 +398,25 @@ async def spawn_worker(
     os.makedirs(output_dir, exist_ok=True)
 
     agent_def = {"name": role, "opencode_config": {}}
-    result = await launch_agent(
-        agent_def, prompt, worktree_path, output_dir,
-        timeout=timeout, idle_timeout=idle_timeout, step_id=f"{task_id}-{role}",
-        runner_name=runner_name,
-        # Our own agent, defined in the project config above — see
-        # _write_opencode_config's docstring for why a borrowed built-in name
-        # ("build") wasn't durable.
-        agent=_WORKER_AGENT,
-        model_override=model_override,
-    )
+    # Publish a cancel event for the lifetime of the run. The launcher's monitor
+    # loop already knows what to do with it; until now nobody handed it one, so
+    # stopping a task meant killing a pid by hand.
+    from . import cancellation
+    cancel_event = cancellation.register(task_id, role)
+    try:
+        result = await launch_agent(
+            agent_def, prompt, worktree_path, output_dir,
+            timeout=timeout, idle_timeout=idle_timeout, step_id=f"{task_id}-{role}",
+            runner_name=runner_name,
+            # Our own agent, defined in the project config above — see
+            # _write_opencode_config's docstring for why a borrowed built-in name
+            # ("build") wasn't durable.
+            agent=_WORKER_AGENT,
+            model_override=model_override,
+            cancel_event=cancel_event,
+        )
+    finally:
+        cancellation.unregister(task_id, role)
 
     from .usage import record_run
     record_run(task_id, role, result.model, result.usage, result.duration_ms)
@@ -373,13 +425,8 @@ async def spawn_worker(
     # session is still active — that's the crash/timeout fallback signal.
     if sessions.resolve(token) is not None:
         sessions.revoke(token)
-        store.post_message(
-            task_id, author="system", kind="worker_finished",
-            text=(
-                f"{role} ended without reporting a result "
-                f"(status={result.status}): {result.error or result.summary or 'no output'}"
-            ),
-        )
+        store.post_message(task_id, author="system", kind="worker_finished",
+                           text=worker_end_message(role, result))
         # Deferred import: core.orchestrator imports spawn_worker from this
         # module at its top level, so importing it back here at module load
         # time would be circular. By call time both modules are fully loaded.
