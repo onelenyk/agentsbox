@@ -152,10 +152,38 @@ def _open_mr(session, title="", description="", **_):
     return {"ok": True, "branch": result.get("branch")}
 
 
+def _starts_with_verdict(text: str, verdict: str) -> bool:
+    return (text or "").strip().upper().startswith(verdict)
+
+
+def _verdict_result_text(verdict: str, body: str) -> str:
+    """The reviewer's own result line, saying the verdict exactly once.
+
+    Reviewers naturally open with the verdict word, so prefixing blindly gave
+    "APPROVED: APPROVED — 1 MR reviewed". Text that already leads with the
+    verdict is kept verbatim; the task-detail template keys its badge off
+    startswith(), so the verdict must stay at the front either way.
+    """
+    b = (body or "").strip()
+    return b if _starts_with_verdict(b, verdict) else f"{verdict}: {b}".strip(": ").strip()
+
+
+def _verdict_body(verdict: str, body: str) -> str:
+    """Just the reasoning, for embedding after a verdict word somewhere else.
+
+    The first fix for the stutter touched only the result line and missed the
+    cross-post to the origin task, so "APPROVED — APPROVED — ..." simply moved
+    there instead. Both call sites go through these helpers now.
+    """
+    b = (body or "").strip()
+    if _starts_with_verdict(b, verdict):
+        b = b[len(verdict):].lstrip(" :—-")
+    return b
+
+
 def _approve(session, summary="", **_):
-    text = summary.strip() if summary.strip().startswith("APPROVED") else f"APPROVED: {summary}".strip()
     store.post_message(session["task_id"], session["role"], kind="result",
-                       text=text)
+                       text=_verdict_result_text("APPROVED", summary))
     try:
         task = store.get_task(session["task_id"])
         if task:
@@ -165,7 +193,8 @@ def _approve(session, summary="", **_):
                 if marker["origin_task"]:
                     store.post_message(
                         marker["origin_task"], author="system", kind="note",
-                        text=f"review verdict for {marker['mr_id']}: APPROVED — {summary}",
+                        text=(f"review verdict for {marker['mr_id']}: APPROVED — "
+                              f"{_verdict_body('APPROVED', summary)}"),
                     )
     except Exception:
         logger.warning("review bookkeeping failed for approve on task %s", session["task_id"], exc_info=True)
@@ -237,9 +266,8 @@ def _decide_note(session, text="", why="", **_):
 def _request_changes(session, reason="", **_):
     if not reason.strip():
         return {"error": "reason required for request_changes"}
-    text = reason.strip() if reason.strip().startswith("CHANGES REQUESTED") else f"CHANGES REQUESTED: {reason}"
     store.post_message(session["task_id"], session["role"], kind="result",
-                       text=text)
+                       text=_verdict_result_text("CHANGES REQUESTED", reason))
     try:
         task = store.get_task(session["task_id"])
         if task:
@@ -249,7 +277,8 @@ def _request_changes(session, reason="", **_):
                 if marker["origin_task"]:
                     store.post_message(
                         marker["origin_task"], author="system", kind="note",
-                        text=f"review verdict for {marker['mr_id']}: CHANGES REQUESTED — {reason}",
+                        text=(f"review verdict for {marker['mr_id']}: CHANGES REQUESTED — "
+                              f"{_verdict_body('CHANGES REQUESTED', reason)}"),
                     )
     except Exception:
         logger.warning("review bookkeeping failed for request_changes on task %s", session["task_id"], exc_info=True)

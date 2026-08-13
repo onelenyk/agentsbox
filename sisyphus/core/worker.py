@@ -20,7 +20,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 from . import agents, sessions, store
-from .launcher import launch_agent
+from .launcher import AgentResult, launch_agent
 from .repos import get_repo
 from .worktree import create_worktree, get_repo_name_from_url, init_bare_clone, set_access
 
@@ -404,17 +404,25 @@ async def spawn_worker(
     from . import cancellation
     cancel_event = cancellation.register(task_id, role)
     try:
-        result = await launch_agent(
-            agent_def, prompt, worktree_path, output_dir,
-            timeout=timeout, idle_timeout=idle_timeout, step_id=f"{task_id}-{role}",
-            runner_name=runner_name,
-            # Our own agent, defined in the project config above — see
-            # _write_opencode_config's docstring for why a borrowed built-in name
-            # ("build") wasn't durable.
-            agent=_WORKER_AGENT,
-            model_override=model_override,
-            cancel_event=cancel_event,
-        )
+        if cancel_event.is_set():
+            # Stopped before we got as far as launching. Starting the runner
+            # just to kill it a moment later wastes a model call and muddies the
+            # thread; report it the same way a mid-run cancellation reports.
+            logger.info("worker %s on %s was cancelled before launch", role, task_id)
+            result = AgentResult(status="cancelled", error="cancelled before launch")
+        else:
+            result = await launch_agent(
+                agent_def, prompt, worktree_path, output_dir,
+                timeout=timeout, idle_timeout=idle_timeout,
+                step_id=f"{task_id}-{role}",
+                runner_name=runner_name,
+                # Our own agent, defined in the project config above — see
+                # _write_opencode_config's docstring for why a borrowed built-in
+                # name ("build") wasn't durable.
+                agent=_WORKER_AGENT,
+                model_override=model_override,
+                cancel_event=cancel_event,
+            )
     finally:
         cancellation.unregister(task_id, role)
 

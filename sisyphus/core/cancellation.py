@@ -27,7 +27,18 @@ _EVENTS: dict = {}
 
 
 def register(task_id: str, role: str = "") -> asyncio.Event:
-    """Create and store the cancel event for a worker about to run."""
+    """The cancel event for a worker about to run, creating it if needed.
+
+    Returns any event already registered for this (task, role) rather than a
+    fresh one, so two callers share a single event. That is what lets the
+    decision site claim it synchronously — before the background task is even
+    created — while spawn_worker still asks for it by name later. Handing back a
+    new event here would reopen the window: a Stop landing in between would set
+    an event nobody is listening to.
+    """
+    existing = (_EVENTS.get(task_id) or {}).get(role)
+    if existing is not None:
+        return existing
     event = asyncio.Event()
     _EVENTS.setdefault(task_id, {})[role] = event
     return event
