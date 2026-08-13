@@ -29,6 +29,7 @@
             <a class="btn btn--ghost btn--sm" href="/tasks/{{ x.task.id }}">View</a>
             <button type="button" class="btn btn--primary btn--sm"
                     hx-post="/api/mr/{{ x.mr.id }}/merge" hx-target="#modal-container" hx-swap="innerHTML"
+                    hx-confirm="Merge {{ x.mr.source_branch }} into {{ x.mr.target_branch }}?"
                     hx-on::after-request="if(event.detail.successful) htmx.trigger('#inbox','inboxChanged')">Merge</button>
         </div>
         {% endfor %}
