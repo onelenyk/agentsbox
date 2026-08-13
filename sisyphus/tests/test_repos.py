@@ -120,6 +120,55 @@ class TestListRepos:
         assert "cloned" in original[0]
         assert result is original  # same list object, mutated in place
 
+    def test_includes_stored_platform(self):
+        """A stored platform override flows through list_repos untouched."""
+        repos = [{"name": "p", "source": "s", "branch": "main", "platform": "github"}]
+        with patch("core.repos.load_repos", return_value=[r.copy() for r in repos]):
+            result = core.repos.list_repos()
+        assert result[0]["platform"] == "github"
+
+
+# ---------------------------------------------------------------------------
+# _save_repo_config
+# ---------------------------------------------------------------------------
+class TestSaveRepoConfig:
+    """_save_repo_config persists the platform override when non-empty."""
+
+    def _call(self, platform):
+        with patch("core.repos.yaml.safe_load", return_value={"repos": []}):
+            with patch("core.repos.yaml.dump", return_value="dumped-yaml") as mock_dump:
+                with patch("core.config.reload_config"):
+                    with patch.object(core.repos.Path, "read_text", return_value=""):
+                        with patch.object(core.repos.Path, "write_text"):
+                            core.repos._save_repo_config("r", "src", platform, "main")
+        return mock_dump.call_args[0][0]["repos"][0]
+
+    def test_round_trips_platform_when_set(self):
+        entry = self._call("gitlab")
+        assert entry == {"name": "r", "source": "src", "branch": "main", "platform": "gitlab"}
+
+    def test_omits_platform_key_when_empty(self):
+        entry = self._call("")
+        assert "platform" not in entry
+        assert entry == {"name": "r", "source": "src", "branch": "main"}
+
+    def test_omits_platform_key_when_none(self):
+        entry = self._call(None)
+        assert "platform" not in entry
+
+
+# ---------------------------------------------------------------------------
+# add_repo
+# ---------------------------------------------------------------------------
+class TestAddRepo:
+    """add_repo forwards the platform override to _save_repo_config."""
+
+    def test_passes_platform_through_to_save(self):
+        with patch("pathlib.Path.exists", return_value=True), \
+             patch("core.repos._save_repo_config") as save:
+            core.repos.add_repo("r", "src", "gitlab", "main")
+        save.assert_called_once_with("r", "src", "gitlab", "main")
+
 
 # ---------------------------------------------------------------------------
 # update_repo_config
@@ -220,3 +269,46 @@ class TestUpdateRepoConfig:
 
         dumped_config = mock_dump.call_args[0][0]
         assert dumped_config["other"] == "preserved"
+
+    def test_preserves_existing_platform_when_other_fields_change(self):
+        repos = [{"name": "repo1", "source": "old-src", "branch": "old-br", "platform": "gitlab"}]
+        with patch("core.repos.load_repos", return_value=[r.copy() for r in repos]):
+            fake_config = {"repos": [r.copy() for r in repos]}
+            with patch("core.repos.yaml.safe_load", return_value=fake_config):
+                with patch("core.repos.yaml.dump", return_value="dumped-yaml") as mock_dump:
+                    with patch("core.config.reload_config"):
+                        with patch.object(core.repos.Path, "read_text", return_value=""):
+                            with patch.object(core.repos.Path, "write_text"):
+                                core.repos.update_repo_config("repo1", source="new-src")
+
+        updated = mock_dump.call_args[0][0]["repos"][0]
+        assert updated["platform"] == "gitlab"
+        assert updated["source"] == "new-src"
+
+    def test_can_change_platform(self):
+        repos = [{"name": "repo1", "source": "old-src", "branch": "old-br", "platform": "gitlab"}]
+        with patch("core.repos.load_repos", return_value=[r.copy() for r in repos]):
+            fake_config = {"repos": [r.copy() for r in repos]}
+            with patch("core.repos.yaml.safe_load", return_value=fake_config):
+                with patch("core.repos.yaml.dump", return_value="dumped-yaml") as mock_dump:
+                    with patch("core.config.reload_config"):
+                        with patch.object(core.repos.Path, "read_text", return_value=""):
+                            with patch.object(core.repos.Path, "write_text"):
+                                core.repos.update_repo_config("repo1", platform="github")
+
+        updated = mock_dump.call_args[0][0]["repos"][0]
+        assert updated["platform"] == "github"
+
+    def test_clears_platform_on_empty_string(self):
+        repos = [{"name": "repo1", "source": "old-src", "branch": "old-br", "platform": "gitlab"}]
+        with patch("core.repos.load_repos", return_value=[r.copy() for r in repos]):
+            fake_config = {"repos": [r.copy() for r in repos]}
+            with patch("core.repos.yaml.safe_load", return_value=fake_config):
+                with patch("core.repos.yaml.dump", return_value="dumped-yaml") as mock_dump:
+                    with patch("core.config.reload_config"):
+                        with patch.object(core.repos.Path, "read_text", return_value=""):
+                            with patch.object(core.repos.Path, "write_text"):
+                                core.repos.update_repo_config("repo1", platform="")
+
+        updated = mock_dump.call_args[0][0]["repos"][0]
+        assert "platform" not in updated

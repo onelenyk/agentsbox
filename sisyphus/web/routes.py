@@ -321,7 +321,7 @@ async def repos_edit_form(request: Request, name: str):
 async def repos_edit(name: str, source: str = Form(""), platform: str = Form(""), branch: str = Form("")):
     from core.repos import update_repo_config
     from fastapi.responses import Response
-    update_repo_config(name, source or None, platform or None, branch or None)
+    update_repo_config(name, source or None, platform, branch or None)
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "reposUpdated"
     return resp
