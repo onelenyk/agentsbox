@@ -5,6 +5,14 @@
             <div class="modal__body">
                 <div class="field"><label>Source</label><input type="text" name="source" value="{{ repo.source }}"></div>
                 <div class="field"><label>Branch</label><input type="text" name="branch" value="{{ repo.branch }}"></div>
+                <div class="field"><label>Platform</label>
+                    <select name="platform">
+                        <option value="" {% if not repo.platform %}selected{% endif %}>Auto-detect</option>
+                        <option value="local" {% if repo.platform == 'local' %}selected{% endif %}>Local</option>
+                        <option value="gitlab" {% if repo.platform == 'gitlab' %}selected{% endif %}>GitLab</option>
+                        <option value="github" {% if repo.platform == 'github' %}selected{% endif %}>GitHub</option>
+                    </select>
+                </div>
             </div>
             <div class="modal__actions">
                 <button type="button" class="btn btn--ghost" onclick="this.closest('.modal-backdrop').remove()">Cancel</button>

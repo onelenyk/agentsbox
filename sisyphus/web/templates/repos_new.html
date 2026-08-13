@@ -6,6 +6,14 @@
                 <div class="field"><label>Name</label><input type="text" name="name" placeholder="android-driver" required></div>
                 <div class="field"><label>Source (local path or git URL)</label><input type="text" name="source" placeholder="/Users/… or git@…" required></div>
                 <div class="field"><label>Branch</label><input type="text" name="branch" value="main"></div>
+                <div class="field"><label>Platform</label>
+                    <select name="platform">
+                        <option value="">Auto-detect</option>
+                        <option value="local">Local</option>
+                        <option value="gitlab">GitLab</option>
+                        <option value="github">GitHub</option>
+                    </select>
+                </div>
             </div>
             <div class="modal__actions">
                 <button type="button" class="btn btn--ghost" onclick="this.closest('.modal-backdrop').remove()">Cancel</button>
