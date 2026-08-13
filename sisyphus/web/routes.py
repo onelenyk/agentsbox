@@ -1180,7 +1180,7 @@ async def mr_land(request: Request, mr_id: str):
     return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
 
 @router.post("/api/mr/{mr_id}/merge", response_class=HTMLResponse)
-async def mr_merge(request: Request, mr_id: str):
+async def mr_merge(request: Request, mr_id: str, force: str = Form("")):
     from core import mergerequests, store
     from fastapi.responses import Response
     mr = mergerequests.get_mr(mr_id)
@@ -1188,6 +1188,11 @@ async def mr_merge(request: Request, mr_id: str):
         return Response(status_code=404)
     if mr["status"] != "open":
         ctx = _mr_view_ctx(request, mr); ctx["error"] = f"MR is already {mr['status']}"
+        return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
+    status = mr.get("review_status")
+    if status in ("pending", "changes_requested") and not force:
+        ctx = _mr_view_ctx(request, mr)
+        ctx["error"] = f"review is {status} — merge blocked; use Merge anyway to override"
         return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
     res = mergerequests.merge_branch(mr, mr["target_branch"])
     if res.get("ok"):
