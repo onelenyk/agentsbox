@@ -57,8 +57,24 @@ def _token(cfg: dict) -> "str | None":
     return tok if tok and not tok.startswith("${") else None
 
 
-def _push(bare: str, branch: str) -> None:
-    r = subprocess.run(["git", "-C", bare, "push", "origin", branch],
+def _resolve_forge_url(source: str) -> "str | None":
+    """The forge URL a repo publishes to: the source itself when it is already a
+    URL, or the 'origin' remote of a path-registered repo (None if it has none)."""
+    s = (source or "").strip()
+    if "://" in s or s.startswith("git@"):
+        return s
+    if not s:
+        return None
+    r = subprocess.run(["git", "-C", s, "remote", "get-url", "origin"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    url = r.stdout.strip()
+    return url or None
+
+
+def _push(bare: str, branch: str, forge_url: str) -> None:
+    r = subprocess.run(["git", "-C", bare, "push", forge_url, f"{branch}:{branch}"],
                        capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError(f"push failed: {r.stderr.strip()}")
@@ -143,11 +159,14 @@ def _publish_gitlab(bare, source, branch, base_branch, title, description) -> di
     if api.startswith("${"):
         api = "https://gitlab.com"
     api = api.rstrip("/")
+    forge_url = _resolve_forge_url(source)
+    if not forge_url:
+        return {"error": "path-registered repo has no origin remote — cannot publish to a forge"}
     try:
-        _push(bare, branch)
+        _push(bare, branch, forge_url)
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
-    project = urllib.parse.quote(_repo_slug(source), safe="")
+    project = urllib.parse.quote(_repo_slug(forge_url), safe="")
     res = _post_json(
         f"{api}/api/v4/projects/{project}/merge_requests",
         {"PRIVATE-TOKEN": token},
@@ -171,12 +190,15 @@ def _publish_github(bare, source, branch, base_branch, title, description) -> di
     if api.startswith("${"):
         api = "https://api.github.com"
     api = api.rstrip("/")
+    forge_url = _resolve_forge_url(source)
+    if not forge_url:
+        return {"error": "path-registered repo has no origin remote — cannot publish to a forge"}
     try:
-        _push(bare, branch)
+        _push(bare, branch, forge_url)
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
     res = _post_json(
-        f"{api}/repos/{_repo_slug(source)}/pulls",
+        f"{api}/repos/{_repo_slug(forge_url)}/pulls",
         {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
         {"head": branch, "base": base_branch, "title": title, "body": description},
     )
