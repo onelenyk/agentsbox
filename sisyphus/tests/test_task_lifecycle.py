@@ -106,6 +106,46 @@ class TestStop:
         assert store.get_task(done_kid["id"])["status"] == "done"
 
 
+class TestStopBeforeTheWorkerStarts:
+    """The race that made Stop unreliable: _execute calls create_task and
+    returns before the coroutine runs a line, so a Stop landing in that window
+    found nothing registered — the task parked and the worker started anyway."""
+
+    def test_the_cancel_event_exists_before_the_worker_runs(self, db_path):
+        """Both sides must share one event, or the decision site claiming it
+        early is pointless."""
+        cancellation.clear()
+        early = cancellation.register("task-x", "engineer")
+        later = cancellation.register("task-x", "engineer")
+        assert later is early, "a second register handed back a different event"
+
+    def test_a_stop_in_the_window_is_seen_by_the_worker(self, db_path):
+        cancellation.clear()
+        # decision site claims it
+        event = cancellation.register("task-x", "engineer")
+        # human stops before the worker coroutine has run
+        assert cancellation.request("task-x") == 1
+        # worker starts and asks for its event
+        assert cancellation.register("task-x", "engineer").is_set(), \
+            "the worker would have launched against a stopped task"
+
+    @pytest.mark.asyncio
+    async def test_execute_registers_before_creating_the_background_task(self, db_path):
+        from core.orchestrator import Decision, _execute
+        cancellation.clear()
+        task = store.create_task("about to spawn", repo="sisyphus")
+
+        with patch("core.orchestrator._spawn_worker_safe", return_value=None):
+            bg = await _execute(task["id"],
+                                Decision(action="spawn_worker", role="engineer",
+                                         instruction="do it", why="x"))
+            # registered synchronously — not after the coroutine gets scheduled
+            assert cancellation.is_running(task["id"]), \
+                "Stop pressed right now would find nothing to cancel"
+        if bg:
+            await asyncio.gather(bg, return_exceptions=True)
+
+
 class TestStopActuallyHolds:
     """The subtle half. A cancelled worker posts worker_finished on its way out,
     which drives a pass — and without a guard the orchestrator immediately

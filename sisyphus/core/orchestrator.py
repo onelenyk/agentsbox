@@ -513,6 +513,13 @@ async def _execute(task_id: str, decision: Decision):
     if decision.action == "spawn_worker":
         store.set_status(task_id, "active")
         task = store.get_task(task_id)
+        # Claim the cancel event HERE, synchronously, not inside the worker.
+        # create_task returns before the coroutine runs its first line, so a
+        # Stop landing in that window used to find nothing registered: the task
+        # parked, and the worker then started anyway against a task the human
+        # had already stopped.
+        from . import cancellation
+        cancellation.register(task_id, decision.role or "")
         return asyncio.create_task(
             _spawn_worker_safe(task_id, decision.role, decision.instruction or "",
                                task.get("repo") if task else None)

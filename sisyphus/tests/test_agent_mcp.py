@@ -344,6 +344,50 @@ def test_request_changes_does_not_double_prefix(db_path):
     assert text == "CHANGES REQUESTED -- needs more test coverage"
 
 
+def test_cross_post_to_the_origin_task_does_not_stutter_either(db_path):
+    """The first fix stripped the duplicate verdict from the reviewer's own
+    result line and missed the note sent to the task that opened the MR, so
+    "APPROVED — APPROVED — ..." just moved there. Seen live on task-8cd1f641.
+    """
+    from core import mergerequests
+    sessions.clear()
+    origin = store.create_task("build the thing", repo="sisyphus")
+    mr = mergerequests.create_mr(task_id=origin["id"], repo="sisyphus",
+                                 source_branch="sisyphus/task-x", target_branch="main",
+                                 title="A change")
+    review = store.create_task(
+        f"Review-of-MR: {mr['id']}\nOrigin-task: {origin['id']}\n\nReview it.",
+        repo="sisyphus")
+    token = sessions.mint(review["id"], "reviewer")
+
+    _call(_client(), token, "approve", {"summary": "APPROVED — clean, tests pass"})
+
+    notes = [m["text"] for m in store.get_thread(origin["id"]) if m["kind"] == "note"]
+    verdicts = [n for n in notes if "review verdict" in n]
+    assert verdicts, "the origin task never heard the verdict"
+    assert "APPROVED — APPROVED" not in verdicts[0]
+    assert "clean, tests pass" in verdicts[0]
+
+
+def test_cross_post_keeps_a_plain_reason_intact(db_path):
+    from core import mergerequests
+    sessions.clear()
+    origin = store.create_task("build the thing", repo="sisyphus")
+    mr = mergerequests.create_mr(task_id=origin["id"], repo="sisyphus",
+                                 source_branch="sisyphus/task-y", target_branch="main",
+                                 title="A change")
+    review = store.create_task(
+        f"Review-of-MR: {mr['id']}\nOrigin-task: {origin['id']}\n\nReview it.",
+        repo="sisyphus")
+    token = sessions.mint(review["id"], "reviewer")
+
+    _call(_client(), token, "request_changes", {"reason": "no tests for the new branch"})
+
+    notes = [m["text"] for m in store.get_thread(origin["id"]) if m["kind"] == "note"]
+    verdicts = [n for n in notes if "review verdict" in n]
+    assert verdicts and "CHANGES REQUESTED — no tests for the new branch" in verdicts[0]
+
+
 def test_propose_subtasks_posts_plan(db_path):
     task_id, token = _session(db_path, "explorer")
     out = _call(_client(), token, "propose_subtasks", {"items": [
