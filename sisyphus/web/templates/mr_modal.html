@@ -37,9 +37,15 @@
             <div class="row" style="gap:8px;margin:14px 0 4px">
                 <button type="button" class="btn btn--ghost btn--sm" hx-post="/api/mr/{{ mr.id }}/land" hx-target="#modal-container" hx-swap="innerHTML"
                         hx-confirm="Fetch {{ mr.source_branch }} into your real repo ({{ mr.source_path }})? Adds a branch — nothing else is touched.">Land branch</button>
+                {% if mr.review_status in ('pending', 'changes_requested') %}
+                <button type="button" class="btn btn--primary btn--sm" {% if not (merge.ok and merge.mergeable) %}disabled{% endif %}
+                        hx-post="/api/mr/{{ mr.id }}/merge" hx-vals='{"force": "1"}' hx-target="#modal-container" hx-swap="innerHTML"
+                        hx-confirm="Review is {{ mr.review_status }} — merge anyway? This overrides the review verdict.">Merge anyway</button>
+                {% else %}
                 <button type="button" class="btn btn--primary btn--sm" {% if not (merge.ok and merge.mergeable) %}disabled{% endif %}
                         hx-post="/api/mr/{{ mr.id }}/merge" hx-target="#modal-container" hx-swap="innerHTML"
                         hx-confirm="Merge {{ mr.source_branch }} into {{ mr.target_branch }} in {{ mr.source_path }}? Creates a merge commit (reversible with git reset).">🚀 Merge into {{ mr.target_branch }}</button>
+                {% endif %}
                 <button type="button" class="btn btn--danger btn--sm" hx-post="/api/mr/{{ mr.id }}/close" hx-target="#modal-container" hx-swap="innerHTML"
                         hx-confirm="Close this merge request without merging?">Close MR</button>
             </div>

@@ -292,6 +292,86 @@ def test_inbox_empty_state(db_path):
     assert "Inbox zero" in r.text
 
 
+def _open_mr(review_status=None):
+    from core import store
+    task = store.create_task("merge it", repo="test-repo")
+    mr = mergerequests.create_mr(task["id"], "test-repo", "feature/x", "main")
+    if review_status is not None:
+        mergerequests.set_review_status(mr["id"], review_status)
+    return mr
+
+
+def test_mr_merge_refused_for_changes_requested_without_force(db_path):
+    mr = _open_mr(review_status="changes_requested")
+    client = _make_client()
+    with patch("core.mergerequests.merge_branch") as mock_merge:
+        r = client.post(f"/api/mr/{mr['id']}/merge")
+    assert r.status_code == 200
+    assert "review is changes_requested" in r.text
+    assert "merge blocked" in r.text
+    mock_merge.assert_not_called()
+    assert mergerequests.get_mr(mr["id"])["status"] == "open"
+
+
+def test_mr_merge_refused_for_pending_without_force(db_path):
+    mr = _open_mr(review_status="pending")
+    client = _make_client()
+    with patch("core.mergerequests.merge_branch") as mock_merge:
+        r = client.post(f"/api/mr/{mr['id']}/merge")
+    assert r.status_code == 200
+    assert "review is pending" in r.text
+    mock_merge.assert_not_called()
+    assert mergerequests.get_mr(mr["id"])["status"] == "open"
+
+
+def test_mr_merge_allowed_for_changes_requested_with_force(db_path):
+    mr = _open_mr(review_status="changes_requested")
+    client = _make_client()
+    with patch("core.mergerequests.merge_branch",
+               return_value={"ok": True, "sha": "abc12345", "target": "main"}):
+        r = client.post(f"/api/mr/{mr['id']}/merge", data={"force": "1"})
+    assert r.status_code == 200
+    assert mergerequests.get_mr(mr["id"])["status"] == "merged"
+
+
+def test_mr_merge_allowed_for_approved(db_path):
+    mr = _open_mr(review_status="approved")
+    client = _make_client()
+    with patch("core.mergerequests.merge_branch",
+               return_value={"ok": True, "sha": "abc12345", "target": "main"}):
+        r = client.post(f"/api/mr/{mr['id']}/merge")
+    assert r.status_code == 200
+    assert mergerequests.get_mr(mr["id"])["status"] == "merged"
+
+
+def test_mr_merge_allowed_for_null_review_status(db_path):
+    mr = _open_mr(review_status=None)
+    client = _make_client()
+    with patch("core.mergerequests.merge_branch",
+               return_value={"ok": True, "sha": "abc12345", "target": "main"}):
+        r = client.post(f"/api/mr/{mr['id']}/merge")
+    assert r.status_code == 200
+    assert mergerequests.get_mr(mr["id"])["status"] == "merged"
+
+
+def test_mr_modal_renders_merge_anyway_for_changes_requested(db_path):
+    mr = _open_mr(review_status="changes_requested")
+    client = _make_client()
+    r = client.get(f"/api/mr/{mr['id']}/view")
+    assert r.status_code == 200
+    assert "Merge anyway" in r.text
+    assert "force" in r.text
+
+
+def test_mr_modal_renders_merge_button_for_approved(db_path):
+    mr = _open_mr(review_status="approved")
+    client = _make_client()
+    r = client.get(f"/api/mr/{mr['id']}/view")
+    assert r.status_code == 200
+    assert "Merge into" in r.text
+    assert "Merge anyway" not in r.text
+
+
 def test_external_event_renders_distinctly(db_path):
     """A forge webhook's [external] message stands out in the thread."""
     from core import store
