@@ -102,6 +102,25 @@ class TestRepoSlug:
         assert providers._repo_slug("https://gitlab.com/grp/sub/proj.git") == "grp/sub/proj"
 
 
+class TestResolveForgeUrl:
+    def test_url_source_unchanged(self):
+        assert providers._resolve_forge_url("https://github.com/acme/widgets.git") == \
+            "https://github.com/acme/widgets.git"
+        assert providers._resolve_forge_url("git@github.com:acme/widgets.git") == \
+            "git@github.com:acme/widgets.git"
+
+    def test_path_source_returns_origin(self):
+        remote = "git@sln-gtl.vanongo.com:sln-apps/android-driver.git"
+        with patch("subprocess.run",
+                   return_value=subprocess.CompletedProcess([], 0, remote + "\n", "")):
+            assert providers._resolve_forge_url("/Users/me/android-driver") == remote
+
+    def test_path_source_no_origin_returns_none(self):
+        with patch("subprocess.run",
+                   return_value=subprocess.CompletedProcess([], 1, "", "no origin")):
+            assert providers._resolve_forge_url("/Users/me/android-driver") is None
+
+
 class TestForgeProviders:
     def test_gitlab_pushes_and_opens_mr(self):
         with patch("core.config.get_config", return_value={"token": "t", "base_url": "https://gl.example.com"}), \
@@ -140,6 +159,36 @@ class TestForgeProviders:
              patch("core.providers._post_json", return_value=err):
             r = providers._publish_github("/bare", "https://github.com/a/b.git", "sisyphus/x", "main", "T", "D")
         assert "error" in r and "422" in r["error"]
+
+    def test_gitlab_path_source_resolves_origin_and_pushes(self):
+        remote = "git@sln-gtl.vanongo.com:sln-apps/android-driver.git"
+        source = "/Users/lenyk/workproject/android-driver"
+
+        def fake_run(cmd, *a, **kw):
+            if "get-url" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, remote + "\n", "")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with patch("core.config.get_config", return_value={"token": "t", "base_url": "https://gl.example.com"}), \
+             patch("subprocess.run", side_effect=fake_run) as run, \
+             patch("core.providers._post_json", return_value={"web_url": "https://gl/mr/1"}) as post:
+            r = providers._publish_gitlab("/bare", source, "sisyphus/task-1", "main", "T", "D")
+
+        assert r["ok"] and r["platform"] == "gitlab"
+        assert "sln-apps%2Fandroid-driver/merge_requests" in post.call_args.args[0]
+        push_calls = [c for c in run.call_args_list if "push" in c.args[0]]
+        assert push_calls, "expected a git push"
+        push_cmd = push_calls[0].args[0]
+        assert remote in push_cmd
+        assert push_cmd[-1] == "sisyphus/task-1:sisyphus/task-1"
+
+    def test_gitlab_path_source_no_origin_errors(self):
+        with patch("core.config.get_config", return_value={"token": "t"}), \
+             patch("subprocess.run",
+                   return_value=subprocess.CompletedProcess([], 1, "", "No such remote 'origin'")):
+            r = providers._publish_gitlab("/bare", "/some/path", "sisyphus/x", "main", "T", "D")
+        assert "error" in r
+        assert "no origin remote" in r["error"]
 
     def test_publish_change_routes_by_platform(self, db_path):
         task = store.create_task("x", repo="r")
