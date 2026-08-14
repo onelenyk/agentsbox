@@ -291,9 +291,14 @@ def _worker_in_flight(task_id: str) -> bool:
 def _reviewer_approved(task_id: str) -> bool:
     """True once a reviewer has posted an APPROVED result on the thread. The
     orchestrator never self-certifies quality (see the system prompt), so
-    'done' is gated on this."""
+    'done' is gated on this. The verdict must lead the text (normalized for
+    case/whitespace) and must not be negated ("NOT APPROVED")."""
+    def _is_approved(text: str) -> bool:
+        t = (text or "").lstrip().upper()
+        return t.startswith("APPROVED") and not t.startswith("NOT APPROVED")
+
     return any(
-        m["author"] == "reviewer" and m["kind"] == "result" and m["text"].startswith("APPROVED")
+        m["author"] == "reviewer" and m["kind"] == "result" and _is_approved(m["text"])
         for m in store.get_thread(task_id)
     )
 
@@ -422,7 +427,8 @@ async def handle_event(
         decision = Decision(
             action="spawn_worker", role="reviewer",
             instruction=(f"Verify the task goal is fully met: {task['goal']}. "
-                         "Approve if it is; otherwise request changes with specifics."),
+                         "Start your final result with the single word APPROVED "
+                         "or with CHANGES REQUESTED."),
             why="a reviewer must approve before done",
         )
 
