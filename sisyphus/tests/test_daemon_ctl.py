@@ -28,6 +28,11 @@ def test_render_plist_defaults_to_repo_and_sys_executable():
 def test_status_running(monkeypatch):
     monkeypatch.setattr(d, "health", lambda: {"ok": True, "version": "2.0"})
     monkeypatch.setattr(d, "is_installed", lambda: True)
+    # Stub the process probes so status() never spawns launchctl/lsof/ps —
+    # the worker sandbox forbids spawning `ps` (Operation not permitted), and
+    # these two functions are the only path that reaches it.
+    monkeypatch.setattr(d, "_managed_pid", lambda: None)
+    monkeypatch.setattr(d, "_port_listen_pid", lambda: None)
     s = d.status()
     assert s == {"running": True, "version": "2.0", "supervised": True, "url": d.HEALTH_URL}
 
