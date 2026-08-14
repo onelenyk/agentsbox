@@ -380,6 +380,91 @@ def test_auto_merge_invoked_on_done(db_path, monkeypatch):
     assert merged == []
 
 
+def _open_mr_with_review(db_path, review_status):
+    """A real task + an open MR whose review_status is set (or left NULL)."""
+    from core import mergerequests
+    task = store.create_task("go", repo="r")
+    mr = mergerequests.create_mr(task_id=task["id"], repo="r",
+                                 source_branch=f"sisyphus/{task['id']}",
+                                 target_branch="main", title="t",
+                                 bare_path="/tmp/bare", base_branch="main",
+                                 source_path="/tmp/src")
+    if review_status is not None:
+        mergerequests.set_review_status(mr["id"], review_status)
+    return task["id"], mr
+
+
+@pytest.mark.parametrize("review_status", ["changes_requested", "pending"])
+def test_auto_merge_skipped_when_review_gated(db_path, monkeypatch, review_status):
+    """An MR whose review is pending/changes_requested is never auto-merged: no
+    git changes, the MR stays open, and a clear note lands on the thread."""
+    from core import mergerequests
+    task_id, mr = _open_mr_with_review(db_path, review_status)
+    merged, marked, cleaned = [], [], []
+    monkeypatch.setattr("core.mergerequests.check_mergeability",
+                        lambda *a: {"ok": True, "mergeable": True})
+    monkeypatch.setattr("core.mergerequests.merge_branch", lambda m, t: merged.append(t))
+    monkeypatch.setattr("core.mergerequests.mark_merged", lambda mid, sha: marked.append(mid))
+    monkeypatch.setattr("core.worker.cleanup_task", lambda tid: cleaned.append(tid))
+
+    planner._auto_merge_task(task_id)
+
+    assert merged == [] and marked == [] and cleaned == []
+    assert mergerequests.get_mr(mr["id"])["status"] == "open"   # MR left open
+    notes = [m for m in store.get_thread(task_id) if m["kind"] == "note"]
+    assert any(f"auto-merge skipped: review is {review_status}" in n["text"] for n in notes)
+
+
+@pytest.mark.parametrize("review_status", [None, "approved"])
+def test_auto_merge_proceeds_when_review_allows(db_path, monkeypatch, review_status):
+    """review_status NULL or 'approved' auto-merges exactly as before."""
+    from core import mergerequests
+    task_id, mr = _open_mr_with_review(db_path, review_status)
+    cleaned = []
+    monkeypatch.setattr("core.mergerequests.check_mergeability",
+                        lambda *a: {"ok": True, "mergeable": True})
+    monkeypatch.setattr("core.mergerequests.merge_branch",
+                        lambda m, t: {"ok": True, "sha": "deadbeef", "target": t})
+    monkeypatch.setattr("core.worker.cleanup_task", lambda tid: cleaned.append(tid))
+
+    planner._auto_merge_task(task_id)
+
+    assert cleaned == [task_id]
+    merged = mergerequests.get_mr(mr["id"])
+    assert merged["status"] == "merged" and merged["merge_sha"] == "deadbeef"
+
+
+def test_auto_merge_skip_keeps_plan_progression(db_path, monkeypatch):
+    """A gated MR skips auto-merge without stalling the plan: the step still
+    integrates into the plan branch and its dependent still auto-releases — the
+    same terminal handling as when auto_merge is disabled for the step."""
+    from core import mergerequests
+    _emit(monkeypatch)
+    monkeypatch.setattr("core.planner._ensure_plan_branch", lambda pid, repo: f"plan/{pid}")
+    integrated = []
+    monkeypatch.setattr("core.planner._integrate_into_plan_branch",
+                        lambda tid, pid: integrated.append(tid))
+    p = planner.create_plan("p", repo="testrepo")
+    planner.update_plan(p["id"], auto_merge=1, auto_release=1)
+    a = planner.add_item(p["id"], "A", repo="testrepo", agent="engineer")
+    b = planner.add_item(p["id"], "B", repo="testrepo", after=[a["id"]])
+    la = planner.launch_item(a["id"])
+    mr = mergerequests.create_mr(task_id=la["task_id"], repo="r",
+                                 source_branch=f"sisyphus/{la['task_id']}",
+                                 target_branch="main", title="t",
+                                 bare_path="/tmp/bare", base_branch="main",
+                                 source_path="/tmp/src")
+    mergerequests.set_review_status(mr["id"], "changes_requested")
+
+    planner.on_task_terminal(la["task_id"], "done")
+
+    assert integrated == [la["task_id"]]                       # step still integrated
+    assert planner.get_item(b["id"])["status"] == "launched"   # dependent still auto-released
+    assert mergerequests.get_mr(mr["id"])["status"] == "open"  # MR left open, nothing merged
+    notes = [m for m in store.get_thread(la["task_id"]) if m["kind"] == "note"]
+    assert any("auto-merge skipped" in n["text"] for n in notes)
+
+
 def test_convert_to_drafts_rejects_cyclic_graph(db_path, monkeypatch):
     """convert_to_drafts raises ValueError if the brief's steps contain a cycle,
     and creates no items."""
