@@ -83,7 +83,13 @@ def _make_output_dir(run_id, step_id):
 class TestMockAgentTimeout:
 
     @pytest.mark.asyncio
-    async def test_agent_timeout(self, db_path):
+    async def test_agent_timeout(self, db_path, monkeypatch):
+        # launch_agent wraps the runner in sandbox-exec; inside the worker
+        # sandbox sandbox-exec cannot be nested (it exits immediately with
+        # "Operation not permitted"), which masks the timeout under test. These
+        # tests exercise the timeout loop, not the sandbox, so disable it here.
+        monkeypatch.setenv("SISYPHUS_SANDBOX", "0")
+
         worktree = pathlib.Path(os.environ["WORKSPACE_ROOT"]) / "worktree"
         worktree.mkdir(parents=True, exist_ok=True)
         _setup_run_shim(worktree)
@@ -95,9 +101,8 @@ class TestMockAgentTimeout:
             "mock-timeout",
             "python3",
             extra_args=[
-                str(MOCK_DIR / "mock_agent_timeout.py"),
+                str(MOCK_DIR / "mock_agent_block.py"),
                 "--output-dir", output_dir,
-                "--sleep", "2",
             ],
         )
 
@@ -113,8 +118,13 @@ class TestMockAgentTimeout:
 class TestIdleTimeout:
 
     @pytest.mark.asyncio
-    async def test_idle_timeout_fires_on_silent_hang(self, db_path):
+    async def test_idle_timeout_fires_on_silent_hang(self, db_path, monkeypatch):
         """No output at all for longer than idle_timeout → killed, even under total timeout."""
+        # See test_agent_timeout: sandbox-exec can't nest in the worker sandbox,
+        # so disable the sandbox and let the blocking mock agent exercise the
+        # idle-timeout path directly.
+        monkeypatch.setenv("SISYPHUS_SANDBOX", "0")
+
         worktree = pathlib.Path(os.environ["WORKSPACE_ROOT"]) / "worktree"
         worktree.mkdir(parents=True, exist_ok=True)
         _setup_run_shim(worktree)
@@ -126,9 +136,8 @@ class TestIdleTimeout:
             "mock-idle-hang",
             "python3",
             extra_args=[
-                str(MOCK_DIR / "mock_agent_timeout.py"),
+                str(MOCK_DIR / "mock_agent_block.py"),
                 "--output-dir", output_dir,
-                "--sleep", "5",
             ],
         )
 
