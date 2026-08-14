@@ -540,6 +540,45 @@ class TestDoneRequiresReview:
         assert decision.action == "done"
         assert store.get_task(task["id"])["status"] == "done"
 
+    @pytest.mark.asyncio
+    async def test_done_with_mixed_case_approval_is_allowed(self, db_path):
+        # Regression (task-ec2ef73b): a reviewer whose only result is the
+        # mixed-case "Approved." must still unblock 'done' — never re-spawn a
+        # reviewer behind an already-approved thread.
+        task = store.create_task("ship it", repo="sisyphus")
+        store.set_status(task["id"], "active")
+        store.post_message(task["id"], "reviewer", kind="result", text="Approved.")
+
+        decisions = _scripted([Decision(action="done", why="reviewer approved")])
+        decision, bg = await handle_event(task["id"], "worker_finished", decide_fn=decisions)
+        assert decision.action == "done"
+        assert decision.role != "reviewer"
+        assert store.get_task(task["id"])["status"] == "done"
+
+
+class TestReviewerApprovedPredicate:
+    def _post_review(self, text):
+        task = store.create_task("review me", repo="sisyphus")
+        store.post_message(task["id"], "reviewer", kind="result", text=text)
+        return task["id"]
+
+    @pytest.mark.parametrize("text", [
+        "APPROVED: LGTM",
+        "Approved. The work is correct",
+        "approved — ship it",
+        "  APPROVED",
+    ])
+    def test_approval_prefix_matches(self, db_path, text):
+        assert orchestrator._reviewer_approved(self._post_review(text))
+
+    @pytest.mark.parametrize("text", [
+        "CHANGES REQUESTED: x",
+        "NOT APPROVED",
+        "I would have approved this",
+    ])
+    def test_non_approval_does_not_match(self, db_path, text):
+        assert not orchestrator._reviewer_approved(self._post_review(text))
+
 
 class TestNoStall:
     @pytest.mark.asyncio
