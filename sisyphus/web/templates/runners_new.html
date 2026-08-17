@@ -5,18 +5,41 @@
             <div class="modal__body">
                 <div class="field"><label>Name</label><input type="text" name="name" placeholder="opencode-deepseek" required></div>
                 <div class="field"><label>Binary</label><input type="text" name="binary" placeholder="opencode" required></div>
+                {# Types come from core.runners.RUNNER_TYPES (itself sourced from
+                   the launch profiles), so the form can only offer a type that
+                   can actually run. #}
                 <div class="field"><label>Type</label>
-                    <select name="type">
-                        <option value="opencode">opencode</option>
-                        <option value="claude-cli">claude-cli</option>
-                        <option value="ollama">ollama</option>
-                        <option value="openai-api">openai-api</option>
-                        <option value="custom">custom</option>
+                    <select name="type" id="runner-type" onchange="applyRunnerTypeDefaults()">
+                        {% for t in types %}
+                        <option value="{{ t }}">{{ t }}</option>
+                        {% endfor %}
                     </select>
                 </div>
-                <div class="field"><label>Model</label><input type="text" name="model" placeholder="deepseek/deepseek-v4"></div>
-                <div class="field"><label>API Key Env</label><input type="text" name="api_key_env" placeholder="OPENROUTER_API_KEY"></div>
-                <div class="field"><label>Base URL</label><input type="text" name="base_url" placeholder="https://openrouter.ai/api/v1"></div>
+                <div class="field"><label>Model</label><input type="text" name="model" id="runner-model" placeholder="leave blank for the runtime's own default"></div>
+                <div class="field"><label>API Key Env</label><input type="text" name="api_key_env" id="runner-key-env"></div>
+                <div class="field"><label>Base URL</label><input type="text" name="base_url" id="runner-base-url"></div>
+                <div class="muted" id="runner-type-hint" style="font-size:11px"></div>
+                <script>
+                    var RUNNER_DEFAULTS = {{ suggested | tojson }};
+                    function applyRunnerTypeDefaults() {
+                        var t = document.getElementById("runner-type").value;
+                        var d = RUNNER_DEFAULTS[t] || {};
+                        // Prefill only — anything already typed is left alone.
+                        var key = document.getElementById("runner-key-env");
+                        var url = document.getElementById("runner-base-url");
+                        var mod = document.getElementById("runner-model");
+                        if (!key.dataset.touched) key.value = d.api_key_env || "";
+                        if (!url.dataset.touched) url.value = d.base_url || "";
+                        if (!mod.dataset.touched) mod.value = d.model || "";
+                        document.getElementById("runner-type-hint").textContent = d.hint || "";
+                    }
+                    ["runner-key-env", "runner-base-url", "runner-model"].forEach(function (id) {
+                        document.getElementById(id).addEventListener("input", function () {
+                            this.dataset.touched = "1";
+                        });
+                    });
+                    applyRunnerTypeDefaults();
+                </script>
             </div>
             <div class="modal__actions">
                 <button type="button" class="btn btn--ghost" onclick="this.closest('.modal-backdrop').remove()">Cancel</button>

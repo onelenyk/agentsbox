@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from pathlib import Path
 from typing import List
@@ -494,19 +495,64 @@ async def runners_list_view(request: Request):
     from core.runners import list_runners
     return _tmpl().TemplateResponse(request, "runners_list.html", {"runners": list_runners()})
 
+def _runner_error(message: str):
+    """A 400 the runners page can actually show.
+
+    Runner writes now reject unsupported types and duplicate names. Letting
+    those escape as a 500 gave the UI's generic htmx handler nothing but
+    "Internal Server Error"; this rides the same HX-Trigger channel the success
+    path uses, so base.html can flash the real reason.
+    """
+    from fastapi.responses import Response
+    resp = Response(status_code=400)
+    resp.headers["HX-Trigger"] = json.dumps({"runnerError": message})
+    return resp
+
+
+def _runner_form_context() -> dict:
+    """Type list + per-type prefill hints, so the forms can't drift from the
+    set of types that actually have a launch profile."""
+    from core.runner_profiles import suggested_config
+    from core.runners import RUNNER_TYPES
+    return {
+        "types": list(RUNNER_TYPES),
+        "suggested": {t: suggested_config(t) for t in RUNNER_TYPES},
+    }
+
+
 @router.get("/api/runners/new-form", response_class=HTMLResponse)
 async def runners_new_form(request: Request):
-    return _tmpl().TemplateResponse(request, "runners_new.html", {})
+    return _tmpl().TemplateResponse(request, "runners_new.html", _runner_form_context())
 
 @router.get("/api/runners/detect", response_class=HTMLResponse)
 async def runners_detect_view(request: Request):
     from core.runner_detect import detect, resolve
+    from core.runner_profiles import suggested_config
     from core.runners import list_runners
     configured = list_runners()
+    configured_names = {r["name"] for r in configured}
+    # Compare where each binary actually RESOLVES, not the string in the row.
+    # A row stores whatever was typed — often an absolute path — while detect()
+    # reports the bare name, so a plain string match reported an already
+    # configured runtime as missing and offered to add a duplicate.
     configured_bins = {r["binary"] for r in configured}
+    configured_paths = {p for p in (resolve(r["binary"]) for r in configured) if p}
     detected = detect()
     for d in detected:
-        d["configured"] = d["binary"] in configured_bins
+        d["configured"] = (
+            d["binary"] in configured_bins or (d.get("path") in configured_paths)
+        )
+        # Prefill per type rather than assuming OpenRouter for everything.
+        d.update(suggested_config(d["type"]))
+        # Names are UNIQUE; suggest a free one so "+ Add" can't 400 on a
+        # collision with an unrelated row that happens to hold the name.
+        name = d["name"]
+        if name in configured_names:
+            n = 2
+            while f"{name}-{n}" in configured_names:
+                n += 1
+            name = f"{name}-{n}"
+        d["suggested_name"] = name
     conf = [{"name": r["name"], "binary": r["binary"], "resolved": resolve(r["binary"])}
             for r in configured]
     return _tmpl().TemplateResponse(
@@ -518,9 +564,15 @@ async def runners_detect_view(request: Request):
 @router.post("/api/runners")
 async def runners_add(name: str = Form(...), binary: str = Form(...), type: str = Form("opencode"),
                        model: str = Form(""), api_key_env: str = Form(""), base_url: str = Form("")):
+    import sqlite3
     from core.runners import add_runner
     from fastapi.responses import Response
-    add_runner(name, binary, type, model, api_key_env, base_url)
+    try:
+        add_runner(name, binary, type, model, api_key_env, base_url)
+    except ValueError as e:
+        return _runner_error(str(e))
+    except sqlite3.IntegrityError:
+        return _runner_error(f"a runner named {name!r} already exists")
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "runnersUpdated"
     return resp
@@ -531,12 +583,15 @@ async def runners_edit_form(request: Request, runner_id: str):
     runner = get_runner(runner_id)
     if not runner:
         return HTMLResponse("<p>Runner not found</p>")
-    return _tmpl().TemplateResponse(request, "runners_edit.html", {"runner": runner})
+    ctx = _runner_form_context()
+    ctx["runner"] = runner
+    return _tmpl().TemplateResponse(request, "runners_edit.html", ctx)
 
 @router.post("/api/runners/{runner_id}/edit")
 async def runners_edit(runner_id: str, name: str = Form(""), binary: str = Form(""),
                         type: str = Form(""), model: str = Form(""), api_key_env: str = Form(""),
                         base_url: str = Form("")):
+    import sqlite3
     from core.runners import update_runner
     from fastapi.responses import Response
     fields = {}
@@ -546,7 +601,12 @@ async def runners_edit(runner_id: str, name: str = Form(""), binary: str = Form(
     if model: fields["model"] = model
     if api_key_env: fields["api_key_env"] = api_key_env
     if base_url: fields["base_url"] = base_url
-    update_runner(runner_id, **fields)
+    try:
+        update_runner(runner_id, **fields)
+    except ValueError as e:
+        return _runner_error(str(e))
+    except sqlite3.IntegrityError:
+        return _runner_error(f"a runner named {name!r} already exists")
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "runnersUpdated"
     return resp

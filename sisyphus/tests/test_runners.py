@@ -1,5 +1,6 @@
 """Tests for core/runners.py — CRUD + health check."""
 import asyncio
+from core.db import get_conn
 from core.runners import (
     init_runners_table,
     add_runner,
@@ -25,11 +26,11 @@ class TestRunnerCRUD:
 
     def test_add_runner(self, db_path):
         init_runners_table()
-        r = add_runner("test-runner", "test-binary", "custom", "gpt-4", "API_KEY", "https://api.test.com")
+        r = add_runner("test-runner", "test-binary", "claude-cli", "opus", "API_KEY", "https://api.test.com")
         assert r["name"] == "test-runner"
         assert r["binary"] == "test-binary"
-        assert r["type"] == "custom"
-        assert r["model"] == "gpt-4"
+        assert r["type"] == "claude-cli"
+        assert r["model"] == "opus"
         assert r["api_key_env"] == "API_KEY"
         assert r["base_url"] == "https://api.test.com"
         assert r["is_default"] == 0
@@ -53,9 +54,29 @@ class TestRunnerCRUD:
         assert get_runner_by_name("nonexistent") is None
 
     def test_get_default_runner_falls_back(self, db_path):
+        """With an enabled runner but none flagged default, fall back to the
+        oldest enabled one. The seeded runner IS the default, so clear the flag
+        first — otherwise the first query hits and the fallback never runs
+        (which is why this test passed while that branch was crashing)."""
         init_runners_table()
+        seeded = get_default_runner()
+        set_default_runner(seeded["id"])
+        conn = get_conn()
+        conn.execute("UPDATE runners SET is_default = 0")
+        conn.commit()
+        conn.close()
+
         default = get_default_runner()
         assert default is not None
+        assert default["id"] == seeded["id"]
+
+    def test_get_default_runner_none_when_all_disabled(self, db_path):
+        init_runners_table()
+        conn = get_conn()
+        conn.execute("UPDATE runners SET enabled = 0, is_default = 0")
+        conn.commit()
+        conn.close()
+        assert get_default_runner() is None
 
     def test_update_runner(self, db_path):
         init_runners_table()
@@ -96,6 +117,29 @@ class TestRunnerHealth:
         assert result["checked_at"] is not None
         updated = get_runner(r["id"])
         assert updated["health_status"] in ("healthy", "unhealthy")
+
+    def test_missing_api_key_env_is_a_note_not_a_failure(self, db_path, monkeypatch):
+        """Both supported CLIs hold their own login, and the daemon's env is
+        nearly empty under launchd — so an unset variable must not report a
+        working runtime as unhealthy."""
+        init_runners_table()
+        monkeypatch.delenv("SOME_ABSENT_KEY", raising=False)
+        r = add_runner("with-key-env", "opencode", "opencode",
+                       api_key_env="SOME_ABSENT_KEY")
+        result = asyncio.run(health_check(r["id"]))
+        assert result["status"] == "healthy"
+        row = get_runner(r["id"])
+        assert row["health_status"] == "healthy"
+        # Still surfaced, just not as a failure.
+        assert "SOME_ABSENT_KEY" in (row["health_error"] or "")
+        assert "auth.json" in row["health_error"]
+
+    def test_missing_binary_is_still_fatal(self, db_path):
+        init_runners_table()
+        r = add_runner("ghost", "definitely-not-installed-xyz", "opencode")
+        result = asyncio.run(health_check(r["id"]))
+        assert result["status"] == "unhealthy"
+        assert "not found" in result["error"]
 
     def test_health_check_missing_runner(self, db_path):
         init_runners_table()

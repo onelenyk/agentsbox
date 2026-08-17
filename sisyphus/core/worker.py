@@ -1,14 +1,19 @@
-"""Worker execution — spawn a role-scoped opencode subprocess pointed at the
+"""Worker execution — spawn a role-scoped agent CLI subprocess pointed at the
 agent-facing MCP server, instead of the old file contract.
 
 Reuses core.worktree (git isolation) and core.launcher.launch_agent (subprocess
 lifecycle: timeout, idle-timeout, cancellation) unmodified. The only new thing
-is per-run agent-MCP wiring: a session token + a generated project-level
-opencode.json pointing opencode at a LOCAL (stdio) MCP bridge
-(tools/agent_mcp_stdio.py), which forwards to the daemon's /mcp/agent over
-HTTP. Local, not remote — opencode's remote-MCP transport proved unreliable
-in practice (see docs/adr/); every other MCP server on this machine, and our
-own control-plane mcp_server.py, already use the local/stdio pattern.
+is per-run agent-MCP wiring: a session token + a generated config pointing the
+CLI at a LOCAL (stdio) MCP bridge (tools/agent_mcp_stdio.py), which forwards to
+the daemon's /mcp/agent over HTTP. Local, not remote — opencode's remote-MCP
+transport proved unreliable in practice (see docs/adr/); every other MCP server
+on this machine, and our own control-plane mcp_server.py, already use the
+local/stdio pattern.
+
+Which CLI runs is a property of the resolved runner row, and everything that
+differs between CLIs — config file shape and location, and how the model must
+spell our tool names in a call — comes from core.runner_profiles. This module
+resolves the runner's type once per run and threads it through both.
 """
 import json
 import logging
@@ -34,13 +39,13 @@ _BRIDGE_SCRIPT = str(Path(__file__).resolve().parent.parent / "tools" / "agent_m
 _PYTHON = sys.executable
 
 # The name of the agent/persona we ask opencode to run as (see
-# _write_opencode_config and spawn_worker's launch_agent call). Ours, not
-# borrowed from opencode's own built-ins — see that function's docstring for
-# why borrowing a built-in name (originally "build") turned out not to be
-# durable.
+# core.runner_profiles.write_mcp_config and spawn_worker's launch_agent call).
+# Ours, not borrowed from opencode's own built-ins — see that function's
+# docstring for why borrowing a built-in name (originally "build") turned out
+# not to be durable. opencode-only: Claude Code has no equivalent concept.
 _WORKER_AGENT = "sisyphus-worker"
 
-# The name of our project-local MCP server entry (see _write_opencode_config
+# The name of our MCP server entry (see core.runner_profiles.write_mcp_config
 # and _build_prompt). NOT "sisyphus" — confirmed live that this machine
 # already has an MCP server registered globally/per-project under the literal
 # name "sisyphus" (almost certainly this repo's own control-plane
@@ -144,63 +149,52 @@ def _prepare_repo(task_id: str, repo_name: Optional[str]):
     return bare_path, repo.get("branch", "main")
 
 
-def _write_opencode_config(worktree_path: str, token: str) -> None:
-    """Point opencode at our agent-MCP bridge as a LOCAL (stdio) MCP server.
-    Role restriction is enforced server-side (by the token), so no
-    tool-allowlisting is needed in this config.
 
-    "plugin": [] overrides (not merges with) the user's global plugin list —
-    this is what actually stops the global oh-my-openagent plugin from
-    hijacking the run (it reroutes all tool calls through its own
-    task/skill_mcp indirection and never lets the model see our raw
-    tools). --pure was tried first, but confirmed by live probing (opencode
-    debug logs + a direct tool-list run) to strip project-local MCP servers
-    too — with --pure our own server never even connects. An explicit empty
-    "plugin" array disables just the plugin, leaving project-local "mcp"
-    entries (this one included) intact.
 
-    "agent": {_WORKER_AGENT: {"mode": "primary"}} defines our OWN agent
-    entirely within project config, instead of asking opencode to run one of
-    its own built-in agents by name (originally "build"). That approach
-    worked at first but broke without any change on our side: the global
-    oh-my-openagent config can (and, on this machine, later did) reclassify
-    a built-in agent name as a subagent, at which point opencode silently
-    falls back to its own default — the very custom persona we were trying
-    to avoid, reintroducing the skill_mcp indirection bug. A name we mint and
-    define ourselves, with "mode" set explicitly, isn't subject to that.
+def _effective_model(model_override: Optional[str], runner_name: Optional[str]) -> str:
+    """The model this run will actually use: the agent's override, else the
+    runner row's. opencode needs it written into the generated agent config —
+    a primary agent with no model hangs the CLI (see
+    core.runner_profiles.write_mcp_config)."""
+    if model_override:
+        return model_override
+    from .runners import resolve_runner
+    return (resolve_runner(runner_name or "") or {}).get("model") or ""
 
-    The MCP server is named _MCP_SERVER_NAME ("sisyphus_agent"), not
-    "sisyphus" — see that constant's comment for why the obvious name
-    collides with something already on this machine.
+
+def _write_runner_config(rtype: str, worktree_path: str, output_dir: str,
+                         token: str, model: str = "") -> Optional[str]:
+    """Point *rtype*'s CLI at our stdio MCP bridge for this one run.
+
+    Returns a config path to hand back to the launcher, or None when the CLI
+    finds the config itself (opencode reads opencode.json from its cwd).
     """
-    config = {
-        "$schema": "https://opencode.ai/config.json",
-        "plugin": [],
-        "agent": {_WORKER_AGENT: {"mode": "primary"}},
-        "mcp": {
-            _MCP_SERVER_NAME: {
-                "type": "local",
-                "command": [_PYTHON, _BRIDGE_SCRIPT],
-                "environment": {
-                    "SISYPHUS_SESSION_TOKEN": token,
-                    "SISYPHUS_DAEMON_URL": DAEMON_URL,
-                },
-                "enabled": True,
-            }
+    from . import runner_profiles
+    return runner_profiles.write_mcp_config(
+        rtype,
+        model=model,
+        worktree_path=worktree_path,
+        output_dir=output_dir,
+        server_name=_MCP_SERVER_NAME,
+        command=[_PYTHON, _BRIDGE_SCRIPT],
+        env={
+            "SISYPHUS_SESSION_TOKEN": token,
+            "SISYPHUS_DAEMON_URL": DAEMON_URL,
         },
-    }
-    Path(worktree_path, "opencode.json").write_text(json.dumps(config, indent=2))
+        agent_name=_WORKER_AGENT,
+    )
 
 
-def _build_prompt(role_def: dict, goal: str, instruction: str, thread: str) -> str:
-    # Name the tools explicitly, with opencode's actual server-prefixed form
-    # (_MCP_SERVER_NAME + "_" + tool) — a repo that itself contains Sisyphus's
-    # source (e.g. exploring this very project) can otherwise confuse the
-    # model into calling a similarly-named control-plane tool (mcp_server.py's
-    # sisyphus_get_card etc.) instead of the real agent tool. Naming them
-    # exactly, and warning it off anything else "sisyphus"-looking it may
-    # read in the code, removes the ambiguity.
-    prefix = f"{_MCP_SERVER_NAME}_"
+def _build_prompt(role_def: dict, goal: str, instruction: str, thread: str,
+                  prefix: str = f"{_MCP_SERVER_NAME}_") -> str:
+    # Name the tools explicitly, in the runner's own server-prefixed form
+    # (*prefix*, from core.runner_profiles.tool_prefix — opencode spells it
+    # `<server>_<tool>`, Claude Code `mcp__<server>__<tool>`) — a repo that
+    # itself contains Sisyphus's source (e.g. exploring this very project) can
+    # otherwise confuse the model into calling a similarly-named control-plane
+    # tool (mcp_server.py's sisyphus_get_card etc.) instead of the real agent
+    # tool. Naming them exactly, and warning it off anything else
+    # "sisyphus"-looking it may read in the code, removes the ambiguity.
     tool_names = ", ".join(f"{prefix}{t}" for t in role_def["tools"])
     if "finish" in role_def["tools"]:
         finish_tool = f"{prefix}finish"
@@ -382,20 +376,31 @@ async def spawn_worker(
                           model=model_override or "",
                           runner=runner_name or "",
                           kind="worker")
-    _write_opencode_config(worktree_path, token)
-
     store.post_message(
         task_id, author="system", kind="worker_started",
         text=f"spawning {role}: {instruction}",
     )
 
-    prompt = _build_prompt(role_def, task["goal"], instruction, store.render_thread(task_id, for_prompt=True))
     # Layout matches what launcher._derive_run_id expects (runs/{run_id}/
     # resources/{step_id}), using task_id as the run id and role as the step
     # id — so worker logs land under runs/{task_id}/logs/{role}.log instead
     # of being mis-derived to a shared "runs/{role}/" bucket.
     output_dir = f"{os.environ.get('WORKSPACE_ROOT', '/workspace')}/runs/{task_id}/resources/{role}"
     os.makedirs(output_dir, exist_ok=True)
+
+    # Which CLI actually runs decides two things the prompt and config must
+    # agree on: where its MCP config lives, and how the model must spell our
+    # tool names. Resolve once, through the same chain the launcher uses.
+    from . import runner_profiles
+    from .runners import resolve_runner
+    rtype = runner_profiles.normalize_type(resolve_runner(runner_name or ""))
+    mcp_config = _write_runner_config(rtype, worktree_path, output_dir, token,
+                                      model=_effective_model(model_override, runner_name))
+    prefix = runner_profiles.tool_prefix(rtype, _MCP_SERVER_NAME)
+
+    prompt = _build_prompt(role_def, task["goal"], instruction,
+                           store.render_thread(task_id, for_prompt=True),
+                           prefix=prefix)
 
     agent_def = {"name": role, "opencode_config": {}}
     # Publish a cancel event for the lifetime of the run. The launcher's monitor
@@ -417,11 +422,12 @@ async def spawn_worker(
                 step_id=f"{task_id}-{role}",
                 runner_name=runner_name,
                 # Our own agent, defined in the project config above — see
-                # _write_opencode_config's docstring for why a borrowed built-in
+                # core.runner_profiles.write_mcp_config for why a borrowed built-in
                 # name ("build") wasn't durable.
                 agent=_WORKER_AGENT,
                 model_override=model_override,
                 cancel_event=cancel_event,
+                mcp_config=mcp_config,
             )
     finally:
         cancellation.unregister(task_id, role)
@@ -442,12 +448,13 @@ async def spawn_worker(
         emit(task_id, "worker_finished")
 
 
-def _build_decider_prompt(agent: dict, thread_text: str, roster: list) -> str:
+def _build_decider_prompt(agent: dict, thread_text: str, roster: list,
+                          prefix: str = f"{_MCP_SERVER_NAME}_") -> str:
     """Prompt for the orchestrator agent: read the thread, call exactly one
     decision tool. The persona (decision doctrine) comes from the agent row;
     *roster* is the exact set of worker agents it may spawn (so it can't invent
-    an agent name that doesn't exist — a real hallucination we hit in testing)."""
-    prefix = f"{_MCP_SERVER_NAME}_"
+    an agent name that doesn't exist — a real hallucination we hit in testing).
+    *prefix* is the runner's MCP tool-naming convention (see _build_prompt)."""
     tools = ", ".join(prefix + t for t in agent["tools"] if t.startswith("decide_"))
     names = ", ".join(roster) or "explorer, engineer, reviewer"
     return (
@@ -494,12 +501,21 @@ async def spawn_decider(task_id: str, agent_name: str, thread_text: str,
                           model=model_override or "",
                           runner=runner_name or "",
                           kind="decider")
-    _write_opencode_config(scratch, token)
 
-    roster = [a["name"] for a in agents.list_agents(kind="worker") if a.get("enabled", 1)]
-    prompt = _build_decider_prompt(agent, thread_text, roster)
     output_dir = f"{ws}/runs/{task_id}/resources/orchestrator"
     os.makedirs(output_dir, exist_ok=True)
+
+    from . import runner_profiles
+    from .runners import resolve_runner
+    rtype = runner_profiles.normalize_type(resolve_runner(runner_name or ""))
+    mcp_config = _write_runner_config(rtype, scratch, output_dir, token,
+                                      model=_effective_model(model_override, runner_name))
+
+    roster = [a["name"] for a in agents.list_agents(kind="worker") if a.get("enabled", 1)]
+    prompt = _build_decider_prompt(
+        agent, thread_text, roster,
+        prefix=runner_profiles.tool_prefix(rtype, _MCP_SERVER_NAME),
+    )
 
     # A weaker/cheaper model sometimes finishes its turn without calling a
     # decision tool (no decision recorded). Give it up to DECIDER_ATTEMPTS tries
@@ -512,7 +528,7 @@ async def spawn_decider(task_id: str, agent_name: str, thread_text: str,
             agent_def, prompt, scratch, output_dir,
             timeout=timeout, idle_timeout=idle_timeout, step_id=f"{task_id}-orchestrator",
             runner_name=runner_name, agent=_WORKER_AGENT,
-            model_override=model_override,
+            model_override=model_override, mcp_config=mcp_config,
         )
         record_run(task_id, agent_name, result.model, result.usage, result.duration_ms)
         session = sessions.resolve(token)

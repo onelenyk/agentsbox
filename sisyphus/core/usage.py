@@ -40,9 +40,80 @@ def init_usage_table() -> None:
     conn.close()
 
 
+def _find_claude_result(stdout: str) -> Optional[dict]:
+    """The terminal ``"type":"result"`` event from Claude Code's output.
+
+    Handles both shapes the CLI can emit: the stream-json event stream the
+    worker actually runs (see core.runner_profiles, which uses it so the
+    launcher's idle timer keeps ticking), where the result is the last of many
+    lines; and a lone json object, which is what `--output-format json`
+    produces and what a hand-configured runner might still yield. Returns None
+    for anything else, so opencode's NDJSON path can handle it instead.
+    """
+    last = None
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if not (line.startswith("{") and line.endswith("}")):
+            continue
+        try:
+            obj = json.loads(line)
+        except Exception:
+            continue
+        # Keep scanning: only the final result event carries whole-run totals,
+        # and a resumed/retried run can emit more than one.
+        if isinstance(obj, dict) and obj.get("type") == "result":
+            last = obj
+    return last
+
+
+def _parse_claude_usage(stdout: str) -> Optional[dict]:
+    """Usage from Claude Code's run output, or None if this isn't that runner.
+
+    One cumulative ``usage`` block per run plus ``total_cost_usd`` — unlike
+    opencode, which reports per-step and has to be summed.
+    """
+    obj = _find_claude_result(stdout)
+    if obj is None:
+        return None
+    u = obj.get("usage")
+    if not isinstance(u, dict):
+        return None
+    details = u.get("output_tokens_details") or {}
+    # Claude Code reports which model actually served the run. A claude-cli
+    # runner row usually names no model (the CLI uses its own configured
+    # default), so without this the Statistics page shows a blank model for
+    # every Claude run — the one thing that row is for.
+    model_usage = obj.get("modelUsage")
+    served = next(iter(model_usage), "") if isinstance(model_usage, dict) else ""
+    return {
+        "model": served,
+        "input_tokens": int(u.get("input_tokens") or 0),
+        "output_tokens": int(u.get("output_tokens") or 0),
+        "reasoning_tokens": int(details.get("thinking_tokens") or 0),
+        "cache_read": int(u.get("cache_read_input_tokens") or 0),
+        "cache_write": int(u.get("cache_creation_input_tokens") or 0),
+        "cost": float(obj.get("total_cost_usd") or 0),
+        # One row per run, not per model turn. record_run drops rows with
+        # steps == 0, so a run that reported real tokens must count at least 1
+        # even when num_turns is absent or zero.
+        "steps": max(1, int(obj.get("num_turns") or 0)),
+        "total_tokens": (
+            int(u.get("input_tokens") or 0)
+            + int(u.get("output_tokens") or 0)
+            + int(details.get("thinking_tokens") or 0)
+        ),
+    }
+
+
 def parse_usage(stdout: str) -> dict:
-    """Sum token/cost across a run's opencode NDJSON output. Returns zeros if the
-    output carries no usage (a different runner, or a crash before any step)."""
+    """Token/cost for one run, from whichever runner produced *stdout*.
+
+    Returns zeros if the output carries no usage (an unrecognised runner, or a
+    crash before any step)."""
+    claude = _parse_claude_usage(stdout)
+    if claude is not None:
+        return claude
+
     agg = {"input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0,
            "cache_read": 0, "cache_write": 0, "cost": 0.0, "steps": 0}
     for line in (stdout or "").splitlines():

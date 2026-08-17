@@ -42,3 +42,33 @@ def test_detect_lists_found(monkeypatch):
     found = runner_detect.detect()
     assert found == [{"name": "opencode", "type": "opencode",
                       "binary": "opencode", "path": "/opt/opencode"}]
+
+
+class TestPathWithInstallDirs:
+    """Resolving a runner absolutely only fixes OUR spawn. A runner that is a
+    wrapper script (this machine's `claude` is one) still searches PATH for the
+    real binary, and under launchd that PATH is /usr/bin:/bin:/usr/sbin:/sbin.
+    """
+
+    def test_appends_existing_install_dirs(self, monkeypatch, tmp_path):
+        real = tmp_path / "toolbin"
+        real.mkdir()
+        monkeypatch.setattr(runner_detect, "_EXTRA_DIRS", [str(real), str(tmp_path / "nope")])
+        out = runner_detect.path_with_install_dirs("/usr/bin:/bin")
+        parts = out.split(os.pathsep)
+        assert parts[:2] == ["/usr/bin", "/bin"], "configured PATH must keep priority"
+        assert str(real) in parts
+        assert str(tmp_path / "nope") not in parts, "must not add dirs that don't exist"
+
+    def test_no_duplicates(self, monkeypatch, tmp_path):
+        real = tmp_path / "toolbin"
+        real.mkdir()
+        monkeypatch.setattr(runner_detect, "_EXTRA_DIRS", [str(real)])
+        out = runner_detect.path_with_install_dirs(str(real))
+        assert out.split(os.pathsep).count(str(real)) == 1
+
+    def test_empty_base(self, monkeypatch, tmp_path):
+        real = tmp_path / "toolbin"
+        real.mkdir()
+        monkeypatch.setattr(runner_detect, "_EXTRA_DIRS", [str(real)])
+        assert runner_detect.path_with_install_dirs("") == str(real)

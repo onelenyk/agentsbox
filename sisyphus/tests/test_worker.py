@@ -133,7 +133,12 @@ class TestRepoBackedWorktree:
         # "build" agent that worked one day was reclassified as a subagent
         # the next, silently falling back to the persona this exists to
         # avoid).
-        assert config["agent"] == {"sisyphus-worker": {"mode": "primary"}}
+        agent_cfg = config["agent"]["sisyphus-worker"]
+        assert agent_cfg["mode"] == "primary"
+        # The model must be written in: a primary agent without one makes
+        # `opencode run` hang with no output at all, which surfaces to the user
+        # only as "decider produced no decision".
+        assert agent_cfg.get("model")
 
         # Worktrees are always writable regardless of role (opencode needs to
         # write its own .opencode/ session state) — access control for what a

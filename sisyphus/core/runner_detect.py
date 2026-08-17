@@ -13,6 +13,7 @@ from pathlib import Path
 # CLI runners Sisyphus knows how to drive: binary name -> runner type.
 KNOWN = {
     "opencode": "opencode",
+    "claude": "claude-cli",
 }
 
 # Common install dirs beyond PATH: curl installers, npm/pnpm/bun/homebrew globals.
@@ -45,6 +46,31 @@ def resolve(binary: str):
         if p.exists() and os.access(p, os.X_OK):
             return str(p)
     return None
+
+
+def path_with_install_dirs(base: str = "") -> str:
+    """*base* PATH with the CLI install dirs above appended (existing ones only).
+
+    Resolving a runner to an absolute path is enough for US to spawn it, but
+    says nothing about what THAT binary can find. Confirmed live: `claude` on
+    this machine resolves to ~/.superset/bin/claude, which is a shell wrapper
+    that searches PATH for the real binary (skipping its own directory) and
+    exits with "claude not found in PATH" under the daemon's PATH of
+    /usr/bin:/bin:/usr/sbin:/sbin. The worker died in 71ms and reported only
+    "ended without reporting a result: no output". Anything a runner shells out
+    to — wrappers, node, git — has the same exposure, so the worker gets the
+    same search path a human shell would.
+
+    Appended, never prepended: an explicit PATH from config still wins.
+    """
+    parts = [p for p in (base or "").split(os.pathsep) if p]
+    seen = {os.path.normpath(p) for p in parts}
+    for d in _EXTRA_DIRS:
+        p = os.path.expanduser(d)
+        if os.path.isdir(p) and os.path.normpath(p) not in seen:
+            seen.add(os.path.normpath(p))
+            parts.append(p)
+    return os.pathsep.join(parts)
 
 
 def detect() -> list:
