@@ -222,7 +222,29 @@ def init_mr_table() -> None:
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(merge_requests)").fetchall()}
     if "review_status" not in cols:
         conn.execute("ALTER TABLE merge_requests ADD COLUMN review_status TEXT")
+    # The daemon's own verdict on this branch (core.verify), kept apart from
+    # review_status: one is what a machine measured, the other what an agent
+    # decided, and conflating them is exactly the failure this guards against.
+    if "check_status" not in cols:
+        conn.execute("ALTER TABLE merge_requests ADD COLUMN check_status TEXT")
+        conn.execute("ALTER TABLE merge_requests ADD COLUMN check_output TEXT")
+        conn.execute("ALTER TABLE merge_requests ADD COLUMN check_command TEXT")
+        conn.execute("ALTER TABLE merge_requests ADD COLUMN check_ran_at TEXT")
 
+    conn.commit()
+    conn.close()
+
+
+def set_check_result(mr_id: str, status: str, output: str = "", command: str = "") -> None:
+    """Record what the daemon's own check found: 'passed', 'failed' or
+    'not_run'. Never derived from anything an agent said."""
+    conn = get_conn()
+    now = _now()
+    conn.execute(
+        "UPDATE merge_requests SET check_status = ?, check_output = ?, "
+        "check_command = ?, check_ran_at = ?, updated_at = ? WHERE id = ?",
+        (status, output, command, now, now, mr_id),
+    )
     conn.commit()
     conn.close()
 

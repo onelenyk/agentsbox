@@ -30,6 +30,18 @@ def ensure_review_task(mr: dict) -> Optional[dict]:
             if f"Review-of-MR: {mr_id}" in t["goal"]:
                 return None
 
+    # Run the repo's own check before the reviewer is asked anything, so the
+    # verdict it must account for is already on the record and was produced by
+    # the daemon rather than typed by an agent.
+    check_line = ""
+    try:
+        from core import verify
+        res = verify.run_and_record(mr)
+        check_line = verify.summarise(res)
+    except Exception:  # noqa: BLE001 — a broken check must not block review
+        logger.exception("check failed to run for %s", mr_id)
+        check_line = "The automated check could not be run — treat it as absent, not as a pass."
+
     mr_title = mr.get("title", "") or "Untitled"
     max_title_len = 120
     if len(mr_title) > max_title_len:
@@ -46,6 +58,12 @@ def ensure_review_task(mr: dict) -> Optional[dict]:
         f"Use get_mr_diff to read the diff. Check freshness vs target and "
         f"diff quality. Then call approve(summary=...) or "
         f"request_changes(reason=...). Read-only — never commit/merge.\n"
+        f"\n"
+        f"Automated check (run by the daemon, not by you): {check_line}\n"
+        f"Its full output is on the thread. This is the authoritative result for "
+        f"this branch — do not substitute your own test run for it, and do not "
+        f"approve over a failing check. If no check ran, say so in your verdict "
+        f"rather than implying the branch was verified.\n"
     )
 
     return store.create_task(

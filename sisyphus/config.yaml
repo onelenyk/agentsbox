@@ -25,25 +25,25 @@ repos:
   name: sisyphus
   source: /Users/lenyk/workproject/agentsbox
 - branch: main
+  check: python3 -m pytest -q
   name: testrepo
   source: /Users/lenyk/workproject/agentsbox/testrepo
 - branch: main
+  check: python3 -m pytest -q
   name: testrepo2
   source: /Users/lenyk/workproject/agentsbox/testrepo2
 - branch: main
+  check: python3 -m pytest -q
   name: testrepo-bug
   source: /Users/lenyk/workproject/agentsbox/testrepo-bug
 - branch: staging
   name: android-driver
+  platform: gitlab
   source: /Users/lenyk/workproject/android-driver
 task_budget_usd: 5.0
 webhooks:
   secret: ${SISYPHUS_WEBHOOK_SECRET}
-
-# Environment handed to worker subprocesses. The daemon runs under launchd,
-# whose environment is nearly empty, so anything a real toolchain needs must be
-# stated here. Values may reference earlier keys and the daemon's own env.
 worker_env:
-  JAVA_HOME: "/Users/lenyk/Applications/Android Studio.app/Contents/jbr/Contents/Home"
-  ANDROID_HOME: "~/Library/Android/sdk"
-  PATH: "${JAVA_HOME}/bin:${ANDROID_HOME}/platform-tools:/opt/homebrew/bin:${PATH}"
+  ANDROID_HOME: ~/Library/Android/sdk
+  JAVA_HOME: /Users/lenyk/Applications/Android Studio.app/Contents/jbr/Contents/Home
+  PATH: ${JAVA_HOME}/bin:${ANDROID_HOME}/platform-tools:/opt/homebrew/bin:${PATH}
