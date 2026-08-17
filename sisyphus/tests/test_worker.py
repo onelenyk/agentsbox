@@ -385,3 +385,53 @@ class TestSetAccessWriteAlias:
 
         set_access(str(d), "write")
         assert _os.access(str(f), _os.W_OK), "file left read-only — 'write' was a no-op"
+
+
+class TestWorkerEndDiagnosis:
+    """Every runner failure reached the thread as the single word "no output",
+    which covers four faults needing four different fixes. These pin the
+    distinctions apart."""
+
+    def _result(self, **kw):
+        from core.launcher import AgentResult
+        return AgentResult(**kw)
+
+    def test_stderr_is_surfaced_when_nothing_reached_stdout(self):
+        from core.worker import worker_end_message
+        msg = worker_end_message("explorer", self._result(
+            status="completed", raw_stdout="",
+            raw_stderr="Superset: claude not found in PATH."))
+        assert "not found in PATH" in msg
+
+    def test_total_silence_points_at_the_smoke_test(self):
+        from core.worker import worker_end_message
+        msg = worker_end_message("explorer", self._result(
+            status="completed", raw_stdout="", raw_stderr=""))
+        assert "no output at all" in msg
+        assert "smoke test" in msg.lower()
+
+    def test_work_done_but_unreported_is_not_an_infrastructure_fault(self):
+        """The agent ran a full turn and just never called finish — a prompt or
+        tool-visibility problem, not a broken runner."""
+        from core.worker import worker_end_message
+        msg = worker_end_message("engineer", self._result(
+            status="completed", raw_stdout='{"type":"text"}', usage={"steps": 7}))
+        assert "7 model step" in msg
+        assert "never called its finishing tool" in msg
+
+    def test_output_without_model_steps_is_its_own_case(self):
+        from core.worker import worker_end_message
+        msg = worker_end_message("engineer", self._result(
+            status="completed", raw_stdout="starting up", usage={"steps": 0}))
+        assert "no model steps were billed" in msg
+
+    def test_an_explicit_error_still_wins(self):
+        from core.worker import worker_end_message
+        msg = worker_end_message("engineer", self._result(
+            status="timeout", error="Agent exceeded 1800s timeout", raw_stdout="x"))
+        assert "exceeded 1800s timeout" in msg
+
+    def test_cancellation_is_still_reported_as_not_a_failure(self):
+        from core.worker import worker_end_message
+        msg = worker_end_message("engineer", self._result(status="cancelled"))
+        assert "not a" in msg and "failure" in msg
