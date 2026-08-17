@@ -1228,6 +1228,24 @@ async def task_diff_modal(request: Request, task_id: str, filename: str):
     })
 
 
+@router.get("/api/tasks/{task_id}/logs", response_class=HTMLResponse)
+async def task_logs_modal(request: Request, task_id: str, name: str = ""):
+    """The run logs for a task — what each worker's CLI actually printed.
+
+    These answered every question during the runner debugging that produced the
+    smoke test, and reading them required a terminal. *name* selects one log;
+    without it the newest is shown.
+    """
+    from core import runlogs
+    logs = runlogs.list_logs(task_id)
+    selected = name or (logs[0]["name"] if logs else "")
+    text = runlogs.read_log(task_id, selected) if selected else None
+    return _tmpl().TemplateResponse(request, "logs_modal.html", {
+        "task_id": task_id, "logs": logs,
+        "selected": selected, "text": text,
+    })
+
+
 # ── Local Merge Requests ────────────────────────────────────────────────
 
 def _mr_view_ctx(request, mr):

@@ -293,9 +293,49 @@ def worker_end_message(role: str, result) -> str:
                 f"failure and nothing is known to be wrong with the work — the "
                 f"instruction was interrupted part-way. Do not fail the task for "
                 f"this; continue from the human's next instruction.")
-    detail = getattr(result, "error", "") or getattr(result, "summary", "") or "no output"
     return (f"{role} ended without reporting a result "
-            f"(status={getattr(result, 'status', '?')}): {detail}")
+            f"(status={getattr(result, 'status', '?')}): {_diagnose(result)}")
+
+
+def _diagnose(result) -> str:
+    """Why a worker stopped without closing its session, in words that point
+    somewhere.
+
+    Every runner failure this system has hit reached the thread as the single
+    word "no output", which is true and useless: it covers a CLI that never
+    started, one that died with an explanation on stderr, one that hung
+    producing nothing, and one that did a full turn of real work and simply
+    never called the finishing tool. Those need four different fixes, and the
+    evidence telling them apart — stderr, and whether any model steps were
+    billed — was already on the result and thrown away.
+    """
+    explicit = (getattr(result, "error", "") or "").strip()
+    if explicit:
+        return explicit
+
+    stdout = (getattr(result, "raw_stdout", "") or "").strip()
+    stderr = (getattr(result, "raw_stderr", "") or "").strip()
+    steps = ((getattr(result, "usage", None) or {}).get("steps") or 0)
+
+    if not stdout:
+        if stderr:
+            # The Claude wrapper-script failure said exactly what was wrong here
+            # and nobody saw it for a day.
+            return (f"the runner wrote nothing to stdout and exited. Its error was: "
+                    f"{stderr[:400]}")
+        return ("the runner produced no output at all — it never started, or it hung "
+                "and was killed. Run a smoke test on this runner (Runners → Smoke "
+                "test) to see which.")
+
+    if steps:
+        # The infrastructure worked; the agent chose not to finish.
+        return (f"the agent ran ({steps} model step(s)) but never called its finishing "
+                f"tool, so the work is unreported rather than undone. Check the run log "
+                f"for what it did; if its tools were missing, the MCP wiring is at fault, "
+                f"and if they were present it stopped early.")
+
+    return (f"the runner produced output but no model steps were billed — it likely "
+            f"failed before reaching the model. Last output: {(stderr or stdout)[:300]}")
 
 
 async def spawn_worker(

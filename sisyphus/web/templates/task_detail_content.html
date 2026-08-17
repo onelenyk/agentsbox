@@ -36,6 +36,11 @@
                     hx-confirm="Stop this task? Its running worker is killed; the task parks as waiting and a reply resumes it."
                     hx-swap="none">Stop</button>
             {% endif %}
+            {# What each worker's CLI actually printed. When a worker ends
+               without reporting, this is where the reason is. #}
+            <button class="btn btn--sm"
+                    hx-get="/api/tasks/{{ task.id }}/logs"
+                    hx-target="#modal-container" hx-swap="innerHTML">Run logs</button>
             <button class="btn btn--danger btn--sm"
                     hx-post="/api/tasks/{{ task.id }}/delete"
                     hx-confirm="Delete this task and its whole thread? This can't be undone."
