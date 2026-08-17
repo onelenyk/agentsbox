@@ -157,6 +157,7 @@ async def launch_agent(
     pure: bool = False,
     agent: Optional[str] = None,
     model_override: Optional[str] = None,
+    mcp_config: Optional[str] = None,
 ) -> AgentResult:
     """Spawn AI runner subprocess, capture output.
 
@@ -191,6 +192,7 @@ async def launch_agent(
     next, silently falling back to the exact persona this param exists to
     avoid).
     """
+    from . import runner_profiles
     from .runners import get_runner_by_name, get_default_runner
 
     if runner_name:
@@ -200,7 +202,15 @@ async def launch_agent(
     if not runner:
         runner = get_default_runner()
     if not runner:
-        runner = {"binary": "opencode", "model": "", "api_key_env": "", "base_url": "", "extra_args": "[]"}
+        runner = {"binary": "opencode", "type": "opencode", "model": "",
+                  "api_key_env": "", "base_url": "", "extra_args": "[]"}
+
+    # A row whose type has no launch profile used to be fed opencode's flags
+    # and fail somewhere deep inside the wrong binary. Name the real problem.
+    try:
+        rtype = runner_profiles.normalize_type(runner)
+    except runner_profiles.UnsupportedRunner as e:
+        return AgentResult(status="error", error=str(e))
 
     # Resolve to an absolute path so the launch works under a minimal PATH
     # (e.g. a launchd-supervised daemon), falling back to the bare name.
@@ -241,6 +251,14 @@ async def launch_agent(
     for name in worker_env_rejected():
         logger.warning("worker_env: ignoring %r — the daemon owns that variable", name)
 
+    # Give the runner the search path a human shell would have. Resolving the
+    # binary absolutely (above) only fixes OUR spawn; a runner that is itself a
+    # wrapper script, or that shells out to node/git, still searches PATH — and
+    # under launchd that PATH is just /usr/bin:/bin:/usr/sbin:/sbin. See
+    # core.runner_detect.path_with_install_dirs for the live failure this fixes.
+    from .runner_detect import path_with_install_dirs
+    env["PATH"] = path_with_install_dirs(env.get("PATH", ""))
+
     env["WORKSPACE_ROOT"] = str(output_path / "wsroot")
     Path(env["WORKSPACE_ROOT"]).mkdir(parents=True, exist_ok=True)
     env["SISYPHUS_OUTPUT_DIR"] = str(output_dir)
@@ -249,30 +267,21 @@ async def launch_agent(
     if model_override or runner.get("model"):
         env["SISYPHUS_MODEL"] = model_override or runner["model"]
 
-    api_env = runner.get("api_key_env", "")
-    if api_env:
-        key = os.environ.get(api_env, "")
-        if key:
-            env[api_env] = key
-            env["OPENROUTER_API_KEY"] = key
-
-    if runner.get("base_url"):
-        env["OPENROUTER_BASE_URL"] = runner["base_url"]
+    # Credential variables are per-CLI: what OpenRouter reads is meaningless to
+    # a CLI talking to Anthropic directly (see core.runner_profiles.build_env).
+    env.update(runner_profiles.build_env(rtype, runner))
 
     agent_env = agent_def.get("opencode_config", {}).get("env", {})
     env.update(agent_env)
 
-    args = [binary, "run"] + extra_args + [
-        prompt,
-        "--format", "json",
-        "--auto",
-    ]
-    if pure:
-        args.append("--pure")
-    if agent:
-        args.extend(["--agent", agent])
-    if worktree_path and worktree_path != "/tmp":
-        args.extend(["--dir", str(worktree_path)])
+    args = runner_profiles.build_argv(
+        rtype, binary, extra_args, prompt,
+        worktree_path=worktree_path,
+        pure=pure,
+        agent=agent,
+        model=model_override or runner.get("model", ""),
+        mcp_config=mcp_config,
+    )
 
     # Confine the runner's filesystem writes to the workspace (see core.sandbox).
     # Without a backend the run proceeds unconfined — surface that once so it's
@@ -333,7 +342,12 @@ async def launch_agent(
     # before the cutoff), so parse it regardless of terminal status.
     from .usage import parse_usage
     usage = parse_usage(stdout_str)
-    model = model_override if model_override else (runner.get("model", "") if isinstance(runner, dict) else "")
+    # Last resort: what the runner itself says it served. A claude-cli row
+    # normally names no model (the CLI carries its own default), so without
+    # this the run is recorded with a blank model.
+    model = (model_override
+             or (runner.get("model", "") if isinstance(runner, dict) else "")
+             or (usage or {}).get("model", ""))
 
     if status == "cancelled":
         return AgentResult(status="cancelled", duration_ms=duration, usage=usage, model=model)

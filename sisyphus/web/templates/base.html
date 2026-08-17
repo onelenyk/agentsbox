@@ -67,8 +67,17 @@
         b.addEventListener("agentsUpdated",  function () { flash("Saved"); });
         b.addEventListener("taskCreated",    function () { flash("Task created"); });
         b.addEventListener("taskUpdated",    function () { flash("Updated"); });
+        // Runner writes reject unsupported types and duplicate names; the route
+        // sends the reason on this trigger so the toast can say what went wrong
+        // instead of a bare status line.
+        b.addEventListener("runnerError", function (e) {
+            flash(e.detail.value || e.detail, "err");
+        });
         b.addEventListener("htmx:afterRequest", function (e) {
-            if (e.detail.failed) flash("Error: " + (e.detail.xhr.statusText || "request failed"), "err");
+            if (!e.detail.failed) return;
+            // Already reported with a specific reason above — don't double-flash.
+            if ((e.detail.xhr.getResponseHeader("HX-Trigger") || "").indexOf("runnerError") !== -1) return;
+            flash("Error: " + (e.detail.xhr.statusText || "request failed"), "err");
         });
 
         // Daemon heartbeat — reflect real reachability + readiness in the LED.

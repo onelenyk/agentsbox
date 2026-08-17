@@ -74,6 +74,99 @@ def test_runners_list(db_path):
     assert response.text
 
 
+# ── Tests: runner add / detect / type list ───────────────────────────────
+
+
+def test_runners_new_form_offers_only_launchable_types(db_path):
+    """The form must not advertise a type that has no launch profile."""
+    from core.runners import RUNNER_TYPES
+    init_runners_table()
+    client = _make_client()
+    body = client.get("/api/runners/new-form").text
+    for t in RUNNER_TYPES:
+        assert f'value="{t}"' in body
+    for gone in ("ollama", "openai-api", "custom"):
+        assert f'value="{gone}"' not in body
+
+
+def test_runners_add_claude(db_path):
+    """A Claude runner can be added from the page and lands with its own type."""
+    from core.runners import get_runner_by_name
+    init_runners_table()
+    client = _make_client()
+    r = client.post("/api/runners", data={
+        "name": "claude", "binary": "claude", "type": "claude-cli",
+        "model": "", "api_key_env": "", "base_url": "",
+    })
+    assert r.status_code == 200
+    row = get_runner_by_name("claude")
+    assert row is not None and row["type"] == "claude-cli"
+
+
+def test_runners_add_rejects_unlaunchable_type_readably(db_path):
+    init_runners_table()
+    client = _make_client()
+    r = client.post("/api/runners", data={
+        "name": "nope", "binary": "ollama", "type": "ollama",
+    })
+    assert r.status_code == 400
+    # The reason rides HX-Trigger so the page can show it, not a bare 500.
+    assert "runnerError" in r.headers.get("HX-Trigger", "")
+    assert "ollama" in r.headers["HX-Trigger"]
+
+
+def test_runners_add_duplicate_name_is_reported(db_path):
+    init_runners_table()
+    client = _make_client()
+    data = {"name": "dup", "binary": "claude", "type": "claude-cli"}
+    assert client.post("/api/runners", data=data).status_code == 200
+    r = client.post("/api/runners", data=data)
+    assert r.status_code == 400
+    assert "already exists" in r.headers.get("HX-Trigger", "")
+
+
+def test_runners_detect_never_suggests_openrouter_key_for_claude(db_path):
+    """The autodetect panel used to hardcode OPENROUTER_API_KEY for every
+    binary it found — for a Claude row that key would be forwarded as
+    ANTHROPIC_API_KEY."""
+    init_runners_table()
+    client = _make_client()
+    detected = [{"name": "claude", "type": "claude-cli", "binary": "claude",
+                 "path": "/usr/local/bin/claude"}]
+    with patch("core.runner_detect.detect", return_value=detected):
+        body = client.get("/api/runners/detect").text
+    assert "claude-cli" in body
+    assert "OPENROUTER_API_KEY" not in body
+
+
+def test_runners_detect_matches_configured_by_resolved_path(db_path):
+    """A row storing an absolute path is the same runtime detect() reports by
+    bare name — the panel must not offer to add it again."""
+    from core.runners import add_runner
+    init_runners_table()
+    add_runner("mine", "/opt/bin/opencode", "opencode")
+    client = _make_client()
+    detected = [{"name": "opencode", "type": "opencode", "binary": "opencode",
+                 "path": "/opt/bin/opencode"}]
+    with patch("core.runner_detect.detect", return_value=detected), \
+         patch("core.runner_detect.resolve", side_effect=lambda b: b if b.startswith("/") else "/opt/bin/opencode"):
+        body = client.get("/api/runners/detect").text
+    assert "configured" in body
+    assert "+ Add as runtime" not in body
+
+
+def test_runners_detect_suggests_free_name_on_collision(db_path):
+    from core.runners import add_runner
+    init_runners_table()
+    add_runner("claude", "something-else", "opencode")
+    client = _make_client()
+    detected = [{"name": "claude", "type": "claude-cli", "binary": "claude",
+                 "path": "/usr/local/bin/claude"}]
+    with patch("core.runner_detect.detect", return_value=detected):
+        body = client.get("/api/runners/detect").text
+    assert "claude-2" in body
+
+
 # ── Tests: GET / (root redirect) ─────────────────────────────────────────
 
 

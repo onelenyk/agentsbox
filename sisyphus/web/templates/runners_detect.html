@@ -9,13 +9,22 @@
             {% if detected %}
             <div class="bars" style="margin-top:8px">
                 {% for d in detected %}
-                <div class="statline">
-                    <span class="cap">{{ d.name }} <span class="muted mono">{{ d.path }}</span></span>
+                <div class="statline" style="align-items:flex-start">
+                    <span class="cap">
+                        {{ d.name }} <span class="muted mono">{{ d.type }}</span>
+                        <br><span class="muted mono" style="font-size:11px">{{ d.path }}</span>
+                        {% if not d.configured and d.hint %}
+                        <br><span class="muted" style="font-size:11px">{{ d.hint }}</span>
+                        {% endif %}
+                    </span>
                     {% if d.configured %}
                     <span class="val" style="color:var(--good)">configured</span>
                     {% else %}
+                    {# Prefill comes from core.runner_profiles.suggested_config, per
+                       type — an OpenRouter key must never be handed to a runner
+                       that talks to Anthropic. #}
                     <button class="btn btn--ghost btn--sm" hx-post="/api/runners"
-                            hx-vals='{"name": "{{ d.name }}", "binary": "{{ d.binary }}", "type": "{{ d.type }}", "api_key_env": "OPENROUTER_API_KEY"}'
+                            hx-vals='{{ {"name": d.suggested_name, "binary": d.binary, "type": d.type, "model": d.model, "api_key_env": d.api_key_env, "base_url": d.base_url} | tojson }}'
                             hx-swap="none">+ Add as runtime</button>
                     {% endif %}
                 </div>
