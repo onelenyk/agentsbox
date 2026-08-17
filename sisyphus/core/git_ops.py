@@ -10,16 +10,30 @@ import subprocess
 TASK_BRANCH_PREFIX = "sisyphus/"
 
 # Files that must never end up in a task's commits, excluded via git pathspec
-# magic at add time: the daemon's generated opencode config + session state, and
-# common build/OS junk an agent can create by running the code (e.g. it runs the
-# tests and __pycache__ appears). Keeps engineer commits clean without relying on
-# the target repo having a .gitignore.
+# magic at add time: whatever the runner CLI generated (its config + session
+# state), plus common build/OS junk an agent can create by running the code
+# (e.g. it runs the tests and __pycache__ appears). Keeps engineer commits clean
+# without relying on the target repo having a .gitignore.
 # Long-form :(exclude) pathspecs (the :! short form mis-parses a leading "_" as
 # magic). git's default matching lets "*" span "/", so "*.pyc" / "*__pycache__*"
 # catch nested paths too.
-_COMMIT_EXCLUDES = [
-    ":(exclude)opencode.json",
-    ":(exclude).opencode", ":(exclude).opencode/**",
+#
+# The runner-owned names come from core.runner_profiles rather than being listed
+# here, so adding a runner cannot leave its scaffolding committable: this list
+# previously knew only opencode's, which meant a Claude worker — whose cwd is
+# the same worktree — could have committed its own state directory.
+def _runner_excludes():
+    from .runner_profiles import workspace_artifacts
+    out = []
+    for path in workspace_artifacts():
+        # Both forms unconditionally: a directory needs the /** to exclude its
+        # contents, and on a plain file that pattern simply matches nothing.
+        out.append(f":(exclude){path}")
+        out.append(f":(exclude){path}/**")
+    return out
+
+
+_COMMIT_EXCLUDES = _runner_excludes() + [
     ":(exclude).sisyphus", ":(exclude).sisyphus/**",
     ":(exclude)*.pyc",
     ":(exclude)*__pycache__*",
