@@ -299,6 +299,21 @@ def _get_mr_diff(session, mr_id="", **_):
     if not mr:
         return {"error": f"merge request {mr_id!r} not found"}
 
+    # Hand over the two commits any further comparison must use. Agents that ran
+    # their own git reached for HEAD~1 — the previous commit on the branch — and
+    # drew confident, wrong conclusions from it; see mergerequests.diff_range.
+    rng = mergerequests.diff_range(mr)
+    baseline = {
+        "base_sha": rng["base"],
+        "head_sha": rng["head"],
+        "baseline": (
+            f"Compare against {rng['base'][:12] or 'the merge base'}, the point this "
+            f"branch left {mr.get('target_branch', 'the target')}. If you run git "
+            f"yourself, use that SHA — never HEAD~1, which is only the previous "
+            f"commit on this branch and hides anything changed earlier on it."
+        ),
+    }
+
     bare_path = mr.get("bare_path", "")
     if bare_path:
         try:
@@ -308,13 +323,13 @@ def _get_mr_diff(session, mr_id="", **_):
                 capture_output=True, text=True, timeout=30,
             )
             if r.returncode == 0:
-                return {"mr_id": mr_id, "source": "fresh", "diff": r.stdout}
+                return {"mr_id": mr_id, "source": "fresh", "diff": r.stdout, **baseline}
         except Exception as e:
             logger.debug("get_mr_diff: fresh diff failed for %s, falling back to snapshot: %s", mr_id, e)
 
     diff = attachments.read(mr["task_id"], "change.patch")
     if diff is not None:
-        return {"mr_id": mr_id, "source": "snapshot", "diff": diff}
+        return {"mr_id": mr_id, "source": "snapshot", "diff": diff, **baseline}
     return {"error": f"no diff found for MR {mr_id!r}"}
 
 

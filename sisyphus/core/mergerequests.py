@@ -235,6 +235,31 @@ def init_mr_table() -> None:
     conn.close()
 
 
+def diff_range(mr: dict) -> dict:
+    """The two commits any comparison of this MR must use: {base, head}.
+
+    ``base`` is the merge base of target and source — where the branch left the
+    target — not the source branch's previous commit. Both the engineer and a
+    reviewer once checked file modes against ``HEAD~1``, concluded nothing had
+    changed, and each missed three scripts that had gone 755 → 644 earlier on the
+    same branch (docs/known-gaps.md). Telling agents the rule is a prompt;
+    handing them the SHA removes the derivation they were getting wrong.
+
+    Returns empty strings for whichever it cannot resolve, so a caller can say
+    "unknown" rather than print a plausible wrong value.
+    """
+    bare = mr.get("bare_path", "")
+    target, source = mr.get("target_branch", ""), mr.get("source_branch", "")
+    if not (bare and target and source):
+        return {"base": "", "head": ""}
+    base = _run(["git", "-C", bare, "merge-base", target, source])
+    head = _run(["git", "-C", bare, "rev-parse", source])
+    return {
+        "base": base.stdout.strip() if base.returncode == 0 else "",
+        "head": head.stdout.strip() if head.returncode == 0 else "",
+    }
+
+
 def set_check_result(mr_id: str, status: str, output: str = "", command: str = "") -> None:
     """Record what the daemon's own check found: 'passed', 'failed' or
     'not_run'. Never derived from anything an agent said."""

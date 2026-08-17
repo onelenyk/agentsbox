@@ -124,3 +124,40 @@ class TestRecording:
         monkeypatch.setattr(verify, "check_command", lambda name: None)
         verify.run_and_record(mr)
         assert mergerequests.get_mr(mr["id"])["check_status"] == "not_run"
+
+
+class TestDiffBaseline:
+    """Agents that ran their own git reached for HEAD~1 and missed changes made
+    earlier on the same branch. The baseline is now computed and handed over,
+    so there is nothing left for them to derive."""
+
+    def _branchy_repo(self, tmp_path):
+        import subprocess as sp
+        src = tmp_path / "b"; src.mkdir()
+        run = lambda *a, cwd=str(src): sp.run(["git", "-C", cwd, *a], capture_output=True, text=True)
+        sp.run(["git", "init", "-b", "main", str(src)], capture_output=True)
+        run("config", "user.email", "t@t"); run("config", "user.name", "t")
+        (src / "a.txt").write_text("1\n"); run("add", "-A"); run("commit", "-m", "base")
+        base = run("rev-parse", "HEAD").stdout.strip()
+        run("checkout", "-b", "feature")
+        (src / "a.txt").write_text("2\n"); run("add", "-A"); run("commit", "-m", "first")
+        (src / "b.txt").write_text("3\n"); run("add", "-A"); run("commit", "-m", "second")
+        head = run("rev-parse", "HEAD").stdout.strip()
+        prev = run("rev-parse", "HEAD~1").stdout.strip()
+        return src, base, head, prev
+
+    def test_base_is_the_merge_base_not_the_previous_commit(self, tmp_path):
+        from core import mergerequests
+        src, base, head, prev = self._branchy_repo(tmp_path)
+        rng = mergerequests.diff_range({"bare_path": str(src), "target_branch": "main",
+                                        "source_branch": "feature"})
+        assert rng["base"] == base
+        assert rng["head"] == head
+        assert rng["base"] != prev, "HEAD~1 would hide the branch's first commit"
+
+    def test_unresolvable_returns_blank_rather_than_a_plausible_wrong_value(self):
+        from core import mergerequests
+        assert mergerequests.diff_range({}) == {"base": "", "head": ""}
+        rng = mergerequests.diff_range({"bare_path": "/nonexistent",
+                                        "target_branch": "main", "source_branch": "x"})
+        assert rng["base"] == "" and rng["head"] == ""

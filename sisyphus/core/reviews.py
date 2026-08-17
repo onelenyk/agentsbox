@@ -42,6 +42,18 @@ def ensure_review_task(mr: dict) -> Optional[dict]:
         logger.exception("check failed to run for %s", mr_id)
         check_line = "The automated check could not be run — treat it as absent, not as a pass."
 
+    # The baseline is computed here rather than described, so the reviewer has
+    # the SHA instead of a rule it has to apply correctly.
+    try:
+        from core import mergerequests
+        rng = mergerequests.diff_range(mr)
+    except Exception:  # noqa: BLE001
+        rng = {"base": "", "head": ""}
+    base_line = (
+        f"Baseline commit: {rng['base']}\n" if rng.get("base")
+        else "Baseline commit: could not be resolved — say so rather than guessing one.\n"
+    )
+
     mr_title = mr.get("title", "") or "Untitled"
     max_title_len = 120
     if len(mr_title) > max_title_len:
@@ -54,6 +66,10 @@ def ensure_review_task(mr: dict) -> Optional[dict]:
         f"Review THIS one merge request only.\n"
         f"Source branch: {mr.get('source_branch', '?')}\n"
         f"Target branch: {mr.get('target_branch', '?')}\n"
+        f"{base_line}"
+        f"Any git command you run yourself must compare against that baseline "
+        f"commit, never HEAD~1 — HEAD~1 is only the previous commit on this "
+        f"branch and hides anything changed earlier on it.\n"
         f"\n"
         f"Use get_mr_diff to read the diff. Check freshness vs target and "
         f"diff quality. Then call approve(summary=...) or "
