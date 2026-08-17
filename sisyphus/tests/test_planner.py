@@ -517,3 +517,42 @@ def test_update_item_rejects_cyclic_dependency(db_path):
         planner.update_item(a["id"], after=[b["id"]])
     # Verify a's dependencies weren't changed
     assert planner.get_item(a["id"])["after"] == []
+
+
+def test_merge_resolving_into_the_checked_out_branch(db_path, tmp_path):
+    """The real-world case: an MR targets `main`, which is the branch the user
+    has checked out. This used to fail every time with "fatal: 'main' is already
+    used by worktree at ..." because the function always took the throwaway-
+    worktree path, which git refuses for an already-checked-out branch. The
+    existing tests merged into `A`, which is never checked out, so the path an
+    ordinary MR takes was untested.
+    """
+    from core import mergerequests
+    src, git = _conflict_repo(tmp_path)
+    # Make `main` conflict with B, and leave main checked out (it already is).
+    git("merge", "--no-edit", "A")
+    mergerequests.init_mr_table()
+    mr = mergerequests.create_mr(task_id="t1", repo="r", source_branch="B", target_branch="main",
+                                 title="", bare_path=str(src), base_branch="main", source_path=str(src))
+    res = mergerequests.merge_resolving(mr, "main", lambda path, text: "MERGED\n")
+    assert res["ok"], res.get("error")
+    assert res["resolved"] == ["x.py"]
+    assert git("show", "main:x.py").stdout == "MERGED\n"
+    # The user's checkout is left on main, clean — not removed as a worktree.
+    assert git("symbolic-ref", "--short", "HEAD").stdout.strip() == "main"
+    assert git("status", "--porcelain").stdout.strip() == ""
+
+
+def test_merge_resolving_refuses_dirty_checked_out_target(db_path, tmp_path):
+    from core import mergerequests
+    src, git = _conflict_repo(tmp_path)
+    git("merge", "--no-edit", "A")
+    (src / "x.py").write_text("uncommitted local edit\n")
+    mergerequests.init_mr_table()
+    mr = mergerequests.create_mr(task_id="t1", repo="r", source_branch="B", target_branch="main",
+                                 title="", bare_path=str(src), base_branch="main", source_path=str(src))
+    res = mergerequests.merge_resolving(mr, "main", lambda path, text: "MERGED\n")
+    assert not res["ok"]
+    assert "uncommitted" in res["error"]
+    # The user's edit survives untouched.
+    assert (src / "x.py").read_text() == "uncommitted local edit\n"

@@ -121,20 +121,37 @@ def merge_branch(mr: dict, target: str) -> dict:
 def merge_resolving(mr: dict, target: str, resolve_fn) -> dict:
     """Merge the MR's source branch into *target* in the user's real repo, calling
     ``resolve_fn(path, conflicted_text) -> resolved_text | None`` for each file that
-    conflicts. A clean merge just commits. Runs entirely in a throwaway worktree on
-    *target* (never the user's checked-out branch); on any unresolved file it aborts
-    and leaves *target* untouched. Returns {ok, sha, target, resolved} or {ok: False,
-    error}. *resolved* is the list of files the resolver had to fix."""
+    conflicts. A clean merge just commits; on any unresolved file it aborts and
+    leaves *target* untouched. Returns {ok, sha, target, resolved} or {ok: False,
+    error}. *resolved* is the list of files the resolver had to fix.
+
+    Where the merge happens mirrors merge_branch: in the user's checkout when
+    *target* is the branch they have out (guarded on a clean tree), otherwise in
+    a throwaway worktree so their working tree is never disturbed. This used to
+    always take the worktree path, which git refuses for a branch that is
+    already checked out — so resolving into an MR's usual target, `main`, failed
+    every time with "fatal: 'main' is already used by worktree at ...". Only
+    plan branches, which are never checked out, ever reached the resolver.
+    """
     real, src, bare = mr["source_path"], mr["source_branch"], mr["bare_path"]
     f = _run(["git", "-C", real, "fetch", bare, f"{src}:{src}"])
     if f.returncode != 0:
         return {"ok": False, "error": f"fetch failed: {f.stderr.strip()[:120]}"}
-    wt = tempfile.mkdtemp(prefix="sisyphus-resolve-")
+
+    cur = _run(["git", "-C", real, "symbolic-ref", "--quiet", "--short", "HEAD"]).stdout.strip()
+    in_place = (target == cur)
+    if in_place:
+        if _run(["git", "-C", real, "status", "--porcelain"]).stdout.strip():
+            return {"ok": False, "error": f"'{target}' is checked out with uncommitted changes — commit or stash first"}
+        wt = real
+    else:
+        wt = tempfile.mkdtemp(prefix="sisyphus-resolve-")
     resolved_files: List[str] = []
     try:
-        a = _run(["git", "-C", real, "worktree", "add", wt, target])
-        if a.returncode != 0:
-            return {"ok": False, "error": f"cannot check out '{target}': {a.stderr.strip()[:120]}"}
+        if not in_place:
+            a = _run(["git", "-C", real, "worktree", "add", wt, target])
+            if a.returncode != 0:
+                return {"ok": False, "error": f"cannot check out '{target}': {a.stderr.strip()[:120]}"}
         m = _run(["git", "-C", wt, "merge", "--no-commit", "--no-ff", src])
         if m.returncode != 0:
             conflicted = [c for c in _run(["git", "-C", wt, "diff", "--name-only",
@@ -169,8 +186,10 @@ def merge_resolving(mr: dict, target: str, resolve_fn) -> dict:
         sha = _run(["git", "-C", wt, "rev-parse", "HEAD"]).stdout.strip()
         return {"ok": True, "sha": sha, "target": target, "resolved": resolved_files}
     finally:
-        _run(["git", "-C", real, "worktree", "remove", "--force", wt])
-        shutil.rmtree(wt, ignore_errors=True)
+        # Only tear down a worktree we created — never the user's own checkout.
+        if not in_place:
+            _run(["git", "-C", real, "worktree", "remove", "--force", wt])
+            shutil.rmtree(wt, ignore_errors=True)
 
 
 def _now() -> str:
