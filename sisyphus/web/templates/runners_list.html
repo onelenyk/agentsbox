@@ -20,6 +20,12 @@
         <div class="ecard__foot">
             <div class="acts" style="margin-left:0">
                 <button class="btn btn--ghost btn--sm" hx-post="/api/runners/{{ r.id }}/health" hx-swap="none">Check</button>
+                {# Health proves the binary resolves; this proves the runner can
+                   actually reach a tool. Takes ~10s, so it says it's working. #}
+                <button class="btn btn--ghost btn--sm" hx-post="/api/runners/{{ r.id }}/smoke"
+                        hx-swap="none" hx-disabled-elt="this"
+                        hx-on:htmx:before-request="this.textContent='Testing…'"
+                        hx-on:htmx:after-request="this.textContent='Smoke test'">Smoke test</button>
                 {% if not r.is_default %}<button class="btn btn--ghost btn--sm" hx-post="/api/runners/{{ r.id }}/set-default" hx-swap="none">★ Default</button>{% endif %}
                 <button class="btn btn--ghost btn--sm" hx-get="/api/runners/{{ r.id }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
                 <button class="btn btn--danger btn--sm" hx-post="/api/runners/{{ r.id }}/delete" hx-confirm="Delete {{ r.name }}?" hx-swap="none">Delete</button>

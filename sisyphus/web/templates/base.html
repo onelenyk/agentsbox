@@ -73,6 +73,12 @@
         b.addEventListener("runnerError", function (e) {
             flash(e.detail.value || e.detail, "err");
         });
+        // A smoke test reports its own outcome either way — a pass is worth
+        // saying out loud, and a failure names the stage that broke.
+        b.addEventListener("runnerSmoke", function (e) {
+            var d = e.detail || {};
+            flash(d.message || "smoke test finished", d.ok ? "ok" : "err");
+        });
         b.addEventListener("htmx:afterRequest", function (e) {
             if (!e.detail.failed) return;
             // Already reported with a specific reason above — don't double-flash.
