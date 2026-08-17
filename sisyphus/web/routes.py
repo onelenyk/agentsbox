@@ -646,6 +646,33 @@ async def runners_health(runner_id: str):
     resp.headers["HX-Trigger"] = "runnersUpdated"
     return resp
 
+
+@router.post("/api/runners/{runner_id}/smoke")
+async def runners_smoke(runner_id: str):
+    """Prove the runner can do the job, not just that its binary exists.
+
+    Health answers "does the binary resolve". Every runner failure this system
+    has hit passed that and still produced nothing but "worker ended without
+    reporting a result". This spawns the CLI the way the launcher does and
+    requires the model to call one tool through a throwaway MCP server, then
+    reports the first stage that failed. Takes ~10s on a working runner.
+    """
+    from core.runners import get_runner
+    from core.runner_smoke import smoke_test
+    from fastapi.responses import Response
+    runner = get_runner(runner_id)
+    if not runner:
+        return _runner_error("runner not found")
+    res = await smoke_test(runner)
+    secs = res["duration_ms"] / 1000
+    if res["ok"]:
+        msg = f"{runner['name']}: smoke test passed in {secs:.0f}s — {res['detail']}"
+    else:
+        msg = f"{runner['name']}: failed at {res['stage']} — {res['detail']}"
+    resp = Response(status_code=200)
+    resp.headers["HX-Trigger"] = json.dumps({"runnerSmoke": {"ok": res["ok"], "message": msg}})
+    return resp
+
 # ── Statistics ──────────────────────────────────────────────────────────
 
 @router.get("/stats", response_class=HTMLResponse)
