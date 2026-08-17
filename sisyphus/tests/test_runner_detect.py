@@ -72,3 +72,21 @@ class TestPathWithInstallDirs:
         real.mkdir()
         monkeypatch.setattr(runner_detect, "_EXTRA_DIRS", [str(real)])
         assert runner_detect.path_with_install_dirs("") == str(real)
+
+
+def test_commit_excludes_cover_every_runner():
+    """git_ops must exclude each runner's scaffolding, sourced from the
+    profiles so a new runner cannot leave its files committable."""
+    from core.git_ops import _COMMIT_EXCLUDES
+    from core.runner_profiles import workspace_artifacts
+    for path in workspace_artifacts():
+        assert f":(exclude){path}" in _COMMIT_EXCLUDES, path
+        assert f":(exclude){path}/**" in _COMMIT_EXCLUDES, path
+
+
+def test_repo_context_recognises_every_runner_config():
+    from core.repo_context import KNOWN_RESOURCES
+    from core.runner_profiles import workspace_artifacts
+    known = {p for p, _ in KNOWN_RESOURCES}
+    for path in workspace_artifacts():
+        assert path in known, path

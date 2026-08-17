@@ -16,10 +16,18 @@ KNOWN_RESOURCES = [
     ("CONVENTIONS.md", "Conventions"),
     ("CONTRIBUTING.md", "Contributing guide"),
     ("README.md", "Readme"),
-    ("opencode.json", "opencode config"),
-    (".opencode", "opencode config dir"),
     (".sisyphus", "Sisyphus notes"),
 ]
+
+
+def _runner_resources():
+    """Runner-owned config paths, from core.runner_profiles rather than listed
+    here — so a new runner's config is recognised without editing this file."""
+    from core.runner_profiles import workspace_artifact_labels
+    return workspace_artifact_labels()
+
+
+KNOWN_RESOURCES += _runner_resources()
 
 _SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist",
               "build", ".next", "target", ".idea", ".pytest_cache"}

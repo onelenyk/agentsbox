@@ -107,6 +107,56 @@ def credential_store(rtype: str) -> Optional[str]:
     return _CREDENTIAL_STORE.get(rtype)
 
 
+# ── what each CLI leaves in, and reads from, a working tree ─────────────
+
+# Per type: (path, human label) for the files and directories that CLI owns
+# inside a repo working tree — its generated config and its own session state.
+# Two consumers, both of which used to hardcode opencode's names and so knew
+# nothing about any other runner:
+#
+#   core.git_ops   excludes these from an engineer's commits, so a worker
+#                  cannot commit the daemon's own scaffolding into the user's
+#                  repo. A Claude worker's cwd is the worktree exactly like
+#                  opencode's, so without .claude here its state directory was
+#                  one `git add -A` away from landing in a real commit.
+#   core.repo_context surfaces them as recognised config when scanning a repo.
+_WORKSPACE_ARTIFACTS = {
+    "opencode": (
+        ("opencode.json", "opencode config"),
+        (".opencode", "opencode config dir"),
+    ),
+    "claude-cli": (
+        (".claude", "Claude Code config dir"),
+    ),
+}
+
+
+def workspace_artifacts(rtype: Optional[str] = None) -> List[str]:
+    """Paths *rtype* owns inside a working tree; every runner's when rtype is
+    None — which is what callers computing a diff need, since by then nothing
+    records which CLI produced the tree."""
+    if rtype is not None:
+        return [p for p, _ in _WORKSPACE_ARTIFACTS.get(rtype, ())]
+    seen, out = set(), []
+    for entries in _WORKSPACE_ARTIFACTS.values():
+        for path, _ in entries:
+            if path not in seen:
+                seen.add(path)
+                out.append(path)
+    return out
+
+
+def workspace_artifact_labels() -> List[tuple]:
+    """(path, label) for every runner's artifacts, for UI/context listings."""
+    seen, out = set(), []
+    for entries in _WORKSPACE_ARTIFACTS.values():
+        for path, label in entries:
+            if path not in seen:
+                seen.add(path)
+                out.append((path, label))
+    return out
+
+
 # ── tool naming ─────────────────────────────────────────────────────────
 
 def tool_prefix(rtype: str, server_name: str) -> str:

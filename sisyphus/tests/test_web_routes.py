@@ -858,3 +858,32 @@ class TestBoardCards:
         assert "stagebar" in html
         assert "feat: half done" in html          # last dialogue event on the card
         assert 'title="code"' in html             # stage dots labeled
+
+
+def test_runner_edit_can_clear_optional_fields(db_path):
+    """An opencode row picks its provider from the model prefix, so a leftover
+    api_key_env/base_url describes a route that does not exist — the UI has to
+    be able to remove them. Treating "" as "leave alone" made that impossible."""
+    from core.runners import add_runner, get_runner
+    init_runners_table()
+    r = add_runner("clearable", "opencode", "opencode",
+                   api_key_env="OPENROUTER_API_KEY", base_url="https://x")
+    client = _make_client()
+    resp = client.post(f"/api/runners/{r['id']}/edit", data={
+        "name": "clearable", "binary": "opencode", "type": "opencode",
+        "model": "", "api_key_env": "", "base_url": "",
+    })
+    assert resp.status_code == 200
+    row = get_runner(r["id"])
+    assert row["api_key_env"] == ""
+    assert row["base_url"] == ""
+
+
+def test_runner_edit_keeps_required_fields_on_blank(db_path):
+    from core.runners import add_runner, get_runner
+    init_runners_table()
+    r = add_runner("keepname", "opencode", "opencode")
+    client = _make_client()
+    client.post(f"/api/runners/{r['id']}/edit", data={"name": "", "binary": "", "type": ""})
+    row = get_runner(r["id"])
+    assert row["name"] == "keepname" and row["binary"] == "opencode"

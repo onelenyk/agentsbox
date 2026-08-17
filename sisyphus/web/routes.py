@@ -598,9 +598,17 @@ async def runners_edit(runner_id: str, name: str = Form(""), binary: str = Form(
     if name: fields["name"] = name
     if binary: fields["binary"] = binary
     if type: fields["type"] = type
-    if model: fields["model"] = model
-    if api_key_env: fields["api_key_env"] = api_key_env
-    if base_url: fields["base_url"] = base_url
+    # Blank means "clear it", not "leave it alone" — these three are optional
+    # and routinely need removing (an opencode row picks its provider from the
+    # model prefix, so a leftover api_key_env/base_url describes a route that
+    # does not exist). Treating "" as absent made them unclearable from the UI;
+    # core.update_runner has always accepted an empty string. name/binary/type
+    # stay skip-if-blank: they are required, and the edit form submits every
+    # field on every save.
+    for key, value in (("model", model), ("api_key_env", api_key_env),
+                       ("base_url", base_url)):
+        if value is not None:
+            fields[key] = value
     try:
         update_runner(runner_id, **fields)
     except ValueError as e:

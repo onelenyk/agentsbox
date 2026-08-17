@@ -216,3 +216,34 @@ class TestWriteMcpConfig:
         assert server["command"] == "/usr/bin/python3"
         assert server["args"] == ["/srv/bridge.py"]
         assert server["env"]["SISYPHUS_SESSION_TOKEN"] == "tok"
+
+
+class TestWorkspaceArtifacts:
+    """What each CLI leaves in a working tree. core.git_ops excludes these from
+    commits; listing only opencode's meant a Claude worker — whose cwd is the
+    same worktree — could commit its own state directory."""
+
+    def test_every_supported_type_declares_its_artifacts(self):
+        for rtype in rp.SUPPORTED_TYPES:
+            assert rp.workspace_artifacts(rtype), rtype
+
+    def test_claude_state_dir_is_known(self):
+        assert ".claude" in rp.workspace_artifacts("claude-cli")
+
+    def test_opencode_config_is_known(self):
+        assert "opencode.json" in rp.workspace_artifacts("opencode")
+
+    def test_union_covers_all_runners(self):
+        allp = rp.workspace_artifacts()
+        for rtype in rp.SUPPORTED_TYPES:
+            for path in rp.workspace_artifacts(rtype):
+                assert path in allp
+        assert len(allp) == len(set(allp)), "no duplicates"
+
+    def test_labels_pair_with_paths(self):
+        labels = rp.workspace_artifact_labels()
+        assert {p for p, _ in labels} == set(rp.workspace_artifacts())
+        assert all(lbl for _, lbl in labels)
+
+    def test_unknown_type_has_no_artifacts(self):
+        assert rp.workspace_artifacts("nope") == []
