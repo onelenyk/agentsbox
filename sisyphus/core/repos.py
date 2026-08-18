@@ -121,3 +121,49 @@ def update_repo_config(name, source=None, platform=None, branch=None):
     config_path.write_text(yaml.dump(config, default_flow_style=False, allow_unicode=True))
     from core.config import reload_config
     reload_config()
+
+
+# ── Per-repo forge credentials ───────────────────────────────────────────
+
+def _resolved(value) -> str:
+    """A config string, or "" when it is an unresolved ${VAR} placeholder.
+
+    core.config substitutes ${VAR} from the environment at load and leaves the
+    literal in place when the variable is unset, so the placeholder itself must
+    never be mistaken for a credential.
+    """
+    v = str(value or "").strip()
+    return "" if (not v or v.startswith("${")) else v
+
+
+def repo_credential(name: str) -> dict:
+    """The token a repo publishes with: {token, source, platform, env_hint}.
+
+    ``source`` is "repo" or "global" — which is the whole point of this
+    function. A single global token per forge holds only until there are two
+    organisations, or a work account and a personal one; the repository that
+    needs a credential is the thing that should carry it. The global block stays
+    as a fallback so an existing setup keeps working untouched.
+
+    ``token`` is None when nothing usable is configured. It is never the
+    unresolved placeholder, and ``env_hint`` names the variable that was
+    expected, so a caller can say *which* variable to set instead of "not
+    configured".
+    """
+    from core.config import get_config
+    from core.providers import detect_platform
+
+    repo = get_repo(name) or {}
+    platform = (repo.get("platform") or "").strip() or detect_platform(repo.get("source", ""))
+
+    own = _resolved(repo.get("token"))
+    if own:
+        return {"token": own, "source": "repo", "platform": platform, "env_hint": ""}
+
+    cfg = get_config(platform, {}) if platform in ("github", "gitlab") else {}
+    shared = _resolved((cfg or {}).get("token"))
+    if shared:
+        return {"token": shared, "source": "global", "platform": platform, "env_hint": ""}
+
+    hint = {"github": "GITHUB_TOKEN", "gitlab": "GITLAB_TOKEN"}.get(platform, "")
+    return {"token": None, "source": None, "platform": platform, "env_hint": hint}

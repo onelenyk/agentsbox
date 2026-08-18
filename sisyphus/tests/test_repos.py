@@ -312,3 +312,98 @@ class TestUpdateRepoConfig:
 
         updated = mock_dump.call_args[0][0]["repos"][0]
         assert "platform" not in updated
+
+
+class TestRepoCredential:
+    """A single global token per forge holds only until there are two
+    organisations, or a work account and a personal one. The repository that
+    needs a credential should carry it; the global block stays as a fallback."""
+
+    def _cfg(self, monkeypatch, repos, forge=None):
+        from core import repos as repos_mod
+        monkeypatch.setattr(repos_mod, "get_repo", lambda n: next((r for r in repos if r["name"] == n), None))
+        conf = {"github": forge or {}, "gitlab": forge or {}}
+        monkeypatch.setattr("core.config.get_config",
+                            lambda key=None, default=None: conf.get(key, default))
+
+    def test_repo_token_wins_over_the_global_one(self, monkeypatch):
+        from core.repos import repo_credential
+        self._cfg(monkeypatch,
+                  [{"name": "a", "source": "git@github.com:o/a.git", "token": "repo-tok"}],
+                  forge={"token": "global-tok"})
+        c = repo_credential("a")
+        assert c["token"] == "repo-tok" and c["source"] == "repo"
+
+    def test_falls_back_to_the_global_token(self, monkeypatch):
+        from core.repos import repo_credential
+        self._cfg(monkeypatch, [{"name": "a", "source": "git@github.com:o/a.git"}],
+                  forge={"token": "global-tok"})
+        c = repo_credential("a")
+        assert c["token"] == "global-tok" and c["source"] == "global"
+
+    def test_unresolved_placeholder_is_not_a_credential(self, monkeypatch):
+        """core.config leaves ${VAR} literal when the variable is unset — that
+        string must never be handed to a forge as a token."""
+        from core.repos import repo_credential
+        self._cfg(monkeypatch,
+                  [{"name": "a", "source": "git@gitlab.com:o/a.git", "token": "${NOPE}"}],
+                  forge={"token": "${ALSO_NOPE}"})
+        c = repo_credential("a")
+        assert c["token"] is None and c["source"] is None
+
+    def test_missing_credential_names_the_variable_to_set(self, monkeypatch):
+        from core.repos import repo_credential
+        self._cfg(monkeypatch, [{"name": "a", "source": "git@gitlab.com:o/a.git"}])
+        assert repo_credential("a")["env_hint"] == "GITLAB_TOKEN"
+
+    def test_local_repo_needs_no_credential(self, monkeypatch):
+        from core.repos import repo_credential
+        self._cfg(monkeypatch, [{"name": "a", "source": "/on/disk"}])
+        c = repo_credential("a")
+        assert c["platform"] == "local" and c["token"] is None and c["env_hint"] == ""
+
+    def test_explicit_platform_beats_detection(self, monkeypatch):
+        from core.repos import repo_credential
+        self._cfg(monkeypatch,
+                  [{"name": "a", "source": "/on/disk", "platform": "gitlab"}],
+                  forge={"token": "g"})
+        assert repo_credential("a")["platform"] == "gitlab"
+
+
+class TestForgePublishIsRecordedLocally:
+    """A GitHub/GitLab change used to exist on the forge and nowhere in
+    Sisyphus — list_mrs() never returned it, so core.forge_poll had nothing to
+    follow. Only the local publisher kept a row."""
+
+    def test_a_successful_forge_publish_creates_an_mr_row(self, monkeypatch, tmp_path, db_path):
+        from core import mergerequests, providers
+        mergerequests.init_mr_table()
+        providers._record_forge_mr(
+            task_id="task-x", repo_name="acme", branch="sisyphus/task-x",
+            base_branch="main", title="Add thing", bare="/bare", source="/src",
+            url="https://github.com/o/r/pull/7")
+        mr = mergerequests.latest_for_task("task-x")
+        assert mr and mr["source_branch"] == "sisyphus/task-x"
+        assert mr["forge_url"] == "https://github.com/o/r/pull/7"
+
+    def test_republishing_updates_the_url_rather_than_duplicating(self, db_path):
+        from core import mergerequests, providers
+        mergerequests.init_mr_table()
+        for url in ("https://github.com/o/r/pull/7", "https://github.com/o/r/pull/7"):
+            providers._record_forge_mr("task-y", "acme", "sisyphus/task-y", "main",
+                                       "T", "/bare", "/src", url)
+        assert len(mergerequests.list_mrs()) == 1
+
+    def test_bookkeeping_failure_never_fails_a_published_change(self, monkeypatch, db_path):
+        """The change is already on the forge; losing our own row must not turn
+        a successful publish into an error."""
+        from core import providers
+        monkeypatch.setattr("core.mergerequests.find_open_mr",
+                            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("db gone")))
+        providers._record_forge_mr("task-z", "acme", "b", "main", "T", "/bare", "/src", "u")
+
+    def test_no_task_id_records_nothing(self, db_path):
+        from core import mergerequests, providers
+        mergerequests.init_mr_table()
+        providers._record_forge_mr("", "acme", "b", "main", "T", "/bare", "/src", "u")
+        assert mergerequests.list_mrs() == []

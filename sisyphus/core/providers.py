@@ -118,9 +118,9 @@ def publish_change(session: dict, title: str, description: str) -> dict:
     if platform == "local":
         return _publish_local(task_id, bare, base, branch, title, task["repo"], source)
     if platform == "gitlab":
-        return _publish_gitlab(bare, source, branch, base, title, description)
+        return _publish_gitlab(bare, source, branch, base, title, description, task["repo"], task_id)
     if platform == "github":
-        return _publish_github(bare, source, branch, base, title, description)
+        return _publish_github(bare, source, branch, base, title, description, task["repo"], task_id)
     return {"error": f"no publisher for platform {platform!r} — change is committed on {branch}"}
 
 
@@ -149,12 +149,46 @@ def _publish_local(task_id: str, bare: str, base: str, branch: str, title: str,
             "patch_file": "change.patch", "patch_path": patch_path, "mr_id": mr["id"]}
 
 
-def _publish_gitlab(bare, source, branch, base_branch, title, description) -> dict:
+
+def _record_forge_mr(task_id, repo_name, branch, base_branch, title, bare, source, url):
+    """Record a forge-hosted merge request in our own ledger.
+
+    Only _publish_local did this, so a GitHub or GitLab change existed on the
+    forge and nowhere in Sisyphus: list_mrs() never returned it, which left
+    core.forge_poll — the whole point of which is to follow what happens to
+    these — with nothing to poll. Best-effort: the change is already published,
+    and losing our bookkeeping must not turn a successful publish into an error.
+    """
+    if not task_id:
+        return
+    try:
+        from . import mergerequests
+        existing = mergerequests.find_open_mr(task_id, branch, base_branch)
+        if existing:
+            mergerequests.set_forge_url(existing["id"], url)
+        else:
+            mergerequests.create_mr(
+                task_id=task_id, repo=repo_name, source_branch=branch,
+                target_branch=base_branch, title=title, bare_path=bare,
+                base_branch=base_branch, source_path=source, forge_url=url,
+            )
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).exception(
+            "published %s but could not record the merge request locally", url)
+
+
+def _publish_gitlab(bare, source, branch, base_branch, title, description, repo_name="", task_id="") -> dict:
     from .config import get_config
+    from .repos import repo_credential
     cfg = get_config("gitlab", {}) or {}
-    token = _token(cfg)
+    # Prefer the repo's own token; the global one is the fallback. Naming the
+    # variable that was expected turns "not configured" into an instruction.
+    cred = repo_credential(repo_name) if repo_name else {"token": None, "env_hint": "GITLAB_TOKEN"}
+    token = cred["token"] or _token(cfg)
     if not token:
-        return {"error": "GitLab token not configured (set GITLAB_TOKEN)"}
+        return {"error": f"GitLab token not configured for {repo_name or 'this repo'} "
+                         f"(set {cred.get('env_hint') or 'GITLAB_TOKEN'}, or a token: on the repo)"}
     api = (cfg.get("base_url") or "https://gitlab.com")
     if api.startswith("${"):
         api = "https://gitlab.com"
@@ -177,15 +211,22 @@ def _publish_gitlab(bare, source, branch, base_branch, title, description) -> di
         return {"error": f"GitLab MR failed: HTTP {res.code} {res.read().decode()[:200]}"}
     if isinstance(res, urllib.error.URLError):
         return {"error": f"GitLab unreachable: {res.reason}"}
-    return {"ok": True, "platform": "gitlab", "branch": branch, "url": res.get("web_url", "")}
+    url = res.get("web_url", "")
+    _record_forge_mr(task_id, repo_name, branch, base_branch, title, bare, source, url)
+    return {"ok": True, "platform": "gitlab", "branch": branch, "url": url}
 
 
-def _publish_github(bare, source, branch, base_branch, title, description) -> dict:
+def _publish_github(bare, source, branch, base_branch, title, description, repo_name="", task_id="") -> dict:
     from .config import get_config
+    from .repos import repo_credential
     cfg = get_config("github", {}) or {}
-    token = _token(cfg)
+    # Prefer the repo's own token; the global one is the fallback. Naming the
+    # variable that was expected turns "not configured" into an instruction.
+    cred = repo_credential(repo_name) if repo_name else {"token": None, "env_hint": "GITHUB_TOKEN"}
+    token = cred["token"] or _token(cfg)
     if not token:
-        return {"error": "GitHub token not configured (set GITHUB_TOKEN)"}
+        return {"error": f"GitHub token not configured for {repo_name or 'this repo'} "
+                         f"(set {cred.get('env_hint') or 'GITHUB_TOKEN'}, or a token: on the repo)"}
     api = (cfg.get("base_url") or "https://api.github.com")
     if api.startswith("${"):
         api = "https://api.github.com"
@@ -206,4 +247,6 @@ def _publish_github(bare, source, branch, base_branch, title, description) -> di
         return {"error": f"GitHub PR failed: HTTP {res.code} {res.read().decode()[:200]}"}
     if isinstance(res, urllib.error.URLError):
         return {"error": f"GitHub unreachable: {res.reason}"}
-    return {"ok": True, "platform": "github", "branch": branch, "url": res.get("html_url", "")}
+    url = res.get("html_url", "")
+    _record_forge_mr(task_id, repo_name, branch, base_branch, title, bare, source, url)
+    return {"ok": True, "platform": "github", "branch": branch, "url": url}
