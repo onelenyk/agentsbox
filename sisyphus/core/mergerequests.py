@@ -10,6 +10,7 @@ The engineer's work already lives on `source_branch` (sisyphus/<task_id>) in the
 per-task bare clone (`bare_path`); `source_path` is the user's real repo that the
 Land/Merge actions touch.
 """
+import json
 import os
 import shutil
 import subprocess
@@ -230,6 +231,18 @@ def init_mr_table() -> None:
         conn.execute("ALTER TABLE merge_requests ADD COLUMN check_output TEXT")
         conn.execute("ALTER TABLE merge_requests ADD COLUMN check_command TEXT")
         conn.execute("ALTER TABLE merge_requests ADD COLUMN check_ran_at TEXT")
+    # Where this change lives on a forge, and the last state we observed there.
+    # Polling is the only way this daemon hears about a PR it opened — it listens
+    # on 127.0.0.1, so no forge can ever call in (core.forge_poll). The poller
+    # needs two durable facts per MR: which PR to ask about, and what it looked
+    # like last time, because "what changed" is the only thing worth posting to a
+    # thread. Kept on the MR row rather than in memory so a daemon restart does
+    # not re-announce every open PR's current state as if it were news.
+    if "forge_url" not in cols:
+        conn.execute("ALTER TABLE merge_requests ADD COLUMN forge_url TEXT")
+        conn.execute("ALTER TABLE merge_requests ADD COLUMN forge_state TEXT")
+        conn.execute("ALTER TABLE merge_requests ADD COLUMN forge_checked_at TEXT")
+
     # Which files a model rewrote to make the merge possible, newline-separated.
     # Persisted rather than only flashed after the action: the merge commit looks
     # exactly like a hand-made one, so days later nothing in the UI would say
@@ -280,6 +293,59 @@ def set_check_result(mr_id: str, status: str, output: str = "", command: str = "
     conn.close()
 
 
+# ── Forge-side state (what core.forge_poll observed on GitHub/GitLab) ────
+
+
+def set_forge_url(mr_id: str, forge_url: str) -> None:
+    """Record which PR/MR on a forge this row corresponds to.
+
+    Separate from create_mr because the URL is not always known when the row is
+    written: a local MR has none, and an MR recovered from the task thread's
+    ``mr`` message learns its URL on the first poll. Writing it back means the
+    thread scan happens once per MR, not once per tick.
+    """
+    conn = get_conn()
+    conn.execute("UPDATE merge_requests SET forge_url = ?, updated_at = ? WHERE id = ?",
+                 (forge_url, _now(), mr_id))
+    conn.commit()
+    conn.close()
+
+
+def get_forge_state(mr_id: str) -> Optional[dict]:
+    """The last state we successfully read off the forge, or None if we never
+    have. None and ``{}`` are different answers and callers depend on it: None
+    means "never observed" (so nothing on the forge is news yet), while a stored
+    dict means every field in it is a baseline to diff against."""
+    row = get_mr(mr_id)
+    raw = (row or {}).get("forge_state")
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def save_forge_state(mr_id: str, state: dict) -> None:
+    """Persist a state we actually read from the forge.
+
+    Must only be called after a successful read. A failed read that stored
+    anything here would turn "we could not reach the forge" into "the PR is
+    unchanged", and the merge/review the poller exists to notice would be lost
+    for good rather than reported one tick later.
+    """
+    now = _now()
+    conn = get_conn()
+    conn.execute(
+        "UPDATE merge_requests SET forge_state = ?, forge_checked_at = ?, updated_at = ? "
+        "WHERE id = ?",
+        (json.dumps(state, sort_keys=True), now, now, mr_id),
+    )
+    conn.commit()
+    conn.close()
+
+
 def set_review_status(mr_id: str, review_status: str) -> None:
     conn = get_conn()
     conn.execute(
@@ -296,17 +362,18 @@ def _dict(row) -> Optional[dict]:
 
 def create_mr(task_id: str, repo: str, source_branch: str, target_branch: str,
               title: str = "", description: str = "", bare_path: str = "",
-              base_branch: str = "", source_path: str = "") -> dict:
+              base_branch: str = "", source_path: str = "",
+              forge_url: str = "") -> dict:
     mr_id = f"mr-{uuid4().hex[:8]}"
     now = _now()
     conn = get_conn()
     conn.execute(
         """INSERT INTO merge_requests (id, task_id, repo, source_branch, target_branch,
            title, description, status, bare_path, base_branch, source_path,
-           created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)""",
+           forge_url, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?)""",
         (mr_id, task_id, repo, source_branch, target_branch, title, description,
-         bare_path, base_branch, source_path, now, now),
+         bare_path, base_branch, source_path, forge_url, now, now),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM merge_requests WHERE id = ?", (mr_id,)).fetchone()
