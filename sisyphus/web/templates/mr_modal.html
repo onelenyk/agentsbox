@@ -46,11 +46,22 @@
                         hx-post="/api/mr/{{ mr.id }}/merge" hx-target="#modal-container" hx-swap="innerHTML"
                         hx-confirm="Merge {{ mr.source_branch }} into {{ mr.target_branch }} in {{ mr.source_path }}? Creates a merge commit (reversible with git reset).">🚀 Merge into {{ mr.target_branch }}</button>
                 {% endif %}
+                {% if merge.ok and not merge.mergeable %}
+                {# Offered only for a branch git cannot merge on its own — never the default path. #}
+                <button type="button" class="btn btn--ghost btn--sm"
+                        hx-post="/api/mr/{{ mr.id }}/merge-resolve" hx-target="#modal-container" hx-swap="innerHTML"
+                        {% if mr.review_status in ('pending', 'changes_requested') %}hx-vals='{"force": "1"}'{% endif %}
+                        hx-confirm="Let the local model rewrite {{ merge.conflicts|length }} conflicting file(s) — {{ merge.conflicts|join(', ') }} — preserving both sides, then merge into {{ mr.target_branch }}{% if mr.review_status in ('pending', 'changes_requested') %} (review is {{ mr.review_status }} — this overrides it){% endif %}. If any file cannot be resolved, nothing is merged and {{ mr.target_branch }} stays untouched. The merged hunks will be model-written — read them before pushing.">🤖 Resolve conflicts with AI &amp; merge</button>
+                {% endif %}
                 <button type="button" class="btn btn--danger btn--sm" hx-post="/api/mr/{{ mr.id }}/close" hx-target="#modal-container" hx-swap="innerHTML"
                         hx-confirm="Close this merge request without merging?">Close MR</button>
             </div>
             {% elif mr.status == 'merged' %}
             <div class="mr-merge ok" style="margin-top:12px">✓ merged into {{ mr.target_branch }} as {{ mr.merge_sha[:8] }}</div>
+            {% if resolved_files %}
+            {# Persisted on the MR row, so this stays visible long after the flash. #}
+            <div class="mr-merge bad" style="margin-top:8px">🤖 AI-resolved merge — {{ resolved_files|length }} file(s) rewritten by the model: {{ resolved_files|join(', ') }}. Review those hunks before pushing.</div>
+            {% endif %}
             {% endif %}
 
             <div class="diffstat" style="margin-top:14px"><span style="color:var(--good)">+{{ adds }}</span> · <span style="color:var(--bad)">−{{ dels }}</span></div>
