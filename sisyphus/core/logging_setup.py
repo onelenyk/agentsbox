@@ -5,6 +5,7 @@ across core/ so there is a persistent, size-bounded record instead of only
 whatever scrolled past in a terminal.
 """
 import logging
+import os
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -13,11 +14,21 @@ _configured = False
 
 
 def setup_logging() -> Path:
-    """Idempotent. Returns the log file path."""
+    """Idempotent. Returns the log file path.
+
+    The directory follows ``SISYPHUS_LOG_DIR`` when set, otherwise ``logs/``
+    beside the source. The override exists because the path was derived from
+    the module's own location, so a daemon started with an isolated
+    ``SISYPHUS_DB`` and ``WORKSPACE_ROOT`` — which the browser end-to-end test
+    is careful to do — still wrote into the real daemon's log. Its startup lines
+    then read as unexplained restarts of the running daemon, and cost a real
+    debugging detour chasing a database that had never split.
+    """
     global _configured
     root = Path(__file__).resolve().parent.parent
-    log_dir = root / "logs"
-    log_dir.mkdir(exist_ok=True)
+    override = os.environ.get("SISYPHUS_LOG_DIR", "").strip()
+    log_dir = Path(override) if override else root / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "sisyphus.log"
     if _configured:
         return log_file

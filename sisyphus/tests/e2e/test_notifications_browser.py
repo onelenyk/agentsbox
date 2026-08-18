@@ -57,6 +57,10 @@ def live_server(tmp_path_factory):
         **__import__("os").environ,
         "SISYPHUS_DB": str(db),
         "WORKSPACE_ROOT": str(ws),
+        # Without this the isolated daemon still logs into the repo's real
+        # logs/sisyphus.log, where its startup lines look like the running
+        # daemon restarting.
+        "SISYPHUS_LOG_DIR": str(tmp / "logs"),
     }
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "web.app:app",
