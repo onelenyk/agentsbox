@@ -39,6 +39,9 @@ repos:
 - branch: staging
   name: android-driver
   platform: gitlab
+  setup:
+    copy:
+    - local.properties
   source: /Users/lenyk/workproject/android-driver
 task_budget_usd: 5.0
 webhooks:
