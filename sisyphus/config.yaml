@@ -4,6 +4,12 @@ api:
 autopilot_tick_seconds: 30
 daily_budget_usd: 0
 default_model: deepseek
+forge_poll:
+  enabled: true
+  # The daemon listens on 127.0.0.1, so no forge can deliver a webhook to it;
+  # this is how a review, an approval or a merge reaches the task that opened
+  # the PR. Seconds; 60 is the enforced floor — see core/forge_poll.py.
+  interval_seconds: 300
 github:
   base_url: ${GITHUB_BASE_URL}
   token: ${GITHUB_TOKEN}

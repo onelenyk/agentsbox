@@ -107,6 +107,12 @@ async def startup():
     from core import autopilot
     asyncio.create_task(autopilot.run_forever())
 
+    # Ask the forges what happened to the pull requests we opened. A webhook
+    # would be cheaper, but it needs the forge to reach us and this daemon
+    # listens on loopback — see core.forge_poll.
+    from core import forge_poll
+    asyncio.create_task(forge_poll.poll_forever())
+
 @router.get("/", response_class=HTMLResponse)
 async def root():
     return HTMLResponse('<meta http-equiv="refresh" content="0;url=/dashboard">')
@@ -347,6 +353,63 @@ async def repos_update(name: str):
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "reposUpdated"
     return resp
+
+
+def _repo_error(message: str):
+    """A 400 the repos page can actually show.
+
+    Same channel and same reason as _runner_error: a bare 400 reaches the user
+    as "Bad Request", which names nothing. The connection check has real
+    failures worth naming (unknown repo, git missing), and they are not stage
+    failures — a stage failure is a successful check with a bad answer and comes
+    back as a rendered 200.
+    """
+    from fastapi.responses import Response
+    resp = Response(status_code=400)
+    resp.headers["HX-Trigger"] = json.dumps({"repoError": message})
+    return resp
+
+
+async def _render_check(request: Request, **kwargs):
+    """Run one connection check off the event loop and render its report.
+
+    check_connection shells out to git and dials the forge; both block, and this
+    runs inside the daemon that is also serving the task pages.
+    """
+    from core.repo_check import check_connection
+    try:
+        res = await asyncio.to_thread(check_connection, **kwargs)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("repo connection check failed to run")
+        return _repo_error(f"the connection check could not run: {exc}")
+    return _tmpl().TemplateResponse(request, "repos_check.html", {"c": res})
+
+
+@router.post("/api/repos/check", response_class=HTMLResponse)
+async def repos_check_form(request: Request, name: str = Form(""), source: str = Form(""),
+                           platform: str = Form(""), branch: str = Form("main")):
+    """Check the fields in the add/edit form, before anything is saved.
+
+    The point of the whole feature is that "GitLab" in a dropdown is a claim, so
+    the most useful moment to test it is while the user is still typing it.
+    """
+    return await _render_check(request, name=name.strip(), source=source.strip(),
+                               platform=platform.strip(), branch=branch.strip())
+
+
+@router.post("/api/repos/{name}/check", response_class=HTMLResponse)
+async def repos_check(request: Request, name: str):
+    """Prove this repo can do what it was configured for — read, authenticate, push.
+
+    Nothing else verifies any of it. A repo with a GitLab platform and no token
+    looks identical to a working one until core.providers tries to open the MR,
+    which happens after an agent has spent a task's worth of tokens writing the
+    code. This asks the questions up front and reports which one failed.
+    """
+    from core.repos import get_repo
+    if not get_repo(name):
+        return _repo_error(f"no repo named {name!r}")
+    return await _render_check(request, name=name)
 
 # ── Runner CRUD ────────────────────────────────────────────────────────
 
