@@ -230,6 +230,12 @@ def init_mr_table() -> None:
         conn.execute("ALTER TABLE merge_requests ADD COLUMN check_output TEXT")
         conn.execute("ALTER TABLE merge_requests ADD COLUMN check_command TEXT")
         conn.execute("ALTER TABLE merge_requests ADD COLUMN check_ran_at TEXT")
+    # Which files a model rewrote to make the merge possible, newline-separated.
+    # Persisted rather than only flashed after the action: the merge commit looks
+    # exactly like a hand-made one, so days later nothing in the UI would say
+    # those hunks were written by a model instead of by git.
+    if "merge_resolved" not in cols:
+        conn.execute("ALTER TABLE merge_requests ADD COLUMN merge_resolved TEXT")
 
     conn.commit()
     conn.close()
@@ -392,11 +398,16 @@ def set_status(mr_id: str, status: str) -> None:
     conn.close()
 
 
-def mark_merged(mr_id: str, merge_sha: str) -> None:
+def mark_merged(mr_id: str, merge_sha: str, resolved: Optional[List[str]] = None) -> None:
+    """Record the merge. *resolved* is the file list ``merge_resolving`` returns —
+    the files a model had to rewrite. An ordinary merge passes nothing and stores
+    an empty string, so "was this auto-resolved?" is answered by the row itself
+    and never inferred from the absence of a flash message."""
     now = _now()
     conn = get_conn()
     conn.execute(
-        "UPDATE merge_requests SET status = 'merged', merge_sha = ?, merged_at = ?, updated_at = ? WHERE id = ?",
-        (merge_sha, now, now, mr_id))
+        "UPDATE merge_requests SET status = 'merged', merge_sha = ?, merged_at = ?, "
+        "merge_resolved = ?, updated_at = ? WHERE id = ?",
+        (merge_sha, now, "\n".join(resolved or []), now, mr_id))
     conn.commit()
     conn.close()

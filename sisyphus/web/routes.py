@@ -1256,8 +1256,10 @@ def _mr_view_ctx(request, mr):
         mr["bare_path"], mr["source_path"], mr["source_branch"], mr["target_branch"])
     patch = attachments.read(mr["task_id"], "change.patch") or ""
     lines, adds, dels = _classify_diff(patch)
+    resolved_files = [p for p in (mr.get("merge_resolved") or "").split("\n") if p.strip()]
     return {"request": request, "mr": mr, "branches": branches, "merge": merge,
-            "lines": lines, "adds": adds, "dels": dels}
+            "lines": lines, "adds": adds, "dels": dels,
+            "resolved_files": resolved_files}
 
 @router.get("/api/mr/{mr_id}/view", response_class=HTMLResponse)
 async def mr_view(request: Request, mr_id: str):
@@ -1319,6 +1321,72 @@ async def mr_merge(request: Request, mr_id: str, force: str = Form("")):
         ctx["flash"] = f"Merged into {res['target']} as {res['sha'][:8]} — reversible with git reset --hard @{{1}}"
     else:
         ctx = _mr_view_ctx(request, mr); ctx["error"] = res.get("error", "merge failed")
+    return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
+
+@router.post("/api/mr/{mr_id}/merge-resolve", response_class=HTMLResponse)
+async def mr_merge_resolve(request: Request, mr_id: str, force: str = Form("")):
+    """Merge an MR that conflicts, letting the local model resolve each conflicted
+    file (core.planner._ai_conflict_resolver) instead of sending the user off to
+    fix it by hand.
+
+    Guarded to the case it exists for: only an MR that does NOT merge cleanly.
+    A clean merge has nothing to resolve, and putting model-written content into
+    a merge git could do exactly is strictly worse. The mergeability check is
+    repeated here rather than trusted from the button, because the modal's button
+    state was computed when it rendered and the target branch can move under it.
+
+    Failure is never dressed up as success: merge_resolving aborts the merge and
+    leaves the target branch untouched the moment one file comes back unresolved,
+    and this route then leaves the MR open and renders the reason.
+    """
+    from core import mergerequests, planner, store
+    from fastapi.responses import Response
+    mr = mergerequests.get_mr(mr_id)
+    if not mr:
+        return Response(status_code=404)
+    if mr["status"] != "open":
+        ctx = _mr_view_ctx(request, mr); ctx["error"] = f"MR is already {mr['status']}"
+        return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
+    status = mr.get("review_status")
+    if status in ("pending", "changes_requested") and not force:
+        ctx = _mr_view_ctx(request, mr)
+        ctx["error"] = f"review is {status} — merge blocked; use Merge anyway to override"
+        return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
+
+    ctx = _mr_view_ctx(request, mr)
+    merge = ctx["merge"]
+    if not merge.get("ok"):
+        ctx["error"] = f"cannot check mergeability ({merge.get('error')}) — nothing was merged"
+        return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
+    if merge.get("mergeable"):
+        ctx["error"] = ("this branch merges cleanly — use Merge; AI resolution is only "
+                        "for a merge git cannot do on its own")
+        return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
+
+    res = mergerequests.merge_resolving(mr, mr["target_branch"], planner._ai_conflict_resolver)
+    if not res.get("ok"):
+        ctx["error"] = (f"AI resolution failed: {res.get('error', 'unknown error')} — "
+                        f"{mr['target_branch']} is untouched and nothing was merged")
+        return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
+
+    resolved = res.get("resolved") or []
+    mergerequests.mark_merged(mr_id, res["sha"], resolved)
+    note = (f"Merged {mr['source_branch']} into {res['target']} ({res['sha'][:8]}) in "
+            f"{mr['source_path']} — conflicts AI-resolved in: {', '.join(resolved)}"
+            if resolved else
+            f"Merged {mr['source_branch']} into {res['target']} ({res['sha'][:8]}) in "
+            f"{mr['source_path']} — no conflicts remained, nothing was AI-resolved")
+    store.post_message(mr["task_id"], "system", kind="note", text=note)
+    from core.worker import cleanup_task
+    cleanup_task(mr["task_id"])   # MR resolved — reclaim the per-task bare clone
+    ctx = _mr_view_ctx(request, mergerequests.get_mr(mr_id))
+    ctx["flash"] = (
+        f"AI-resolved {len(resolved)} conflicting file(s) — {', '.join(resolved)} — and merged "
+        f"into {res['target']} as {res['sha'][:8]}. Those hunks are model-written: read them "
+        f"before you push (revert with git reset --hard @{{1}})"
+        if resolved else
+        f"Merged into {res['target']} as {res['sha'][:8]} — the conflict was already gone, "
+        f"nothing was AI-resolved")
     return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
 
 @router.post("/api/mr/{mr_id}/close", response_class=HTMLResponse)
