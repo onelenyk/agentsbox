@@ -570,7 +570,19 @@ def reconcile_on_boot() -> int:
     we queue a synthetic ``continue`` so the next dispatch pass re-evaluates
     them.
 
+    Correction: the worker *process* does not reliably die with the daemon
+    (see core.sessions) — so before re-driving anything, kill whatever survived.
+    Order matters: re-driving spawns a fresh worker on the same git worktree,
+    and two runners writing one worktree is a worse failure than the orphan
+    was. A reaper fault must not stop the daemon from booting, hence the guard.
+
     Returns the number of tasks reconciled."""
+    from . import orphans
+    try:
+        orphans.reap()
+    except Exception:  # noqa: BLE001
+        logger.exception("orphan reaper failed — surviving workers may still be running")
+
     n = 0
     for task in store.list_tasks(status="active"):
         if _worker_in_flight(task["id"]):

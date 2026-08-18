@@ -13,6 +13,12 @@ this dict), so it is invisible in the UI while still spending the API key. The
 absence of a session is therefore a useful signal in the other direction too:
 a task whose thread says a worker is in flight, with no session backing it, has
 a worker that will never report — see orchestrator.find_stalled.
+
+That signal is also what core.orphans acts on: it holds a spawn record per
+worker pid on disk (this dict cannot survive the restart, so the evidence
+cannot live here) and, at boot, kills every recorded process that no live
+session accounts for. list_active() is the "backed by a live session" side of
+that test — its ``worktree`` is what a record is matched against.
 """
 import secrets
 from datetime import datetime, timezone
