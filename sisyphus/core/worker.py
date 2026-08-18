@@ -401,6 +401,16 @@ async def spawn_worker(
         # commit/open_mr) and persona prompt, not by filesystem permissions —
         # a read-only worktree just breaks opencode outright.
         set_access(worktree_path, "write")
+        # A worktree has exactly what git tracks; anything gitignored the build
+        # needs (local.properties, .env, credentials) is absent unless this repo
+        # says how to produce it. Runs AFTER set_access on purpose — set_access
+        # rewrites every mode in the tree to 644/755, so copying first would
+        # widen a 600 credentials file. Raises on a configured-but-failed hook:
+        # see core.setup_hook's failure policy. _spawn_worker_safe turns that
+        # into "<role> failed to start: …" on the thread, and no agent runs
+        # against a half-prepared worktree.
+        from .setup_hook import apply_setup
+        setup_result = apply_setup(requested_repo, worktree_path)
     else:
         # A repo-less task (research / planning / Q&A — nothing to check out)
         # still needs a private cwd where opencode can write its own session
@@ -409,6 +419,7 @@ async def spawn_worker(
         ws = os.environ.get("WORKSPACE_ROOT", "/workspace")
         worktree_path = f"{ws}/scratch/{task_id}"
         os.makedirs(worktree_path, exist_ok=True)
+        setup_result = None     # no repo, so nothing to set up — not "setup succeeded"
 
     instruction_first_line = instruction.split("\n")[0][:120]
     token = sessions.mint(task_id, role, worktree=worktree_path,
@@ -420,6 +431,15 @@ async def spawn_worker(
         task_id, author="system", kind="worker_started",
         text=f"spawning {role}: {instruction}",
     )
+    if setup_result and setup_result.get("ran"):
+        # Only when a hook actually did something. A repo without one stays
+        # silent rather than posting a reassuring line about work that never
+        # happened — the thread is where a human reconstructs what the worker
+        # was given, and an unconditional "setup ok" would be a lie for every
+        # repo that configures nothing.
+        from .setup_hook import summarise as _summarise_setup
+        store.post_message(task_id, author="system", kind="note",
+                           text=_summarise_setup(setup_result))
 
     # Layout matches what launcher._derive_run_id expects (runs/{run_id}/
     # resources/{step_id}), using task_id as the run id and role as the step

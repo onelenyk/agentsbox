@@ -39,6 +39,9 @@ repos:
 - branch: staging
   name: sample-app
   platform: gitlab
+  setup:
+    copy:
+    - local.properties
   source: /Users/dev/workproject/sample-app
 task_budget_usd: 5.0
 webhooks:

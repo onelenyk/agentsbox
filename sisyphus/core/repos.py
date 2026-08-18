@@ -25,6 +25,19 @@ def get_repo(name):
             return r
     return None
 
+def repo_setup(name):
+    """The repo's raw ``setup`` block (see core.setup_hook), or None when it has
+    none — or when the repo is unknown, which reaches spawn_worker as its own
+    refusal before any hook is consulted.
+
+    Deliberately unvalidated: core.setup_hook decides what a malformed block
+    means, because the one thing that must never happen is a mistyped hook
+    arriving at a caller as "this repo configures no hook" and the worker
+    starting without the files the human thought they had configured.
+    """
+    return (get_repo(name) or {}).get("setup")
+
+
 def list_repos():
     repos = load_repos()
     for r in repos:
