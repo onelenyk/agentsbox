@@ -13,9 +13,17 @@
             {% else %}<span class="status status--failed right" title="source path not found or not a git repo">unreachable</span>{% endif %}
         </div>
         <a href="/repos/{{ r.name }}" class="term wrap" style="display:block;color:var(--text-2)">{{ r.source }}</a>
+        {# "remote" above only means the source looks like a URL — nothing has
+           ever dialled it. The check below is the part that actually tries. #}
+        <div id="repo-check-{{ loop.index0 }}"></div>
         <div class="ecard__foot">
             <a class="btn btn--ghost btn--sm" href="/repos/{{ r.name }}">Open</a>
             <div class="acts" style="margin-left:auto">
+                <button class="btn btn--ghost btn--sm" hx-post="/api/repos/{{ r.name }}/check"
+                        hx-target="#repo-check-{{ loop.index0 }}" hx-swap="innerHTML"
+                        hx-disabled-elt="this"
+                        hx-on:htmx:before-request="this.textContent='Checking…'"
+                        hx-on:htmx:after-request="this.textContent='Check connection'">Check connection</button>
                 <button class="btn btn--ghost btn--sm" hx-get="/api/repos/{{ r.name }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
                 <button class="btn btn--ghost btn--sm" hx-post="/api/repos/{{ r.name }}/update" hx-swap="none">Fetch</button>
                 <button class="btn btn--danger btn--sm" hx-delete="/api/repos/{{ r.name }}" hx-confirm="Delete {{ r.name }}?" hx-swap="none" hx-on:after-request="htmx.trigger('#repos-list', 'load')">Delete</button>
@@ -27,3 +35,19 @@
 {% else %}
 <div class="empty">No repositories configured. Add one to get started.</div>
 {% endif %}
+<script>
+// The check route reports a real error (unknown repo, git missing) on this
+// trigger — see _repo_error — because a bare 400 reaches the user as
+// "Bad Request". Registered once: this fragment is re-swapped on every
+// reposUpdated, and a listener per swap would flash a toast per swap.
+if (!window.__repoErrHooked) {
+    window.__repoErrHooked = 1;
+    document.body.addEventListener("repoError", function (e) {
+        var msg = e.detail.value || e.detail;
+        // base.html's generic htmx failure toast fires *after* this event and
+        // would overwrite the reason with "Bad Request"; re-flash on the next
+        // tick so the message that names the cause is the one left standing.
+        setTimeout(function () { flash(msg, "err"); }, 0);
+    });
+}
+</script>

@@ -12,6 +12,10 @@
         {% if repo.cloned %}<span class="status status--done">cloned</span>{% else %}<span class="status status--waiting">pending</span>{% endif %}
     </div>
     <div class="term wrap">{{ repo.source }}</div>
+    {# "cloned" says a bare clone exists on disk; it says nothing about whether
+       this repo can be read, authenticated against, or published to. Check
+       connection fills that slot with what was actually proved. #}
+    <div id="repo-check-detail"></div>
 
     <div class="section-title">Tasks <span class="chip">{{ done }}/{{ tasks|length }} done</span></div>
     {% for t in tasks %}
@@ -62,10 +66,24 @@
     <div class="rail-sec">
         <div class="rail-h">Actions</div>
         <div class="acts" style="flex-wrap:wrap;gap:6px">
+            <button class="btn btn--ghost btn--sm" hx-post="/api/repos/{{ repo.name }}/check"
+                    hx-target="#repo-check-detail" hx-swap="innerHTML" hx-disabled-elt="this"
+                    hx-on:htmx:before-request="this.textContent='Checking…'"
+                    hx-on:htmx:after-request="this.textContent='Check connection'">Check connection</button>
             <button class="btn btn--ghost btn--sm" hx-post="/api/repos/{{ repo.name }}/update" hx-swap="none">Fetch</button>
             <button class="btn btn--ghost btn--sm" hx-get="/api/repos/{{ repo.name }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
         </div>
     </div>
   </aside>
 </div>
+<script>
+// Same channel as repos_list.html: _repo_error sends the reason here because a
+// bare 400 reaches the user as "Bad Request", and base.html's generic failure
+// toast fires after this event — re-flash on the next tick so the specific
+// message wins.
+document.body.addEventListener("repoError", function (e) {
+    var msg = e.detail.value || e.detail;
+    setTimeout(function () { flash(msg, "err"); }, 0);
+});
+</script>
 {% endblock %}

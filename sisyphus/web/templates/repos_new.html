@@ -14,9 +14,21 @@
                         <option value="github">GitHub</option>
                     </select>
                 </div>
+                {# The dropdown above is a claim about this repo, and saving used
+                   to be the only thing that ever tested it — badly, since a
+                   clone succeeds long before a missing forge token matters.
+                   Checking here costs a few seconds instead of a whole task. #}
+                <div id="new-repo-check"></div>
             </div>
             <div class="modal__actions">
                 <button type="button" class="btn btn--ghost" onclick="this.closest('.modal-backdrop').remove()">Cancel</button>
+                <button type="button" class="btn btn--ghost" hx-post="/api/repos/check"
+                        hx-include="closest form" hx-target="#new-repo-check" hx-swap="innerHTML"
+                        hx-disabled-elt="this"
+                        hx-on:htmx:before-request="this.textContent='Checking…'"
+                        {# The form's own hx-on:after-request reloads the repos list; this
+                           request is not a save, so stop the event before it bubbles there. #}
+                        hx-on:htmx:after-request="event.stopPropagation(); this.textContent='Check connection'">Check connection</button>
                 <button type="submit" class="btn btn--primary">Clone &amp; Add</button>
             </div>
         </form>
