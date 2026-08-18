@@ -1,6 +1,11 @@
 <div class="panel" style="margin-top:12px">
     <span class="badge badge--accent cmd-badge--{{ result.kind }}">{{ result.kind }}</span>
-    <form>
+    {# hx-include pulls this form's fields; the routes reply with an empty 200
+       carrying HX-Redirect, which only htmx acts on. The buttons were plain
+       type=submit with formaction and no method, so the browser sent a native
+       GET — every one of them landed the user on {"detail":"Method Not
+       Allowed"} outside the app, with the back button the only way home. #}
+    <form id="cmd-form">
         <div class="field" style="margin-top:12px">
             <label>Title</label>
             <input name="title" value="{{ result.title }}">
@@ -23,9 +28,9 @@
             <input name="cron" value="{{ result.cron }}">
         </div>
         <div style="display:flex;gap:8px;margin-top:12px">
-            <button type="submit" formaction="/api/command/create-task" class="btn {% if result.kind == 'task' %}btn--primary{% else %}btn--ghost{% endif %}">Create task</button>
-            <button type="submit" formaction="/api/command/create-plan" class="btn {% if result.kind == 'mission' %}btn--primary{% else %}btn--ghost{% endif %}">Make it a plan</button>
-            <button type="submit" formaction="/api/command/create-automation" class="btn {% if result.kind == 'automation' %}btn--primary{% else %}btn--ghost{% endif %}">Make it an automation</button>
+            <button type="button" hx-post="/api/command/create-task" hx-include="#cmd-form" hx-swap="none" class="btn {% if result.kind == 'task' %}btn--primary{% else %}btn--ghost{% endif %}">Create task</button>
+            <button type="button" hx-post="/api/command/create-plan" hx-include="#cmd-form" hx-swap="none" class="btn {% if result.kind == 'mission' %}btn--primary{% else %}btn--ghost{% endif %}">Make it a plan</button>
+            <button type="button" hx-post="/api/command/create-automation" hx-include="#cmd-form" hx-swap="none" class="btn {% if result.kind == 'automation' %}btn--primary{% else %}btn--ghost{% endif %}">Make it an automation</button>
         </div>
     </form>
 </div>
