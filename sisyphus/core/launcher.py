@@ -283,6 +283,13 @@ async def launch_agent(
         mcp_config=mcp_config,
     )
 
+    # The argv the runner will have once it is running. sandbox-exec below
+    # exec()s its target, so the wrapper's own flags never appear in the live
+    # process — verified on this machine: a `sandbox-exec -f p /bin/sleep 20`
+    # child reads back as `/bin/sleep 20`. core.orphans fingerprints this, not
+    # the wrapped form, so a reaper on the next boot can recognise the process.
+    child_argv = list(args)
+
     # Confine the runner's filesystem writes to the workspace (see core.sandbox).
     # Without a backend the run proceeds unconfined — surface that once so it's
     # never a silent assumption.
@@ -312,17 +319,30 @@ async def launch_agent(
             error=f"Failed to spawn '{binary}' process: {e}",
         )
 
+    # From here on the pid exists on disk as well as in this process: a worker
+    # does not reliably die with the daemon (see core.sessions and
+    # core.orphans), and once the daemon is gone nothing else in the system
+    # knows this pid ever existed.
+    from . import orphans
+    orphans.record(proc.pid, child_argv, worktree=str(worktree_path),
+                   output_dir=str(output_dir), step_id=step_id or output_path.name,
+                   runner=runner.get("name", "") if isinstance(runner, dict) else "")
     try:
-        status, err, stdout, stderr = await _monitored_communicate(proc, timeout, idle_timeout, cancel_event)
-    except Exception as e:
         try:
-            proc.kill()
-            await proc.wait()
+            status, err, stdout, stderr = await _monitored_communicate(proc, timeout, idle_timeout, cancel_event)
         except Exception as e:
-            logger.debug("Failed to kill process after communication error: %s", e)
-            pass
-        duration = (time.monotonic() - start_time) * 1000
-        return AgentResult(status="error", duration_ms=duration, error=str(e))
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception as e:
+                logger.debug("Failed to kill process after communication error: %s", e)
+                pass
+            duration = (time.monotonic() - start_time) * 1000
+            return AgentResult(status="error", duration_ms=duration, error=str(e))
+    finally:
+        # returncode is None only if every attempt to stop it failed — then the
+        # record stays on disk so the next boot can finish the job.
+        orphans.release(proc.pid, still_running=proc.returncode is None)
 
     duration = (time.monotonic() - start_time) * 1000
 
