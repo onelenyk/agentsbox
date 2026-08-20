@@ -54,6 +54,18 @@ the timeout path. Fix: `reclaim_if_settled` should skip (or defer) reclaim while
 `sessions` reports an in-flight worker for the task, the same guard the reaper
 already applies.
 
+### Two orphan tests fail in a sandboxed worktree and tax every review
+**Status:** open, found 2026-08-21 (burned three review loops in one evening).
+Reviewers run the suite inside their Seatbelt-sandboxed worktree, where two
+process-inspection tests from tests/test_orphans.py fail for environmental
+reasons (the sandbox constrains ps/sysctl-style process access — same family as
+the long-known test_daemon_ctl::test_status_running). The daemon's own `check:`
+runs unsandboxed and passes 1030, so every reviewer ends up asking a human to
+adjudicate failures that have nothing to do with the diff. Fix candidates:
+skip these tests when running sandboxed (detect the sandbox, `pytest.mark.skipif`),
+or teach reviewer personas that the MR's recorded check verdict is authoritative
+over their local run.
+
 ### A task reviewer's verdict never reaches the MR row
 **Status:** open, found 2026-08-21.
 When a task's own reviewer writes APPROVED in the thread, `mr.review_status`
