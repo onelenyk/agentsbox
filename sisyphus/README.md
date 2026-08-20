@@ -4,10 +4,10 @@
 
 Give it a goal; it plans, dispatches specialist agents (explorer → engineer →
 reviewer), runs them in isolated git worktrees through a local CLI runner
-(opencode), and drives the work to done — with a review loop, a local
-merge-request flow, budget guards, and a live "Mission Control" web UI. It can
-also run **proactively**: scheduled or webhook-triggered *autopilots* create
-tasks on their own.
+(opencode or Claude Code), and drives the work to done — with a review loop, a
+machine-verified merge-request flow, budget guards, and a live "Mission Control"
+web UI. It can also run **proactively**: scheduled or webhook-triggered
+*autopilots* create tasks on their own.
 
 It runs directly on the host — no container. No hosted backend, and no raw model
 HTTP in the core: every AI decision, including the orchestrator's, runs through
@@ -26,7 +26,17 @@ your local runner.
   rolls their results back up.
 - **Repo-less tasks** — research / planning / Q&A run read-only in a scratch dir.
 - **Local Merge Requests** — mergeability dry-run (🟢/🔴 conflicts), merge into a
-  chosen branch, land, close — reversible, never force.
+  chosen branch, land, close — reversible, never force. Merging is gated on the
+  review verdict (with an explicit override).
+- **Machine-verified checks** — if a repo configures a `check:` command, the
+  daemon runs it in a throwaway worktree against every MR and records the exit
+  code, so an approval cites a number no agent authored.
+- **Forge publishing & polling** — a repo cloned from GitHub/GitLab gets real
+  PRs/MRs (pushed and opened via the API, per-repo or global token), and a
+  poller follows what happens to them — no inbound webhook needed.
+- **Pluggable runners** — opencode and Claude Code CLI behind one profile layer
+  (argv, env, MCP wiring per CLI); auto-detect finds installed CLIs, and a smoke
+  test proves a runner can actually call a tool before it is trusted with work.
 - **Autopilot** — named automations fire on a **schedule** (cron/interval) or a
   **webhook** (jira/github/gitlab) and create tasks; `{{payload}}` templating.
 - **Guardrails** — restart recovery, total/idle timeouts, a global worker-concurrency
@@ -70,17 +80,20 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the domain model in depth
 
 ## Quick start
 
-**Requirements:** Python 3.9+, git, and the [opencode](https://opencode.ai) CLI on
-your PATH (or any configured runner). An `OPENROUTER_API_KEY` (or your runner's
-key) for the model.
+**Requirements:** Python 3.9+, git, and at least one runner CLI on your PATH —
+[opencode](https://opencode.ai) or [Claude Code](https://claude.com/claude-code)
+(**Runners → Detect** finds installed ones). An API key is optional: opencode can
+use its own logged-in providers (the model prefix picks the provider, e.g.
+`deepseek/…`), and Claude Code uses its OAuth login. Set `OPENROUTER_API_KEY`
+only if you route models through OpenRouter.
 
 ```bash
 # 1. install deps
 pip install -r requirements.txt
 
-# 2. configure secrets (loaded at startup; .env is gitignored)
+# 2. configure secrets (loaded at startup; .env is gitignored; all optional)
 cp .env.example .env
-$EDITOR .env          # set OPENROUTER_API_KEY
+$EDITOR .env          # API/forge tokens if you use them
 
 # 3. run the daemon
 python sisyphus.py daemon start      # or: python -m uvicorn web.app:app --port 7677
@@ -112,8 +125,10 @@ Secrets come from `.env` (launchd has no shell env). See [`deploy/README.md`](de
   read-only research. Pinned agent = solo (orchestrator skipped).
 - **Watch it run** — the task thread shows every orchestrator decision and worker
   result; the dashboard shows agents at work and cost.
-- **Ship changes** — when an engineer opens a merge request, review the diff and
-  **merge into a chosen branch**, **land** the branch, or **close** it — all local.
+- **Ship changes** — when an engineer opens a merge request, review the diff
+  (with the repo's own `check:` verdict already attached) and **merge into a
+  chosen branch**, **land** the branch, or **close** it — all local. Repos cloned
+  from GitHub/GitLab publish real PRs/MRs instead.
 - **Automate** — **Autopilot → + New** for a `0 3 * * *` "scan repos for stuck MRs"
   or a jira `issue_created` → "Analyze {{ issue.key }}".
 - **Stay safe** — **Backups → Create backup** before experiments; restore always
@@ -153,7 +168,16 @@ sisyphus dev      install-hooks        # pre-push hook that runs the test suite
   - `max_concurrent_workers` (default 2) — global worker cap
   - `task_budget_usd` (default 5.0) / `daily_budget_usd` (0 = off) — budget guards
   - `autopilot_tick_seconds` (30) — schedule check cadence
+  - `forge_poll` — `enabled` + `interval_seconds`: follow published PRs/MRs by
+    polling (the loopback daemon can never receive a webhook)
   - `default_timeout`, `max_review_loops`, `log_level`, `api.token`, `api.allow_localhost`
+- **per-repo keys** (under `repos:`):
+  - `check:` — shell command the daemon runs against every MR in a throwaway
+    worktree; its exit code becomes the MR's recorded verdict
+  - `setup:` — copy files / run commands into each fresh worktree (things git
+    does not carry, e.g. `local.properties`)
+  - `platform:` (`local`/`github`/`gitlab`, else inferred from the source URL)
+    and `token:` — a per-repo forge credential that beats the global one
 
 Data lives under `workspace/` (SQLite db, per-task bare clones, backups, logs) — gitignored.
 
@@ -166,10 +190,18 @@ core/          domain + engine
   store.py         tasks + threads (SQLite)
   orchestrator.py  the cold decision loop + guardrails
   worker.py        spawn agents in isolated worktrees
-  launcher.py      run the opencode subprocess (timeouts, usage)
+  launcher.py      run the runner subprocess (timeouts, usage, orphan records)
+  runner_profiles.py  per-CLI shape: argv, env, MCP config (opencode, claude-cli)
+  runner_smoke.py  prove a runner can call a tool before trusting it with work
   agents.py        agent registry (persona/tools/runner/kind)
   runners.py       CLI-backend configs + runner_detect.py (binary resolution)
   mergerequests.py local merge-request entity + git actions
+  verify.py        run the repo's check: command against an MR, record verdict
+  providers.py     publish a branch: local MR, or a real GitHub/GitLab PR
+  forge_poll.py    follow published PRs/MRs by polling the forge
+  repo_check.py    connection check: reachable → authenticated → can push
+  sandbox.py       macOS Seatbelt profile for workers (repo + creds write-deny)
+  orphans.py       reap worker subprocesses that outlive the daemon
   autopilot.py     scheduled/webhook automations + tick loop
   ai_assist.py     one-shot "structure this task" helper
   repo_context.py  what the AI reads in a repo (AGENTS.md, CLAUDE.md, …)
@@ -189,7 +221,7 @@ docs/          architecture + feature notes
 ## Testing
 
 ```bash
-pytest -q                 # ~407 unit tests
+pytest -q                 # ~1000 unit tests
 pytest tests/e2e -q       # Playwright browser e2e — needs:
                           #   pip install -r requirements-dev.txt
                           #   python -m playwright install chromium

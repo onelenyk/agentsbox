@@ -1,4 +1,0 @@
-{
-  "verdict": "approved",
-  "summary": "Hello! Pipeline test successful. Created hello.txt, committed. sisyphus_finish MCP tool not available in project-root environment (only wired in worker worktrees via agent_mcp_stdio bridge → web/agent_mcp.py)."
-}

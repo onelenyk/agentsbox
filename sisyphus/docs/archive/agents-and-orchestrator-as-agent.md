@@ -1,3 +1,5 @@
+> **Archived 2026-08-20** — implemented in full (configurable agents, orchestrator-as-agent, task-level agent selection).
+
 # Plan — Configurable Agents + orchestrator-as-agent (all AI via local CLI)
 
 > **Status: IMPLEMENTED (all 3 phases).** Phase 1 — DB-backed Agent entity +

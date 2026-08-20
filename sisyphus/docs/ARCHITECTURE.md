@@ -51,15 +51,18 @@ expressed as `spawn_worker(role="reviewer")`, whose verdict returns as the next
 ## 3. Workers & runtimes
 
 - A **worker** is one run of an **agent** (`core/agents.py`: `{name, persona,
-  tools[], runner, kind}`) as an **opencode subprocess** (`core/launcher.py`) in
+  tools[], runner, kind}`) as a **runner-CLI subprocess** (`core/launcher.py`) in
   an **isolated git worktree** (`core/worktree.py`), granted a scoped set of MCP
   tools. Each task gets a **fresh per-task bare clone** from the repo source, so
   work never branches from a stale snapshot.
 - A **runtime/runner** (`core/runners.py`) is a CLI-backend config: binary, model,
-  api-key env, base URL. `core/runner_detect.py` resolves the binary to an
-  absolute path (PATH + common install dirs) so it works under a minimal PATH
-  (e.g. launchd).
-- Every run's token/cost is captured from opencode's JSON output
+  api-key env, base URL. `core/runner_profiles.py` knows each supported CLI's
+  shape — argv, env, MCP config format, tool-name prefix — currently **opencode**
+  and **claude-cli** (Claude Code). `core/runner_detect.py` resolves the binary
+  to an absolute path (PATH + common install dirs) so it works under a minimal
+  PATH (e.g. launchd), and `core/runner_smoke.py` proves a runner can call an
+  MCP tool before it is trusted with real work.
+- Every run's token/cost is captured from the runner CLI's JSON output
   (`core/usage.py`) — real spend, no estimates.
 
 ## 4. The event loop

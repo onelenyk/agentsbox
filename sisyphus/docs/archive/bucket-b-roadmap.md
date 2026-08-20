@@ -1,3 +1,5 @@
+> **Archived 2026-08-20** — every item shipped; kept as the record of what Bucket B was.
+
 # Bucket B — Roadmap: from "looks autonomous" to "actually ships"
 
 > **Status: COMPLETE.** All 7 items shipped (git spine + local/GitLab/GitHub
