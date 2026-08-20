@@ -29,6 +29,10 @@
             <button class="btn btn--sm"
                     hx-post="/api/tasks/{{ task.id }}/reopen"
                     hx-swap="none">Reopen</button>
+            <button class="btn btn--sm"
+                    hx-post="/api/tasks/{{ task.id }}/retry"
+                    hx-confirm="Retry from scratch? This starts a brand-new task with the same goal — its thread and branch are deliberately ignored, so it begins with a clean history."
+                    hx-swap="none">Retry from scratch</button>
             {% else %}
             {# the only way to stop work; without it a human had to find the pid #}
             <button class="btn btn--sm"
