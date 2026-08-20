@@ -108,3 +108,60 @@ class TestBarePreservedForOpenMR:
         mergerequests.set_status(m["id"], "closed")
         cleanup_task(task["id"])            # resolved → bare reclaimed
         assert not bare.exists()
+
+
+class TestDiskIsReclaimedWhenTheLastMrCloses:
+    """cleanup_task keeps the per-task bare clone while an MR is open, and runs
+    when the *task* finishes — always before the human merges. So nothing ever
+    reclaimed it afterwards: four finished tasks had left 26MB and two worktrees
+    behind by the time anyone looked."""
+
+    def _mr(self, db_path, task_id="t1", source_branch="b"):
+        from core import mergerequests
+        mergerequests.init_mr_table()
+        return mergerequests.create_mr(
+            task_id=task_id, repo="r", source_branch=source_branch, target_branch="main",
+            title="", bare_path="/bare", base_branch="main", source_path="/src")
+
+    def test_merging_the_last_mr_reclaims(self, db_path, monkeypatch):
+        from core import mergerequests
+        seen = []
+        monkeypatch.setattr("core.worker.cleanup_task", lambda tid, deep=False: seen.append(tid))
+        mr = self._mr(db_path)
+        mergerequests.mark_merged(mr["id"], "abc123")
+        assert seen == ["t1"]
+
+    def test_closing_reclaims_too(self, db_path, monkeypatch):
+        from core import mergerequests
+        seen = []
+        monkeypatch.setattr("core.worker.cleanup_task", lambda tid, deep=False: seen.append(tid))
+        mr = self._mr(db_path)
+        mergerequests.set_status(mr["id"], "closed")
+        assert seen == ["t1"]
+
+    def test_another_open_mr_holds_the_disk(self, db_path, monkeypatch):
+        """The remaining MR still needs the bare clone to merge from."""
+        from core import mergerequests
+        seen = []
+        monkeypatch.setattr("core.worker.cleanup_task", lambda tid, deep=False: seen.append(tid))
+        first = self._mr(db_path)
+        self._mr(db_path, source_branch="b2")
+        mergerequests.mark_merged(first["id"], "abc123")
+        assert seen == []
+
+    def test_reopening_a_status_does_not_reclaim(self, db_path, monkeypatch):
+        from core import mergerequests
+        seen = []
+        monkeypatch.setattr("core.worker.cleanup_task", lambda tid, deep=False: seen.append(tid))
+        mr = self._mr(db_path)
+        mergerequests.set_status(mr["id"], "open")
+        assert seen == []
+
+    def test_a_reclaim_failure_never_breaks_the_merge(self, db_path, monkeypatch):
+        from core import mergerequests
+        def boom(tid, deep=False):
+            raise RuntimeError("disk gone")
+        monkeypatch.setattr("core.worker.cleanup_task", boom)
+        mr = self._mr(db_path)
+        mergerequests.mark_merged(mr["id"], "abc123")
+        assert mergerequests.get_mr(mr["id"])["status"] == "merged"

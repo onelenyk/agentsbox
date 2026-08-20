@@ -463,6 +463,8 @@ def set_status(mr_id: str, status: str) -> None:
                  (status, _now(), mr_id))
     conn.commit()
     conn.close()
+    if status in ("merged", "closed"):
+        reclaim_if_settled(mr_id)
 
 
 def mark_merged(mr_id: str, merge_sha: str, resolved: Optional[List[str]] = None) -> None:
@@ -478,3 +480,33 @@ def mark_merged(mr_id: str, merge_sha: str, resolved: Optional[List[str]] = None
         (merge_sha, now, "\n".join(resolved or []), now, mr_id))
     conn.commit()
     conn.close()
+    reclaim_if_settled(mr_id)
+
+
+def reclaim_if_settled(mr_id: str) -> bool:
+    """Reclaim a task's disk once its last open merge request closes.
+
+    core.worker.cleanup_task deliberately keeps the per-task bare clone while an
+    MR is still open — the branch a merge lands from lives there. But cleanup
+    runs when the *task* reaches a terminal status, which is always before the
+    human merges, so nothing ever reclaimed it afterwards. Four finished tasks
+    had left 26MB of bare clones and two worktrees behind by the time anyone
+    looked; on a real repository that is per task, indefinitely.
+
+    Best-effort and safe to call twice: cleanup_task is idempotent, and this
+    does nothing while any MR for the task is still open.
+    """
+    mr = get_mr(mr_id)
+    if not mr:
+        return False
+    task_id = mr.get("task_id", "")
+    if not task_id or open_mr_exists(task_id):
+        return False
+    try:
+        from .worker import cleanup_task
+        cleanup_task(task_id)
+        return True
+    except Exception:  # noqa: BLE001 — reclaiming disk must never fail a merge
+        import logging
+        logging.getLogger(__name__).exception("could not reclaim disk for %s", task_id)
+        return False

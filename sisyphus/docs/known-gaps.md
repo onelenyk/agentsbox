@@ -4,12 +4,25 @@ Things verified to be missing or wrong, with enough detail to act on. Each was
 found by using the system, not by reading it. Remove an entry when it is fixed —
 this file is only useful if it is true.
 
-Last reviewed: 2026-08-13.
+Last reviewed: 2026-08-20.
 
 Closed since the last review, kept only as a pointer to where the guard now
 lives: Stop racing a not-yet-started worker, and the subprocess kill having no
 automated test — both af6fe05, guarded by `tests/test_task_lifecycle.py`
 (`TestStopBeforeTheWorkerStarts`) and `tests/test_launcher_cancel.py`.
+
+Closed 2026-08-17..20:
+
+- *An approval can rest on a number nobody read* — the daemon now runs the
+  repo's own `check:` command against the branch and records the verdict on the
+  MR before the reviewer is asked anything (`core/verify.py`, fd2f86c). "No
+  check configured" is recorded as `not_run` and can never read as a pass.
+- *Agents compare against the wrong baseline* — the merge base is computed and
+  handed over as a SHA instead of described as a rule
+  (`mergerequests.diff_range`, `get_mr_diff`, 9dcfc36).
+- *Untracked local config never reaches a worker* — a repo may declare a
+  `setup:` block that copies files into the worktree or runs a command
+  (`core/setup_hook.py`, 8211edd).
 
 ---
 
@@ -26,7 +39,7 @@ went wrong (a bad early decision the model keeps re-reading and repeating).
 ## Review loop
 
 ### An approval can rest on a number nobody read
-**Status:** partly mitigated.
+**Status:** CLOSED 2026-08-18 — see the header. Kept for the reasoning.
 Reviewer personas now require quoting the command and the last line of its
 output, and forbid approving with any failure. But nothing *checks* the quote:
 a reviewer once reported "604 passed, 3 pre-existing failures (unrelated)" on a
@@ -38,7 +51,7 @@ so the verdict cites a number the system produced rather than one the agent
 typed.
 
 ### Agents compare against the wrong baseline
-**Status:** mitigated 2026-08-13, unproven.
+**Status:** CLOSED 2026-08-18 — the baseline is now computed, not prompted.
 Both the engineer and the reviewer checked file modes with `git ls-tree HEAD~1`
 — the previous commit on their own branch — instead of the branch base, and each
 concluded the modes were clean. Three scripts had in fact gone 755 → 644 in an
@@ -56,7 +69,7 @@ a real MR.
 ## Environment
 
 ### Untracked local config never reaches a worker
-**Status:** open, worked around.
+**Status:** CLOSED 2026-08-18 — a per-repo `setup:` hook. Kept for the reasoning.
 Workers get a fresh clone, so anything gitignored is absent — `local.properties`,
 `.env`, credentials. `worker_env` in `config.yaml` covers environment variables
 (that is how JAVA_HOME/ANDROID_HOME got there), and Android happens to accept
@@ -65,3 +78,47 @@ project that genuinely needs a *file* present has no answer today.
 
 **Likely fix:** a per-repo `setup` hook — files to copy into the worktree after
 clone, or a command to run.
+
+---
+
+## Product surface
+
+### A reply to a blocked task is wiped while you type it
+**Status:** open, measured.
+The Needs-you panel refreshes on `every 10s` and the inline reply inputs live
+inside it, so the whole form is replaced mid-sentence. Measured directly: text
+present at 7s, gone at 9s, and the input is a different DOM node. Pressing Send
+then posts nothing — no error, no hint — and the task stays `waiting`. Two tasks
+have been stuck since 2026-08-16 for exactly this reason.
+
+The command box at the top of the dashboard is *outside* the refreshing block,
+so the field protected is the one holding a short phrase and the field lost is
+the one holding a considered answer.
+
+**Likely fix:** swap only when nothing inside is focused or dirty, or move the
+reply forms out of the refreshed fragment.
+
+### Classify gives no sign that it is working
+**Status:** open.
+It is a model call taking several seconds and the page shows nothing until it
+returns, so it reads as a dead button. I assumed my own click had missed and
+went to the console to check.
+
+---
+
+## Housekeeping
+
+### Reclaiming a task's disk was every caller's job to remember
+**Status:** CLOSED 2026-08-20.
+`cleanup_task` keeps the per-task bare clone while an MR is open and runs when
+the *task* reaches a terminal status — always before a human merges. Four call
+sites each remembered to reclaim afterwards (three MR routes and the planner's
+auto-merge), which worked; what did not was a fifth path. Merging
+programmatically through `mergerequests.merge_branch` + `mark_merged` — as a
+script or another tool would — skipped all four, and four finished tasks had
+left 26MB of bare clones and two worktrees behind.
+
+Reclaiming is now a property of the state change (`reclaim_if_settled`, called
+from `mark_merged` and from `set_status` on merged/closed), and the four
+explicit calls were removed. It does nothing while another MR for the task is
+still open, and a failure to reclaim can never fail a merge.

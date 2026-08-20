@@ -675,8 +675,8 @@ def _auto_merge_task(task_id: str) -> None:
             mergerequests.mark_merged(mr["id"], res["sha"])
             store.post_message(task_id, "system", kind="note",
                                text=f"Auto-merged {mr['source_branch']} into {res['target']} ({res['sha'][:8]})")
-            from core.worker import cleanup_task
-            cleanup_task(task_id)
+            # Disk is reclaimed by mark_merged above — see
+            # mergerequests.reclaim_if_settled.
         else:
             logger.info("auto-merge failed for %s — %s", task_id, res.get("error"))
     except Exception:  # noqa: BLE001
