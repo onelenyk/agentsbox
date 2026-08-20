@@ -41,6 +41,19 @@ re-reading and repeating).
 
 ## Review loop
 
+### Merging an MR reclaims worktrees out from under a live worker
+**Status:** open, found 2026-08-21.
+`reclaim_if_settled` fires on `mark_merged`/`set_status` and calls
+`cleanup_task` when the task has no open MR left — but it never asks whether a
+worker is still running for that task. Observed on task-a5c0604b: the human
+merged mr-7cdb06dc while the task's own reviewer was mid-run; cleanup salvaged
+and removed both worktrees (see the `salvaged uncommitted work` warnings), and
+the reviewer kept running against a directory that no longer exists, so its
+`worker_finished` — the event the orchestrator sleeps on — was delayed until
+the timeout path. Fix: `reclaim_if_settled` should skip (or defer) reclaim while
+`sessions` reports an in-flight worker for the task, the same guard the reaper
+already applies.
+
 ### A task reviewer's verdict never reaches the MR row
 **Status:** open, found 2026-08-21.
 When a task's own reviewer writes APPROVED in the thread, `mr.review_status`
