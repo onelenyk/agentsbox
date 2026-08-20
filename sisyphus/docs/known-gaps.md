@@ -84,19 +84,10 @@ clone, or a command to run.
 ## Product surface
 
 ### A reply to a blocked task is wiped while you type it
-**Status:** open, measured.
-The Needs-you panel refreshes on `every 10s` and the inline reply inputs live
-inside it, so the whole form is replaced mid-sentence. Measured directly: text
-present at 7s, gone at 9s, and the input is a different DOM node. Pressing Send
-then posts nothing — no error, no hint — and the task stays `waiting`. Two tasks
-have been stuck since 2026-08-16 for exactly this reason.
-
-The command box at the top of the dashboard is *outside* the refreshing block,
-so the field protected is the one holding a short phrase and the field lost is
-the one holding a considered answer.
-
-**Likely fix:** swap only when nothing inside is focused or dirty, or move the
-reply forms out of the refreshed fragment.
+**Status:** CLOSED 2026-08-20 — the reply input now carries `hx-preserve` with a
+task-derived id (`reply-text-<task id>`), so htmx keeps the live element across
+every `#inbox` swap — the 10s poll and the `taskUpdated`/`inboxChanged` events
+alike — protecting typed-but-unsent text, focus and cursor.
 
 ### Classify gives no sign that it is working
 **Status:** open.
