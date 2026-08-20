@@ -1,3 +1,5 @@
+> **Archived 2026-08-20** — implemented; local MRs are a first-class entity with review, verified checks and merge actions.
+
 # Plan — Local Merge Requests (a mini in-app forge)
 
 ## Motivation

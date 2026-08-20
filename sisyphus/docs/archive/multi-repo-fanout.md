@@ -1,3 +1,5 @@
+> **Archived 2026-08-20** — implemented; parent tasks fan out one child per repo and aggregate results.
+
 # Plan — Multi-repo task fan-out (parent → children)
 
 > **Status: IMPLEMENTED.** All layers shipped — `parent_id` data model,

@@ -1,3 +1,5 @@
+> **Archived 2026-08-20** — the scenarios were run during the 2026-08 dogfooding waves; the test repos they used were deregistered when the project went local-only (sisyphus is now the sole repo).
+
 # Real-world test plan — 10 end-to-end scenarios
 
 Each is a real task run through the live daemon (orchestrator + opencode agents),
