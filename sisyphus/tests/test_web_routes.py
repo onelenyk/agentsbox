@@ -732,6 +732,48 @@ class TestReopenAndWorkingIndicator:
         assert "reviewer" in html and "queued" in html
 
 
+class TestTaskRetry:
+    def test_retry_failed_creates_new_active_task_with_crosslinks(self, db_path):
+        from core import store
+        old = store.create_task("retry me", repo="sisyphus", agent="engineer")
+        store.set_status(old["id"], "failed")
+        store.post_message(old["id"], "system", kind="note",
+                           text="some old attempt message")
+        with patch("core.orchestrator.emit") as mock_emit:
+            r = _make_client().post(f"/api/tasks/{old['id']}/retry")
+        assert r.status_code == 200
+        new_id = r.headers.get("HX-Redirect", "").split("/tasks/")[1]
+        new = store.get_task(new_id)
+        assert new is not None
+        assert new["id"] != old["id"]
+        assert new["status"] == "active"
+        assert new["goal"] == old["goal"]
+        assert new["repo"] == old["repo"]
+        assert new["agent"] == old["agent"]
+        assert new["base_branch"] is None
+        old_thread = store.get_thread(old["id"])
+        assert old_thread[-1]["text"] == f"retried from scratch as {new_id}"
+        new_thread = store.get_thread(new_id)
+        assert len(new_thread) == 1
+        assert new_thread[0]["text"] == (f"retry of {old['id']} — previous attempt's "
+                                         "thread and branch deliberately ignored")
+        mock_emit.assert_called_once_with(new_id, "created")
+
+    def test_retry_rejected_for_active_task(self, db_path):
+        from core import store
+        t = store.create_task("g")
+        assert _make_client().post(f"/api/tasks/{t['id']}/retry").status_code == 409
+
+    def test_retry_button_and_confirm_on_detail_page(self, db_path):
+        from core import store
+        t = store.create_task("g")
+        store.set_status(t["id"], "done")
+        html = _make_client().get(f"/api/tasks/{t['id']}/detail").text
+        assert f'hx-post="/api/tasks/{t["id"]}/retry"' in html
+        assert "Retry from scratch" in html
+        assert "clean history" in html
+
+
 # ── Live workers endpoints ────────────────────────────────────────────
 
 

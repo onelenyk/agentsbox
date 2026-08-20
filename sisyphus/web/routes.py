@@ -1610,6 +1610,34 @@ async def task_reopen(task_id: str):
     resp.headers["HX-Trigger"] = "taskUpdated"
     return resp
 
+@router.post("/api/tasks/{task_id}/retry")
+async def task_retry(task_id: str):
+    """Retry a terminal task *from scratch*: a brand-new task with the same
+    goal, repo and agent, but a fresh id — and therefore a fresh branch, thread
+    and worktree. The old attempt's work is deliberately ignored; this is the
+    complement of /reopen, which continues the same branch. base_branch is not
+    copied, so the new task starts from the repo default."""
+    from core import store
+    from core.orchestrator import emit
+    from fastapi.responses import Response
+
+    task = store.get_task(task_id)
+    if not task:
+        return Response(status_code=404)
+    if task["status"] not in ("done", "failed"):
+        return Response(status_code=409)
+
+    new_task = store.create_task(task["goal"], task["repo"] or "",
+                                 agent=task["agent"] or None)
+    store.post_message(task_id, "system", kind="note",
+                       text=f"retried from scratch as {new_task['id']}")
+    store.post_message(new_task["id"], "system", kind="note",
+                       text=f"retry of {task_id} — previous attempt's thread and branch deliberately ignored")
+    emit(new_task["id"], "created")
+    resp = Response(status_code=200)
+    resp.headers["HX-Redirect"] = f"/tasks/{new_task['id']}"
+    return resp
+
 @router.post("/api/tasks/{task_id}/delete")
 async def task_delete(task_id: str):
     from core import cancellation, sessions, store
