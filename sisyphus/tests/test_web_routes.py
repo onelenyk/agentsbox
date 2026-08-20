@@ -363,6 +363,9 @@ def test_inbox_shows_waiting_task_with_reply_form(db_path):
     assert "Which colour?" in r.text
     # inline reply form posts to the existing messages endpoint
     assert f"/api/tasks/{task['id']}/messages" in r.text
+    # the reply field survives the 10s inbox refresh: stable task-derived id + hx-preserve
+    assert f'id="reply-text-{task["id"]}"' in r.text
+    assert "hx-preserve" in r.text
 
 
 def test_inbox_shows_done_task_with_open_mr_under_to_merge(db_path):

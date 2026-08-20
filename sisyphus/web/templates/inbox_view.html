@@ -9,7 +9,7 @@
             {% if w.question %}<span class="inbox-row__q muted">{{ w.question }}</span>{% endif %}
             <form class="inbox-row__reply" hx-post="/api/tasks/{{ w.task.id }}/messages" hx-swap="none"
                   hx-on::after-request="if(event.detail.successful) htmx.trigger('#inbox','inboxChanged')">
-                <input name="text" placeholder="Reply…" required autocomplete="off">
+                <input name="text" id="reply-text-{{ w.task.id }}" hx-preserve placeholder="Reply…" required autocomplete="off">
                 <button type="submit" class="btn btn--primary btn--sm">Send</button>
             </form>
         </div>
