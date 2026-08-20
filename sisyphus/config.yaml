@@ -25,12 +25,11 @@ openrouter:
   base_url: https://openrouter.ai/api/v1
 repos:
 - branch: main
+  check: cd sisyphus && env -u SISYPHUS_DB_READONLY python3 -m pytest -q
   name: sisyphus
   source: /Users/lenyk/workproject/agentsbox
 task_budget_usd: 5.0
 webhooks:
   secret: ${SISYPHUS_WEBHOOK_SECRET}
 worker_env:
-  ANDROID_HOME: ~/Library/Android/sdk
-  JAVA_HOME: /Users/lenyk/Applications/Android Studio.app/Contents/jbr/Contents/Home
-  PATH: ${JAVA_HOME}/bin:${ANDROID_HOME}/platform-tools:/opt/homebrew/bin:${PATH}
+  PATH: /opt/homebrew/bin:${PATH}
