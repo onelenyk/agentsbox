@@ -681,6 +681,37 @@ def test_command_classify_renders_card(db_path):
     assert "cmd-badge" in response.text
 
 
+def test_dashboard_classify_form_has_in_flight_affordances(db_path):
+    """The classify command is a slow model call; the form must disable itself
+    and show a progress hint while the request is in flight, so it never reads
+    as a dead button."""
+    html = _make_client().get("/dashboard").text
+    form_tag = html.split('hx-post="/api/command/classify"')[1].split(">")[0]
+    assert 'hx-disabled-elt="this"' in form_tag
+    assert 'hx-indicator="#cmd-classify-indicator"' in form_tag
+    assert 'id="cmd-classify-indicator"' in html
+    assert "Classifying" in html
+
+
+def test_command_result_buttons_have_in_flight_affordances(db_path):
+    """The create-task/plan/automation buttons each take time too — they must
+    disable themselves and show a shared progress hint, matching the classify
+    form."""
+    mock_result = {"kind": "task", "title": "Fix login", "goal": "fix login button", "repo": "", "cron": ""}
+    mock_repos = [{"name": "sisyphus", "source": "x", "branch": "main"}]
+    client = _make_client()
+    with patch("core.ai_assist.classify_command", return_value=mock_result):
+        with patch("core.repos.list_repos", return_value=mock_repos):
+            response = client.post("/api/command/classify", data={"text": "fix login"})
+    assert response.status_code == 200
+    for endpoint in ("create-task", "create-plan", "create-automation"):
+        button_tag = response.text.split(f'hx-post="/api/command/{endpoint}"')[1].split(">")[0]
+        assert 'hx-disabled-elt="this"' in button_tag
+        assert 'hx-indicator="#cmd-working-indicator"' in button_tag
+    assert 'id="cmd-working-indicator"' in response.text
+    assert "Working" in response.text
+
+
 def test_command_create_task(db_path):
     from core import store
     client = _make_client()

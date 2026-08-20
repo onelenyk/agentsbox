@@ -90,7 +90,9 @@ every `#inbox` swap — the 10s poll and the `taskUpdated`/`inboxChanged` events
 alike — protecting typed-but-unsent text, focus and cursor.
 
 ### Classify gives no sign that it is working
-**Status:** open.
+**Status:** CLOSED 2026-08-21 — the classify form and the command result's action
+buttons now disable themselves and show a "Classifying…"/"Working…" hint
+(htmx `hx-indicator` + `hx-disabled-elt`) while their request is in flight.
 It is a model call taking several seconds and the page shows nothing until it
 returns, so it reads as a dead button. I assumed my own click had missed and
 went to the console to check.

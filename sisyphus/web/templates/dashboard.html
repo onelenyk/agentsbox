@@ -9,10 +9,12 @@
     <span class="liveflag"><span class="led live"></span> LIVE</span>
 </div>
 <div class="panel" style="margin-bottom:14px">
-    <form hx-post="/api/command/classify" hx-target="#cmd-result" hx-swap="innerHTML">
+    <form hx-post="/api/command/classify" hx-target="#cmd-result" hx-swap="innerHTML"
+          hx-disabled-elt="this" hx-indicator="#cmd-classify-indicator">
         <div style="display:flex;gap:8px">
             <input name="text" placeholder="What do you want to do? Type in plain words…" style="flex:1" autocomplete="off">
             <button type="submit" class="btn btn--primary">Classify</button>
+            <span id="cmd-classify-indicator" class="htmx-indicator">Classifying…</span>
         </div>
     </form>
     <div id="cmd-result" style="margin-top:12px"></div>

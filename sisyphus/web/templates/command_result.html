@@ -28,9 +28,10 @@
             <input name="cron" value="{{ result.cron }}">
         </div>
         <div style="display:flex;gap:8px;margin-top:12px">
-            <button type="button" hx-post="/api/command/create-task" hx-include="#cmd-form" hx-swap="none" class="btn {% if result.kind == 'task' %}btn--primary{% else %}btn--ghost{% endif %}">Create task</button>
-            <button type="button" hx-post="/api/command/create-plan" hx-include="#cmd-form" hx-swap="none" class="btn {% if result.kind == 'mission' %}btn--primary{% else %}btn--ghost{% endif %}">Make it a plan</button>
-            <button type="button" hx-post="/api/command/create-automation" hx-include="#cmd-form" hx-swap="none" class="btn {% if result.kind == 'automation' %}btn--primary{% else %}btn--ghost{% endif %}">Make it an automation</button>
+            <button type="button" hx-post="/api/command/create-task" hx-include="#cmd-form" hx-swap="none" hx-disabled-elt="this" hx-indicator="#cmd-working-indicator" class="btn {% if result.kind == 'task' %}btn--primary{% else %}btn--ghost{% endif %}">Create task</button>
+            <button type="button" hx-post="/api/command/create-plan" hx-include="#cmd-form" hx-swap="none" hx-disabled-elt="this" hx-indicator="#cmd-working-indicator" class="btn {% if result.kind == 'mission' %}btn--primary{% else %}btn--ghost{% endif %}">Make it a plan</button>
+            <button type="button" hx-post="/api/command/create-automation" hx-include="#cmd-form" hx-swap="none" hx-disabled-elt="this" hx-indicator="#cmd-working-indicator" class="btn {% if result.kind == 'automation' %}btn--primary{% else %}btn--ghost{% endif %}">Make it an automation</button>
+            <span id="cmd-working-indicator" class="htmx-indicator">Working…</span>
         </div>
     </form>
 </div>
