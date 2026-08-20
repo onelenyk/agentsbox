@@ -29,14 +29,27 @@ Closed 2026-08-17..20:
 ## Task lifecycle
 
 ### There is no "retry from scratch"
-**Status:** open, not started.
-Reopen resumes a task on its existing thread and branch. There is no way to
-re-run a task ignoring everything it did — useful when the thread itself is what
-went wrong (a bad early decision the model keeps re-reading and repeating).
+**Status:** CLOSED 2026-08-21 — `POST /api/tasks/{id}/retry` (merged as 7e5a160).
+Reopen resumes a task on its existing thread and branch. Retry-from-scratch is
+its complement: a done/failed task gets a "Retry from scratch" action that
+creates a brand-new task with the same goal/repo/agent — fresh id, fresh branch,
+clean thread — cross-linked to the original by thread notes. Useful when the
+thread itself is what went wrong (a bad early decision the model keeps
+re-reading and repeating).
 
 ---
 
 ## Review loop
+
+### A task reviewer's verdict never reaches the MR row
+**Status:** open, found 2026-08-21.
+When a task's own reviewer writes APPROVED in the thread, `mr.review_status`
+stays `pending` — only the mr-reviewer autopilot's verdict path calls
+`set_review_status`. Observed on mr-9b6852f8: the reviewer approved in the
+thread, and the review-gated merge then (correctly, per its own record) refused
+the human's merge until the verdict was recorded by hand. The gate did its job;
+the recording path is what's missing — the orchestrator's approval handling
+should set the MR's review_status the same way the autopilot does.
 
 ### An approval can rest on a number nobody read
 **Status:** CLOSED 2026-08-18 — see the header. Kept for the reasoning.
