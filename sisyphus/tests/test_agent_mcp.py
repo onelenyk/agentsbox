@@ -682,3 +682,60 @@ def test_second_decision_in_one_pass_is_rejected(db_path):
     second = _call(_client(), token, "decide_ask_human", {"question": "help?"})
     assert second["result"]["isError"] is True
     assert sessions.resolve(token)["decision"]["action"] == "spawn_worker"
+
+
+# ── a task's OWN reviewer must also reach the MR row ─────────────────────
+
+
+def test_own_reviewer_approve_reaches_the_tasks_open_mr(db_path):
+    """The review-gated merge reads mr.review_status; only the Review-of-MR
+    path recorded it, so a task's own reviewer approving on the thread left
+    the MR `pending` and the gate refused the human's merge (mr-9b6852f8)."""
+    from core import mergerequests, sessions
+
+    task = store.create_task("build feature Z", repo="sisyphus", agent="engineer")
+    mr = mergerequests.create_mr(
+        task_id=task["id"], repo="sisyphus",
+        source_branch="sisyphus/feat-z", target_branch="main",
+        title="Add feature Z",
+    )
+    sessions.clear()
+    token = sessions.mint(task["id"], "reviewer")
+    out = _call(_client(), token, "approve", {"summary": "clean, tests pass"})
+    assert out["result"]["isError"] is False
+    assert mergerequests.get_mr(mr["id"])["review_status"] == "approved"
+
+
+def test_own_reviewer_request_changes_reaches_the_tasks_open_mr(db_path):
+    from core import mergerequests, sessions
+
+    task = store.create_task("build feature W", repo="sisyphus", agent="engineer")
+    mr = mergerequests.create_mr(
+        task_id=task["id"], repo="sisyphus",
+        source_branch="sisyphus/feat-w", target_branch="main",
+        title="Add feature W",
+    )
+    sessions.clear()
+    token = sessions.mint(task["id"], "reviewer")
+    out = _call(_client(), token, "request_changes", {"reason": "needs tests"})
+    assert out["result"]["isError"] is False
+    assert mergerequests.get_mr(mr["id"])["review_status"] == "changes_requested"
+
+
+def test_own_reviewer_verdict_leaves_a_settled_mr_alone(db_path):
+    """A merged/closed MR's verdict is history — a late reviewer must not
+    rewrite it."""
+    from core import mergerequests, sessions
+
+    task = store.create_task("build feature V", repo="sisyphus", agent="engineer")
+    mr = mergerequests.create_mr(
+        task_id=task["id"], repo="sisyphus",
+        source_branch="sisyphus/feat-v", target_branch="main",
+        title="Add feature V",
+    )
+    mergerequests.set_review_status(mr["id"], "approved")
+    mergerequests.mark_merged(mr["id"], "abc123")
+    sessions.clear()
+    token = sessions.mint(task["id"], "reviewer")
+    _call(_client(), token, "request_changes", {"reason": "too late"})
+    assert mergerequests.get_mr(mr["id"])["review_status"] == "approved"

@@ -181,6 +181,17 @@ def _verdict_body(verdict: str, body: str) -> str:
     return b
 
 
+def _record_verdict_on_own_mr(task_id: str, verdict: str) -> None:
+    """A task's own reviewer approves on the thread; the review-gated merge
+    reads mr.review_status. Only the Review-of-MR path (the marker branch of
+    _approve/_request_changes) ever called set_review_status, so an approved
+    change still showed `pending` and the gate refused the human's merge until
+    the verdict was recorded by hand. Record it on the task's open MR too."""
+    mr = mergerequests.latest_for_task(task_id)
+    if mr and mr.get("status") == "open":
+        mergerequests.set_review_status(mr["id"], verdict)
+
+
 def _approve(session, summary="", **_):
     store.post_message(session["task_id"], session["role"], kind="result",
                        text=_verdict_result_text("APPROVED", summary))
@@ -196,6 +207,8 @@ def _approve(session, summary="", **_):
                         text=(f"review verdict for {marker['mr_id']}: APPROVED — "
                               f"{_verdict_body('APPROVED', summary)}"),
                     )
+            else:
+                _record_verdict_on_own_mr(session["task_id"], "approved")
     except Exception:
         logger.warning("review bookkeeping failed for approve on task %s", session["task_id"], exc_info=True)
     _end_worker(session)
@@ -280,6 +293,8 @@ def _request_changes(session, reason="", **_):
                         text=(f"review verdict for {marker['mr_id']}: CHANGES REQUESTED — "
                               f"{_verdict_body('CHANGES REQUESTED', reason)}"),
                     )
+            else:
+                _record_verdict_on_own_mr(session["task_id"], "changes_requested")
     except Exception:
         logger.warning("review bookkeeping failed for request_changes on task %s", session["task_id"], exc_info=True)
     _end_worker(session)
