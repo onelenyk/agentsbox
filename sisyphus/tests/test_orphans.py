@@ -22,6 +22,40 @@ from core import orphans, sessions
 _SLEEPER = "import time,sys; time.sleep(float(sys.argv[1]))"
 
 
+def _kill_path_observable() -> bool:
+    """Whether this environment can *observe* a killed child's death — probed,
+    not assumed.
+
+    A reviewer runs the suite inside the worker's Seatbelt sandbox, where `ps`
+    is blocked (the same limitation behind test_daemon_ctl's known skip).
+    Signals still deliver, but the corpse is invisible: `_zombie` cannot see
+    the state, so `_alive` keeps answering True and `_terminate` reports
+    "survived" for a process that is already dead. The two kill-path tests
+    then fail for environmental reasons and every review ends with a human
+    adjudicating failures that have nothing to do with the diff. Probe once
+    per run: kill a child, keep the zombie (no wait), ask _zombie about it."""
+    proc = subprocess.Popen([sys.executable, "-c", _SLEEPER, "30"])
+    try:
+        proc.send_signal(signal.SIGKILL)
+        deadline = time.time() + 3
+        while time.time() < deadline:      # do NOT wait() — the zombie IS the probe
+            if orphans._zombie(proc.pid):
+                return True
+            time.sleep(0.1)
+        return False
+    finally:
+        try:
+            proc.wait(timeout=3)
+        except Exception:
+            pass
+
+
+needs_kill = pytest.mark.skipif(
+    not _kill_path_observable(),
+    reason="sandboxed: ps is blocked (Seatbelt), a killed child's death cannot be observed here",
+)
+
+
 @pytest.fixture
 def reaper_env(tmp_path, monkeypatch):
     """Isolated WORKSPACE_ROOT, empty ownership/session state, and a killer for
@@ -77,6 +111,7 @@ def _wait_dead(proc, timeout=10):
 
 # ── the case this module exists for ─────────────────────────────────────
 
+@needs_kill
 def test_reap_kills_a_worker_no_session_accounts_for(reaper_env):
     """The 2026-08-12 failure: the daemon restarted, the session dict died with
     it, the subprocess kept running."""
@@ -187,6 +222,7 @@ def test_process_with_no_arguments_never_matches(reaper_env):
         p.wait(timeout=5)
 
 
+@needs_kill
 def test_release_of_a_process_that_would_not_die_keeps_it_reapable(reaper_env):
     """The launcher's own SIGTERM→SIGKILL can fail. Releasing such a pid must
     leave the record on disk — that is the only remaining trace of it."""

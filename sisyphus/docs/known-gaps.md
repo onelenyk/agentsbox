@@ -42,7 +42,9 @@ re-reading and repeating).
 ## Review loop
 
 ### Merging an MR reclaims worktrees out from under a live worker
-**Status:** open, found 2026-08-21.
+**Status:** CLOSED 2026-08-22 — `reclaim_if_settled` now skips while `sessions`
+reports an in-flight worker for the task; cleanup runs again at terminal
+status, so nothing is lost. Mutation-checked.
 `reclaim_if_settled` fires on `mark_merged`/`set_status` and calls
 `cleanup_task` when the task has no open MR left — but it never asks whether a
 worker is still running for that task. Observed on task-a5c0604b: the human
@@ -55,7 +57,13 @@ the timeout path. Fix: `reclaim_if_settled` should skip (or defer) reclaim while
 already applies.
 
 ### Two orphan tests fail in a sandboxed worktree and tax every review
-**Status:** open, found 2026-08-21 (burned three review loops in one evening).
+**Status:** CLOSED 2026-08-22, both halves. The two kill-path tests now probe
+whether a killed child's death is even observable (Seatbelt blocks `ps`, so
+`_zombie` cannot see the corpse) and skip with an honest reason when it is
+not. And both reviewer personas now treat the MR's recorded automated check
+as authoritative over their own sandboxed run — they stop re-running the
+suite when a verdict is recorded, and never block on a local environmental
+failure the record contradicts.
 Reviewers run the suite inside their Seatbelt-sandboxed worktree, where two
 process-inspection tests from tests/test_orphans.py fail for environmental
 reasons (the sandbox constrains ps/sysctl-style process access — same family as
@@ -67,7 +75,8 @@ or teach reviewer personas that the MR's recorded check verdict is authoritative
 over their local run.
 
 ### A task reviewer's verdict never reaches the MR row
-**Status:** open, found 2026-08-21.
+**Status:** CLOSED 2026-08-22 — approve/request_changes now also record the
+verdict on the task's own open MR (a settled MR is left alone).
 When a task's own reviewer writes APPROVED in the thread, `mr.review_status`
 stays `pending` — only the mr-reviewer autopilot's verdict path calls
 `set_review_status`. Observed on mr-9b6852f8: the reviewer approved in the
