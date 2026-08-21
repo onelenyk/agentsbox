@@ -157,6 +157,33 @@ class TestDiskIsReclaimedWhenTheLastMrCloses:
         mergerequests.set_status(mr["id"], "open")
         assert seen == []
 
+    def test_a_live_worker_holds_the_disk(self, db_path, monkeypatch):
+        """Merging while the task's own reviewer is still running must not rip
+        the worktree out from under it — cleanup runs again at terminal status."""
+        from core import mergerequests, sessions
+        seen = []
+        monkeypatch.setattr("core.worker.cleanup_task", lambda tid, deep=False: seen.append(tid))
+        sessions.clear()
+        sessions.mint("t1", "reviewer")
+        try:
+            mr = self._mr(db_path)
+            mergerequests.mark_merged(mr["id"], "abc123")
+            assert seen == []
+        finally:
+            sessions.clear()
+
+    def test_a_dead_worker_does_not_hold_the_disk(self, db_path, monkeypatch):
+        """The guard is about *live* sessions — once revoked, reclaim proceeds."""
+        from core import mergerequests, sessions
+        seen = []
+        monkeypatch.setattr("core.worker.cleanup_task", lambda tid, deep=False: seen.append(tid))
+        sessions.clear()
+        sessions.mint("t1", "reviewer")
+        sessions.revoke_task("t1")
+        mr = self._mr(db_path)
+        mergerequests.mark_merged(mr["id"], "abc123")
+        assert seen == ["t1"]
+
     def test_a_reclaim_failure_never_breaks_the_merge(self, db_path, monkeypatch):
         from core import mergerequests
         def boom(tid, deep=False):

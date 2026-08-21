@@ -495,12 +495,23 @@ def reclaim_if_settled(mr_id: str) -> bool:
 
     Best-effort and safe to call twice: cleanup_task is idempotent, and this
     does nothing while any MR for the task is still open.
+
+    Deliberately skipped while a worker is still running for the task: a human
+    can merge an MR while the task's own reviewer is mid-run, and reclaiming
+    then rips the worktree out from under a live process (observed — the
+    reviewer kept running against a directory that no longer existed and its
+    worker_finished, the event the orchestrator sleeps on, arrived only via
+    the timeout path). Nothing is lost by skipping: cleanup_task runs again
+    when the task itself reaches a terminal status.
     """
     mr = get_mr(mr_id)
     if not mr:
         return False
     task_id = mr.get("task_id", "")
     if not task_id or open_mr_exists(task_id):
+        return False
+    from . import sessions
+    if sessions.list_for_task(task_id):
         return False
     try:
         from .worker import cleanup_task
