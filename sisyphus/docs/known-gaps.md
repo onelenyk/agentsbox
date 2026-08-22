@@ -39,6 +39,33 @@ re-reading and repeating).
 
 ---
 
+## Worker runs
+
+### An engineer that finished its work times out instead of finishing
+**Status:** open, found 2026-08-23 (control task task-60088d8f).
+Twice in one task the engineer completed everything — restatement, edit,
+commit, open_mr — and then never called `finish`; the run sat until the 1800s
+total timeout and the orchestrator, seeing a worker end "without reporting a
+result", spawned a second engineer to redo a finished job. Cost: ~an hour of
+wall clock for a one-line change. The runner CLI (opencode) appears to stall
+after the last tool call rather than emit the finish call. Diagnose via the
+run logs under workspace/runs/<task>/; candidate mitigations: a sharper
+persona ending ("your LAST action is finish — nothing comes after"), or the
+launcher treating open_mr-then-silence as a soft finish.
+
+### The suite a worker runs errors out on SISYPHUS_DB_READONLY
+**Status:** open, found 2026-08-23 (same control task).
+Workers get SISYPHUS_DB_READONLY=1 (rightly — Seatbelt cannot block writes to
+the daemon DB, the flag is the only guard). But it makes every SQLite
+connection read-only including the per-test tmp databases, so an engineer who
+obediently runs `python3 -m pytest -q` sees ~540 errors and has to diagnose
+the env var (this one did, correctly, and shipped anyway). The MR check runs
+unsandboxed with the flag unset and stays authoritative. Tension to resolve:
+telling engineers to unset the flag would reopen the very hole it guards.
+Candidates: persona note "the recorded MR check is the authoritative suite
+run; treat DB_READONLY errors as environmental", or a test-only DB path
+exemption in core/db.py (risky — needs care not to become a bypass).
+
 ## Review loop
 
 ### Merging an MR reclaims worktrees out from under a live worker
