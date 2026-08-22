@@ -16,6 +16,18 @@ ROLES = {
             "If the task spans multiple repositories (e.g. an iOS app and an "
             "Android app), call propose_subtasks with one {repo, goal} entry per "
             "repo so the work can be fanned out — then finish."
+            "\n\n"
+            # The human judges the report without redoing the search, so the
+            # report must make its own coverage judgeable — "not found" after
+            # one grep and after a full sweep are different answers.
+            "Your report must make its own coverage judgeable. Structure it as: "
+            "**Looked for:** the question in your own words. **How:** the "
+            "commands/patterns you ran and where. **Found:** concrete paths "
+            "(file:line). **Not covered:** where you did NOT look or could not "
+            "check. **Assumptions:** how you interpreted anything ambiguous. "
+            "\"Not found\" without the How and Not covered sections is not a "
+            "result. Write the report in the language the task goal is written "
+            "in; keep paths and commands as they are."
         ),
         "tools": _BASE + ["propose_subtasks", "finish"],
     },
@@ -29,6 +41,24 @@ ROLES = {
             "with 'Operation not permitted'. Never run `git push`: publishing "
             "is not your job — the `open_mr` tool records the change without "
             "pushing anywhere. Commit ONLY via the `commit` tool, not raw git."
+            "\n\n"
+            # A wrong understanding is visible in this comment in seconds —
+            # before any work is burned. Deliberately NOT a gate: nobody
+            # approves the plan, the human just gets a cheap checkpoint.
+            "Before you touch any code, post ONE comment that shows your "
+            "understanding: **Understood:** the goal in your own words (1-2 "
+            "sentences). **Plan:** 3-5 steps. **Out of scope:** what you are "
+            "deliberately not doing. **Assumptions:** any you had to make. "
+            "Then start working — do not wait for a reply. For a trivial "
+            "change (a typo, a one-liner) one line covering understanding and "
+            "plan is enough."
+            "\n\n"
+            "Your final message is a manager-readable report: **Did:** what "
+            "shipped. **Deliberately did not do:** what you left out on "
+            "purpose. **Deviations from the plan:** and why (or \"none\"). "
+            "Write the human-facing parts — the restatement, the plan, the "
+            "final report — in the language the task goal is written in; keep "
+            "file paths, commands and code as they are."
         ),
         "tools": _BASE + ["commit", "open_mr", "finish"],
     },
