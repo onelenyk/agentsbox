@@ -94,9 +94,17 @@ def cleanup_task(task_id: str, deep: bool = False) -> None:
         patterns.append(f"{ws}/runs/{task_id}")    # run logs (forensics)
 
     def _salvage(worktree_path: str) -> None:
+        # The runner's own config (opencode.json, .opencode/, .claude/) is
+        # written into every worktree by us — "uncommitted work" it is not.
+        # Without the exclusion every single run got "salvaged", which spammed
+        # a WARNING per worker per day and buried the real salvages it exists
+        # to make visible.
+        from .runner_profiles import workspace_artifacts
+        exclude = ["--"] + [f":(exclude){p}" for p in workspace_artifacts()]
         try:
             r = subprocess.run(
-                ["git", "-C", worktree_path, "status", "--porcelain", "--untracked-files=normal"],
+                ["git", "-C", worktree_path, "status", "--porcelain",
+                 "--untracked-files=normal", *exclude],
                 capture_output=True, text=True, timeout=30,
             )
             if r.returncode != 0 or not r.stdout.strip():
@@ -106,7 +114,7 @@ def cleanup_task(task_id: str, deep: bool = False) -> None:
                 capture_output=True, text=True, timeout=30,
             )
             diff = subprocess.run(
-                ["git", "-C", worktree_path, "diff", "HEAD"],
+                ["git", "-C", worktree_path, "diff", "HEAD", *exclude],
                 capture_output=True, text=True, timeout=60,
             )
             if diff.returncode != 0 or not diff.stdout.strip():
