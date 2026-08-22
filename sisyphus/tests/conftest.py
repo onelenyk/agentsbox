@@ -15,6 +15,16 @@ def pytest_configure(config):
     os.makedirs(os.environ["WORKSPACE_ROOT"], exist_ok=True)
 
 
+def pytest_collection_modifyitems(config, items):
+    """Stamp every test with its tier marker from tests/tiers.py — one map
+    instead of 58 files carrying their own pytestmark. An unclassified module
+    raises, so a new test file must declare what kind of test it is."""
+    from tests.tiers import tier_for
+    for item in items:
+        module = os.path.basename(str(item.fspath))[:-3]
+        item.add_marker(getattr(pytest.mark, tier_for(module)))
+
+
 @pytest.fixture
 def db_path(tmp_path):
     db = tmp_path / "test.db"
