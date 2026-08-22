@@ -64,7 +64,8 @@ def _enrich_sessions(raw_sessions):
 async def startup():
     global _started
     if _started:
-        logger.warning("startup() fired again — skipping (avoids a duplicate dispatch loop)")
+        # Expected under uvicorn reload/multiple mounts — a handled case, not a warning.
+        logger.info("startup() fired again — skipping (avoids a duplicate dispatch loop)")
         return
     _started = True
 

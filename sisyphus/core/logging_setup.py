@@ -53,4 +53,33 @@ def setup_logging() -> Path:
         handler.setFormatter(logging.Formatter(
             "%(asctime)s %(levelname)s %(name)s: %(message)s"))
         root_logger.addHandler(handler)
+    logging.getLogger("uvicorn.access").addFilter(drop_poll_access)
     return log_file
+
+
+# The UI polls these on a timer (htmx `every Ns`), so a healthy idle daemon
+# writes thousands of identical 200 lines a day — 37% of daemon.out.log when
+# measured — and the access log stops being readable as a record of events.
+# Only successful GETs to the polled views are dropped; errors, writes, and
+# every other path still log.
+_POLL_PATHS = (
+    "/api/inbox/view", "/api/dashboard/view", "/api/workers/live",
+    "/api/tasks/list", "/api/v1/health", "/api/plans/",
+)
+
+
+def drop_poll_access(record) -> bool:
+    """stdlib-filter predicate for the ``uvicorn.access`` logger.
+
+    Access records carry args ``(client, method, path, http_version, status)``;
+    anything shaped differently is kept — when in doubt, log."""
+    try:
+        method, path, status = record.args[1], record.args[2], record.args[4]
+    except Exception:  # noqa: BLE001
+        return True
+    if method != "GET" or status != 200:
+        return True
+    p = str(path).split("?", 1)[0]
+    if p.startswith("/api/tasks/") and p.endswith("/detail"):
+        return False                       # task_detail polls every 3s while active
+    return not any(p == pp or (pp.endswith("/") and p.startswith(pp)) for pp in _POLL_PATHS)
