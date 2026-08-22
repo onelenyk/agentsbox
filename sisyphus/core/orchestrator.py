@@ -174,26 +174,47 @@ def orchestrator_agent_name() -> str:
     return orchestrators[0]["name"] if orchestrators else "orchestrator"
 
 
+DECIDER_ATTEMPTS = 3
+
+
 async def _decide(task: dict, thread_text: str) -> Decision:
     """Produce one decision by running the orchestrator AGENT (a local CLI
     session) — no direct model HTTP. The agent calls exactly one decision tool,
-    which records the choice; we read it back here."""
+    which records the choice; we read it back here.
+
+    An empty or malformed run is retried before anything is parked or failed:
+    one flaky model response used to send the task straight to `waiting` (four
+    times in the ledger), where it sat until a human noticed — retrying is
+    cheap next to that. Only exhausted retries reach the old fallbacks."""
     from .worker import spawn_decider
 
-    raw = await spawn_decider(task["id"], orchestrator_agent_name(), thread_text)
-    if not raw:
-        # The decider produced no decision (crash/timeout/misbehaviour). Park via
-        # ask_human rather than fail — a human reply re-triggers a fresh pass.
-        return Decision(
-            action="ask_human",
-            question=("I couldn't produce a next-step decision (the orchestrator "
-                      "agent returned nothing). Check the runtime, then reply to resume."),
-            why="decider produced no decision",
-        )
-    try:
-        return Decision(**raw)
-    except ValidationError as exc:
-        return Decision(action="fail", reason=f"invalid decision: {exc}", why="malformed decision from the agent")
+    malformed: Optional[str] = None
+    for attempt in range(1, DECIDER_ATTEMPTS + 1):
+        raw = await spawn_decider(task["id"], orchestrator_agent_name(), thread_text)
+        if not raw:
+            malformed = None
+            logger.warning("decider attempt %d/%d for %s produced no decision",
+                           attempt, DECIDER_ATTEMPTS, task["id"])
+            continue
+        try:
+            return Decision(**raw)
+        except ValidationError as exc:
+            malformed = str(exc)
+            logger.warning("decider attempt %d/%d for %s was malformed: %s",
+                           attempt, DECIDER_ATTEMPTS, task["id"], exc)
+
+    if malformed is not None:
+        return Decision(action="fail", reason=f"invalid decision: {malformed}",
+                        why="malformed decision from the agent")
+    # Every attempt came back empty (crash/timeout/misbehaviour). Park via
+    # ask_human rather than fail — a human reply re-triggers a fresh pass.
+    return Decision(
+        action="ask_human",
+        question=(f"I couldn't produce a next-step decision (the orchestrator "
+                  f"agent returned nothing, {DECIDER_ATTEMPTS} attempts). "
+                  "Check the runtime, then reply to resume."),
+        why="decider produced no decision",
+    )
 
 
 def _pass_count(task_id: str) -> int:

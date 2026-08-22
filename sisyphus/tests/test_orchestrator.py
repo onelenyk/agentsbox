@@ -712,11 +712,49 @@ class TestDecideViaAgent:
     @pytest.mark.asyncio
     async def test_decide_falls_back_to_ask_human_when_no_decision(self, db_path):
         from unittest.mock import AsyncMock
-        from core.orchestrator import _decide
+        from core.orchestrator import DECIDER_ATTEMPTS, _decide
         task = store.create_task("g", repo="sisyphus")
-        with patch("core.worker.spawn_decider", AsyncMock(return_value=None)):
+        mock = AsyncMock(return_value=None)
+        with patch("core.worker.spawn_decider", mock):
             d = await _decide(task, "thread")
         assert d.action == "ask_human"
+        assert mock.await_count == DECIDER_ATTEMPTS, \
+            "an empty decider run must be retried before parking the task"
+
+    @pytest.mark.asyncio
+    async def test_one_empty_run_is_retried_not_parked(self, db_path):
+        """The failure this guards: a single flaky model response sent the task
+        straight to waiting, where it sat for days until a human noticed."""
+        from unittest.mock import AsyncMock
+        from core.orchestrator import _decide
+        task = store.create_task("g", repo="sisyphus")
+        mock = AsyncMock(side_effect=[None, {"action": "note", "why": "recovered"}])
+        with patch("core.worker.spawn_decider", mock):
+            d = await _decide(task, "thread")
+        assert d.action == "note" and d.why == "recovered"
+        assert mock.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_malformed_then_valid_recovers(self, db_path):
+        from unittest.mock import AsyncMock
+        from core.orchestrator import _decide
+        task = store.create_task("g", repo="sisyphus")
+        mock = AsyncMock(side_effect=[{"action": "nonsense-action"},
+                                      {"action": "note", "why": "ok now"}])
+        with patch("core.worker.spawn_decider", mock):
+            d = await _decide(task, "thread")
+        assert d.action == "note" and d.why == "ok now"
+
+    @pytest.mark.asyncio
+    async def test_persistently_malformed_still_fails(self, db_path):
+        from unittest.mock import AsyncMock
+        from core.orchestrator import DECIDER_ATTEMPTS, _decide
+        task = store.create_task("g", repo="sisyphus")
+        mock = AsyncMock(return_value={"action": "nonsense-action"})
+        with patch("core.worker.spawn_decider", mock):
+            d = await _decide(task, "thread")
+        assert d.action == "fail"
+        assert mock.await_count == DECIDER_ATTEMPTS
 
     def test_no_raw_model_http_in_orchestrator(self):
         import inspect
