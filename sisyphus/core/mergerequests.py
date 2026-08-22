@@ -76,12 +76,30 @@ def land_branch(mr: dict) -> dict:
     return {"ok": True, "branch": src, "repo": mr["source_path"]}
 
 
+def _drop_merged_source(real: str, src: str, target: str) -> None:
+    """Delete the now-merged sisyphus/<task> branch from the user's repo.
+
+    Merged branches used to pile up (four of them within a week), and the
+    morning mr-reviewer re-reviewed every one of them daily. Deletion is gated
+    on proof: only when *target* actually contains the branch tip
+    (merge-base --is-ancestor) — `branch -d` alone checks HEAD, which is the
+    wrong branch whenever the merge went into a non-checked-out target. Best
+    effort: a failed delete never fails the merge that just happened."""
+    if _run(["git", "-C", real, "rev-parse", "--verify", "--quiet", src]).returncode != 0:
+        return                                     # never landed here — nothing to drop
+    if _run(["git", "-C", real, "merge-base", "--is-ancestor", src, target]).returncode != 0:
+        return                                     # target does not contain it — keep
+    _run(["git", "-C", real, "branch", "-D", src])
+
+
 def merge_branch(mr: dict, target: str) -> dict:
     """Merge the MR's source into *target* in the user's real repo, producing a
     merge commit. Guarded and reversible: refuses to merge over uncommitted work
     on the current branch; when the target isn't checked out, merges via a
     temporary worktree so the user's working tree is never disturbed; aborts on
-    conflict. Never forces, never deletes. Returns {ok, sha, target} or error."""
+    conflict. Never forces; the only deletion is the merged source branch
+    itself, gated on proof that the target contains it. Returns
+    {ok, sha, target} or error."""
     real, src, bare = mr["source_path"], mr["source_branch"], mr["bare_path"]
     msg = f"Merge {src} into {target} (Sisyphus MR {mr['id']})"
 
@@ -99,6 +117,7 @@ def merge_branch(mr: dict, target: str) -> dict:
             _run(["git", "-C", real, "merge", "--abort"])
             return {"ok": False, "error": "merge conflict — resolve manually"}
         sha = _run(["git", "-C", real, "rev-parse", "HEAD"]).stdout.strip()
+        _drop_merged_source(real, src, target)
         return {"ok": True, "sha": sha, "target": target}
 
     # target not checked out — merge in a throwaway worktree on that branch, so
@@ -113,6 +132,7 @@ def merge_branch(mr: dict, target: str) -> dict:
             _run(["git", "-C", wt, "merge", "--abort"])
             return {"ok": False, "error": "merge conflict — resolve manually"}
         sha = _run(["git", "-C", wt, "rev-parse", "HEAD"]).stdout.strip()
+        _drop_merged_source(real, src, target)
         return {"ok": True, "sha": sha, "target": target}
     finally:
         _run(["git", "-C", real, "worktree", "remove", "--force", wt])
@@ -185,6 +205,7 @@ def merge_resolving(mr: dict, target: str, resolve_fn) -> dict:
         if c.returncode != 0:
             return {"ok": False, "error": f"commit failed: {c.stderr.strip()[:120]}"}
         sha = _run(["git", "-C", wt, "rev-parse", "HEAD"]).stdout.strip()
+        _drop_merged_source(real, src, target)
         return {"ok": True, "sha": sha, "target": target, "resolved": resolved_files}
     finally:
         # Only tear down a worktree we created — never the user's own checkout.
