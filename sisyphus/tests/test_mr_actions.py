@@ -73,6 +73,30 @@ class TestGitActions:
         assert res["ok"]
         assert (tmp_path / "real" / "feature.py").exists()   # merged into checked-out main
 
+    def test_merge_drops_the_now_merged_source_branch(self, db_path, tmp_path):
+        """Merged sisyphus/task-* branches piled up in the user's repo and the
+        morning mr-reviewer re-reviewed every one of them daily."""
+        mr, real, bare = _mr(db_path, tmp_path, target="main")
+        mergerequests.land_branch(mr)     # the branch exists in the real repo
+        assert mergerequests.merge_branch(mr, "main")["ok"]
+        branches = _run("git", "-C", real, "branch", "--list", "sisyphus/task-x").stdout
+        assert "sisyphus/task-x" not in branches
+
+    def test_merge_via_worktree_also_drops_the_source_branch(self, db_path, tmp_path):
+        mr, real, bare = _mr(db_path, tmp_path, target="develop")
+        assert mergerequests.merge_branch(mr, "develop")["ok"]
+        branches = _run("git", "-C", real, "branch", "--list", "sisyphus/task-x").stdout
+        assert "sisyphus/task-x" not in branches
+
+    def test_an_unmerged_branch_is_never_deleted(self, db_path, tmp_path):
+        """-d is the whole guard: a branch whose work the target does not
+        contain must survive any stray call."""
+        mr, real, bare = _mr(db_path, tmp_path, target="main")
+        mergerequests.land_branch(mr)     # branch exists, but nothing merged it
+        mergerequests._drop_merged_source(real, "sisyphus/task-x", "main")
+        branches = _run("git", "-C", real, "branch", "--list", "sisyphus/task-x").stdout
+        assert "sisyphus/task-x" in branches
+
 
 class TestRoutes:
     def test_mr_view_renders(self, db_path, tmp_path):
