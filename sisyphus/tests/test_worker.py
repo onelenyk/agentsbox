@@ -344,6 +344,39 @@ class TestCleanupSalvage:
         content = patch_file.read_text()
         assert "modified" in content
 
+    def test_runner_config_alone_is_not_salvaged(self, db_path, tmp_path, monkeypatch):
+        """opencode.json / .opencode / .claude are written into every worktree
+        by the launcher itself — a tree dirty with ONLY those has no work to
+        salvage. Every real run got 'salvaged' before this, one WARNING per
+        worker per day, burying the true salvages."""
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+        task = store.create_task("runner config only")
+        wt = self._make_worktree(tmp_path, task["id"], "reviewer", dirty=False)
+        (wt / "opencode.json").write_text("{}")
+        (wt / ".opencode").mkdir()
+        (wt / ".opencode" / "agent.md").write_text("persona")
+        (wt / ".claude").mkdir()
+        (wt / ".claude" / "settings.json").write_text("{}")
+
+        cleanup_task(task["id"])
+
+        attachments_dir = tmp_path / "tasks" / task["id"] / "attachments"
+        assert not attachments_dir.exists() or not list(attachments_dir.iterdir())
+
+    def test_real_work_is_still_salvaged_next_to_runner_config(self, db_path, tmp_path, monkeypatch):
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+        task = store.create_task("real work plus config")
+        wt = self._make_worktree(tmp_path, task["id"], "engineer", dirty=True)
+        (wt / "opencode.json").write_text("{}")
+
+        cleanup_task(task["id"])
+
+        patch_file = tmp_path / "tasks" / task["id"] / "attachments" / f"salvaged-{wt.name}.patch"
+        assert patch_file.is_file()
+        content = patch_file.read_text()
+        assert "modified" in content
+        assert "opencode.json" not in content
+
     def test_clean_worktree_produces_no_attachment(self, db_path, tmp_path, monkeypatch):
         monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
         task = store.create_task("test clean")
