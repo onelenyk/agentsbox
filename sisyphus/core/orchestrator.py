@@ -13,6 +13,7 @@ as the next worker_finished event.
 import asyncio
 import logging
 import threading
+from collections import deque
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Literal, Optional
 
@@ -65,10 +66,10 @@ def _get_queue() -> "asyncio.Queue[Event]":
 
 
 def reset_queue() -> None:
-    """Test helper — drop the queue/semaphore so fresh ones bind to the current loop."""
-    global _queue, _worker_sem, _loop, _loop_thread
+    """Test helper — drop the queue/gate so fresh ones bind to the current loop."""
+    global _queue, _worker_gate, _loop, _loop_thread
     _queue = None
-    _worker_sem = None
+    _worker_gate = None
     _loop = None
     _loop_thread = None
 
@@ -76,16 +77,62 @@ def reset_queue() -> None:
 # Global cap on concurrently-running worker subprocesses. Per-task double-spawn
 # is already prevented by _worker_in_flight; this bounds total parallelism so a
 # fan-out (or many tasks) can't launch unbounded opencode processes at once.
-_worker_sem: Optional["asyncio.Semaphore"] = None
+class _PriorityGate:
+    """A semaphore that wakes review waiters before everyone else.
+
+    With two slots and a stream of engineers, a queued reviewer used to wait
+    ~10 minutes behind long engineering runs — the cheap, read-only step that
+    unblocks a whole task sat at the back of a FIFO. Same total cap as before;
+    only the wake order changes. Single-loop asyncio: no locking needed."""
+
+    def __init__(self, n: int):
+        self._free = max(1, n)
+        self._waiters = {True: deque(), False: deque()}   # high? → futures
+
+    async def acquire(self, high: bool = False) -> None:
+        if self._free > 0 and not self._waiters[True] and not self._waiters[False]:
+            self._free -= 1
+            return
+        fut = asyncio.get_running_loop().create_future()
+        self._waiters[high].append(fut)
+        try:
+            await fut
+        except asyncio.CancelledError:
+            if fut.done() and not fut.cancelled():
+                self.release()                      # granted, but we cannot use it
+            else:
+                try:
+                    self._waiters[high].remove(fut)
+                except ValueError:
+                    pass
+            raise
+
+    def release(self) -> None:
+        for high in (True, False):
+            q = self._waiters[high]
+            while q:
+                fut = q.popleft()
+                if not fut.done():
+                    fut.set_result(None)            # hand the slot over directly
+                    return
+        self._free += 1
 
 
-def _get_worker_sem() -> "asyncio.Semaphore":
-    global _worker_sem
-    if _worker_sem is None:
+def _is_review_role(role: str) -> bool:
+    """Review-ish workers ride the fast lane; everything else queues normally."""
+    return "review" in (role or "").lower()
+
+
+_worker_gate: Optional[_PriorityGate] = None
+
+
+def _get_worker_gate() -> _PriorityGate:
+    global _worker_gate
+    if _worker_gate is None:
         from .config import get_config
         n = int(get_config("max_concurrent_workers", 2) or 2)
-        _worker_sem = asyncio.Semaphore(max(1, n))
-    return _worker_sem
+        _worker_gate = _PriorityGate(max(1, n))
+    return _worker_gate
 
 
 def emit(task_id: str, event_type: str) -> None:
@@ -527,8 +574,12 @@ async def _spawn_worker_safe(task_id: str, role: str, instruction: str, repo_nam
         # worker_queued as in flight.
         store.post_message(task_id, "system", kind="worker_queued",
                            text=f"{role} queued — waiting for a free worker slot; do not spawn again")
-        async with _get_worker_sem():
+        gate = _get_worker_gate()
+        await gate.acquire(high=_is_review_role(role))
+        try:
             await spawn_worker(task_id, role, instruction, repo_name=repo_name)
+        finally:
+            gate.release()
     except Exception as exc:  # noqa: BLE001
         logger.exception("spawn_worker failed for task %s (role=%s)", task_id, role)
         store.post_message(task_id, "system", kind="worker_finished",
