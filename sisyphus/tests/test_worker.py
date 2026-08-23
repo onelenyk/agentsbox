@@ -468,3 +468,47 @@ class TestWorkerEndDiagnosis:
         from core.worker import worker_end_message
         msg = worker_end_message("engineer", self._result(status="cancelled"))
         assert "not a" in msg and "failure" in msg
+
+
+class TestDeliveredWorkGuard:
+    """A run that opened its MR and then stalled must not read as lost work —
+    the orchestrator respawned a second engineer to redo a finished one-line
+    change (task-60088d8f) off exactly that wording."""
+
+    class _R:
+        status = "timeout"
+        error = ""
+        raw_stdout = "output"
+        raw_stderr = ""
+        usage = {"steps": 5}
+
+    def _task_with_run(self, mr_in_run: bool, mr_before_run: bool = False):
+        from core import store
+        task = store.create_task("guard", repo="sisyphus")
+        if mr_before_run:
+            store.post_message(task["id"], "system", kind="worker_started", text="run 1")
+            store.post_message(task["id"], "engineer", kind="mr", text="old MR")
+        store.post_message(task["id"], "system", kind="worker_started", text="run 2")
+        if mr_in_run:
+            store.post_message(task["id"], "engineer", kind="mr", text="the MR")
+        return task
+
+    def test_timeout_after_open_mr_says_work_is_delivered(self, db_path):
+        from core.worker import worker_end_message
+        task = self._task_with_run(mr_in_run=True)
+        msg = worker_end_message("engineer", self._R(), task_id=task["id"])
+        assert "Do NOT spawn another engineer" in msg
+
+    def test_timeout_without_an_mr_stays_a_plain_failure(self, db_path):
+        from core.worker import worker_end_message
+        task = self._task_with_run(mr_in_run=False)
+        msg = worker_end_message("engineer", self._R(), task_id=task["id"])
+        assert "Do NOT spawn another engineer" not in msg
+
+    def test_an_mr_from_an_earlier_run_does_not_count(self, db_path):
+        """A reviewer sent the old MR back; the fresh run that then failed did
+        not deliver anything — claiming it did would strand the fix."""
+        from core.worker import worker_end_message
+        task = self._task_with_run(mr_in_run=False, mr_before_run=True)
+        msg = worker_end_message("engineer", self._R(), task_id=task["id"])
+        assert "Do NOT spawn another engineer" not in msg
