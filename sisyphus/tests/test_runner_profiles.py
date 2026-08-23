@@ -144,7 +144,9 @@ class TestEnv:
 
     def test_unset_key_env_is_not_exported(self, monkeypatch):
         monkeypatch.delenv("ABSENT_KEY", raising=False)
-        assert rp.build_env("opencode", {"api_key_env": "ABSENT_KEY"}) == {}
+        env = rp.build_env("opencode", {"api_key_env": "ABSENT_KEY"})
+        # No credential material appears; the surface-trimming switches always do.
+        assert not any("KEY" in k or "URL" in k for k in env)
 
 
 class TestWriteMcpConfig:
@@ -247,3 +249,16 @@ class TestWorkspaceArtifacts:
 
     def test_unknown_type_has_no_artifacts(self):
         assert rp.workspace_artifacts("nope") == []
+
+
+def test_opencode_env_trims_the_users_global_tool_surface():
+    """A live run's roster showed the user's global plugins and skills merged
+    into a worker (call_omo_agent, figma_*, playwright_* — task-60088d8f log).
+    The opencode overlay must carry the CLI's own kill switches for the plugin
+    and skill share of that; claude-cli needs none (--strict-mcp-config)."""
+    from core.runner_profiles import build_env
+    env = build_env("opencode", {})
+    assert env.get("OPENCODE_DISABLE_DEFAULT_PLUGINS") == "1"
+    assert env.get("OPENCODE_DISABLE_EXTERNAL_SKILLS") == "1"
+    assert env.get("OPENCODE_DISABLE_CLAUDE_CODE_SKILLS") == "1"
+    assert "OPENCODE_DISABLE_DEFAULT_PLUGINS" not in build_env("claude-cli", {})

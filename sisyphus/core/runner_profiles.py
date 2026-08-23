@@ -380,4 +380,13 @@ def build_env(rtype: str, runner: dict) -> dict:
         overlay["OPENROUTER_API_KEY"] = key
     if base_url:
         overlay["OPENROUTER_BASE_URL"] = base_url
+    # Trim the tool surface the user's own machine leaks into a worker: a live
+    # run's roster showed figma, playwright, macos-use and the oh-my-openagent
+    # plugin suite — the user's GLOBAL opencode config merges into every run.
+    # These switches come from opencode's own help text and kill the plugin and
+    # external-skill share of that; globally configured MCP servers are a
+    # separate leak these do not close (docs/known-gaps.md).
+    overlay["OPENCODE_DISABLE_DEFAULT_PLUGINS"] = "1"
+    overlay["OPENCODE_DISABLE_EXTERNAL_SKILLS"] = "1"
+    overlay["OPENCODE_DISABLE_CLAUDE_CODE_SKILLS"] = "1"
     return overlay
