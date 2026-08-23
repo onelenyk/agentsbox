@@ -10,6 +10,8 @@ Speaks MCP JSON-RPC 2.0 over HTTP: one POST endpoint, one JSON response per
 request (notifications get 202). Mounted in the daemon where the DB is writable.
 """
 import logging
+import threading
+from typing import Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
@@ -136,8 +138,21 @@ def _open_mr(session, title="", description="", **_):
         text = f"{title}: {result.get('url', '')}".strip(": ")
         store.post_message(session["task_id"], session["role"], kind="mr", text=text)
 
+    _spawn_review_hook(session["task_id"])
+
+    return {"ok": True, "branch": result.get("branch")}
+
+
+def _review_hook(task_id: str) -> None:
+    """Check the MR and stand up its review task. MUST NOT run on the MCP
+    request path: ensure_review_task runs the repo's own check command — 150s+
+    of pytest on this repo — and an MCP client waits ~60s before declaring the
+    server dead. When that happened the runner dropped every sisyphus tool,
+    the engineer retried open_mr 160 times against an empty roster, burned to
+    the 1800s total timeout, and the orchestrator respawned a second engineer
+    to redo finished work (task-60088d8f, 2026-08-23)."""
     try:
-        mr = mergerequests.latest_for_task(session["task_id"])
+        mr = mergerequests.latest_for_task(task_id)
         if mr:
             task = reviews.ensure_review_task(mr)
             if task:
@@ -147,9 +162,21 @@ def _open_mr(session, title="", description="", **_):
                 from core.orchestrator import emit
                 emit(task["id"], "created")
     except Exception:
-        logger.warning("review hook failed for open_mr on task %s", session["task_id"], exc_info=True)
+        logger.warning("review hook failed for open_mr on task %s", task_id, exc_info=True)
 
-    return {"ok": True, "branch": result.get("branch")}
+
+_last_review_hook: "Optional[threading.Thread]" = None
+
+
+def _spawn_review_hook(task_id: str) -> "threading.Thread":
+    """Run _review_hook on a daemon thread; open_mr's reply returns at once.
+    The thread handle is kept in _last_review_hook so a test can join it."""
+    global _last_review_hook
+    t = threading.Thread(target=_review_hook, args=(task_id,),
+                         daemon=True, name=f"review-hook-{task_id}")
+    _last_review_hook = t
+    t.start()
+    return t
 
 
 def _starts_with_verdict(text: str, verdict: str) -> bool:

@@ -655,7 +655,10 @@ def test_open_mr_fires_review_hook(db_path):
     with patch("core.providers.publish_change", side_effect=_pub), \
          patch("core.orchestrator.emit", side_effect=lambda t, e: emitted.append((t, e))):
         ok = _call(c, token, "open_mr", {"title": "Review Hook Test"})
-    assert ok["result"]["isError"] is False
+        assert ok["result"]["isError"] is False
+        # The hook runs off the request path now — wait for it before asserting.
+        import web.agent_mcp as am
+        am._last_review_hook.join(timeout=10)
 
     mr = mergerequests.get_mr(published_mr_id)
     assert mr["review_status"] == "pending"
@@ -739,3 +742,55 @@ def test_own_reviewer_verdict_leaves_a_settled_mr_alone(db_path):
     token = sessions.mint(task["id"], "reviewer")
     _call(_client(), token, "request_changes", {"reason": "too late"})
     assert mergerequests.get_mr(mr["id"])["review_status"] == "approved"
+
+
+def test_open_mr_replies_before_a_slow_check_finishes(db_path):
+    """The failure this guards (task-60088d8f): ensure_review_task ran a 150s
+    check INSIDE the open_mr MCP request; the client timed out at ~60s, dropped
+    the server, and the engineer retried open_mr 160 times against an empty
+    roster until the total timeout. The reply must not wait for the check."""
+    import threading
+    import time
+
+    import web.agent_mcp as am
+    from core import mergerequests, sessions
+
+    _grant("engineer", "commit", "open_mr")
+    c = _client()
+    task = store.create_task("slow check", repo="test-repo")
+    sessions.clear()
+    token = sessions.mint(task["id"], "engineer", worktree="/tmp/wt")
+
+    def _pub(session, title, description):
+        mergerequests.init_mr_table()
+        mr = mergerequests.create_mr(
+            task_id=session["task_id"], repo="test-repo",
+            source_branch="sisyphus/task-slow", target_branch="main",
+            title=title, bare_path="/tmp/bare",
+            base_branch="main", source_path="/tmp/src")
+        return {"ok": True, "platform": "local", "branch": "sisyphus/task-slow",
+                "stat": " f | 1 +", "patch_file": "change.patch", "mr_id": mr["id"]}
+
+    check_started = threading.Event()
+    check_release = threading.Event()
+
+    def _slow_review_task(mr):
+        check_started.set()
+        assert check_release.wait(timeout=10), "reply never arrived — hook is synchronous again"
+        return None
+
+    with patch("core.git_ops.is_git_repo", return_value=True), \
+         patch("core.git_ops.commit_all", return_value="b" * 40):
+        _call(c, token, "commit", {"message": "x"})
+
+    with patch("core.providers.publish_change", side_effect=_pub), \
+         patch("core.reviews.ensure_review_task", side_effect=_slow_review_task):
+        started = time.monotonic()
+        ok = _call(c, token, "open_mr", {"title": "Slow"})
+        elapsed = time.monotonic() - started
+        # The reply is in hand while the "check" is still blocked.
+        assert ok["result"]["isError"] is False
+        assert check_started.wait(timeout=10)
+        check_release.set()
+        am._last_review_hook.join(timeout=10)
+    assert elapsed < 5, f"open_mr reply waited on the check ({elapsed:.1f}s)"
