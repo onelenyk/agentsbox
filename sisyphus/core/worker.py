@@ -286,7 +286,22 @@ def was_stopped_by_a_human(thread: list) -> bool:
     return False
 
 
-def worker_end_message(role: str, result) -> str:
+def _published_mr_in_current_run(task_id: str) -> bool:
+    """Did the run that is ending now get as far as opening a merge request?
+    Only the segment after the LAST worker_started counts — an MR from an
+    earlier iteration (e.g. one a reviewer sent back for changes) must not make
+    a fresh failed run look like delivered work."""
+    thread = store.get_thread(task_id)
+    last_start = None
+    for i, m in enumerate(thread):
+        if m["kind"] == "worker_started":
+            last_start = i
+    if last_start is None:
+        return False
+    return any(m["kind"] == "mr" for m in thread[last_start:])
+
+
+def worker_end_message(role: str, result, task_id: str = "") -> str:
     """What goes on the thread when a worker stops without reporting a result.
 
     The orchestrator reads exactly this line to choose the next action, so the
@@ -301,8 +316,18 @@ def worker_end_message(role: str, result) -> str:
                 f"failure and nothing is known to be wrong with the work — the "
                 f"instruction was interrupted part-way. Do not fail the task for "
                 f"this; continue from the human's next instruction.")
-    return (f"{role} ended without reporting a result "
-            f"(status={getattr(result, 'status', '?')}): {_diagnose(result)}")
+    msg = (f"{role} ended without reporting a result "
+           f"(status={getattr(result, 'status', '?')}): {_diagnose(result)}")
+    if task_id and _published_mr_in_current_run(task_id):
+        # The exact failure this guards (task-60088d8f): an engineer opened the
+        # MR, stalled on dead tooling, timed out — and the orchestrator, reading
+        # "ended without a result", spawned a second engineer to redo a finished
+        # job. The next line is behaviour, not prose: the decider reads it.
+        msg += (" HOWEVER: a merge request was already opened during this run — "
+                "the work is delivered, not lost. Do NOT spawn another engineer "
+                "to redo it; the next step is a reviewer (or done, if one has "
+                "already approved).")
+    return msg
 
 
 def _diagnose(result) -> str:
@@ -508,7 +533,7 @@ async def spawn_worker(
     if sessions.resolve(token) is not None:
         sessions.revoke(token)
         store.post_message(task_id, author="system", kind="worker_finished",
-                           text=worker_end_message(role, result))
+                           text=worker_end_message(role, result, task_id))
         # Deferred import: core.orchestrator imports spawn_worker from this
         # module at its top level, so importing it back here at module load
         # time would be circular. By call time both modules are fully loaded.
