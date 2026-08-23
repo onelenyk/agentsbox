@@ -25,7 +25,7 @@ openrouter:
   base_url: https://openrouter.ai/api/v1
 repos:
 - branch: main
-  check: cd sisyphus && env -u SISYPHUS_DB_READONLY python3 -m pytest -q
+  check: cd sisyphus && python3 -m pytest -q
   name: sisyphus
   source: /Users/lenyk/workproject/agentsbox
 task_budget_usd: 5.0

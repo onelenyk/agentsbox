@@ -314,7 +314,8 @@ def _run(repo_name: str, command: str, worktree_path: str, timeout: int):
     env["PATH"] = path_with_install_dirs(env.get("PATH", ""))
     # Setting up a worktree has no business reaching the daemon's own database
     # (same stance as core.verify's check runs).
-    env["SISYPHUS_DB_READONLY"] = "1"
+    from .db import DB_PATH as _daemon_db
+    env["SISYPHUS_DB_PROTECT"] = _daemon_db
 
     try:
         proc = subprocess.run(command, shell=True, cwd=worktree_path, env=env,

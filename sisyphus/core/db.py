@@ -10,8 +10,31 @@ def get_readonly_conn() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     return conn
 
-def get_conn():
+def _write_protected() -> bool:
+    """Whether THIS process may write the database it is pointed at.
+
+    Two guards, an accident fence in both cases (Seatbelt cannot cover the DB):
+      SISYPHUS_DB_READONLY=1   blanket — every connection is read-only.
+      SISYPHUS_DB_PROTECT=<p>  path-scoped — read-only only when DB_PATH IS
+                               that file. This is what workers and checks get:
+                               it keeps them off the daemon's database while a
+                               test suite they run stays free to write its own
+                               per-test tmp databases (the blanket flag made
+                               every such suite fail with ~540 sqlite errors,
+                               which each engineer then had to re-diagnose).
+    """
     if os.environ.get("SISYPHUS_DB_READONLY") == "1":
+        return True
+    protect = (os.environ.get("SISYPHUS_DB_PROTECT") or "").strip()
+    if not protect:
+        return False
+    try:
+        return os.path.realpath(DB_PATH) == os.path.realpath(protect)
+    except OSError:
+        return True   # cannot tell — protect
+
+def get_conn():
+    if _write_protected():
         return get_readonly_conn()
     db_dir = os.path.dirname(DB_PATH)
     if db_dir:
@@ -25,8 +48,8 @@ def get_conn():
     return conn
 
 def init_db():
-    if os.environ.get("SISYPHUS_DB_READONLY") == "1":
-        return  # Read-only mode — skip DB initialization
+    if _write_protected():
+        return  # write-protected — skip DB initialization
     conn = get_conn()
     from .store import init_store
     init_store(conn)

@@ -54,3 +54,80 @@ class TestWorkerEnv:
         with patch("core.config.get_config", return_value="not-a-mapping"):
             assert config.worker_env(base={}) == {}
             assert config.worker_env_rejected() == []
+
+
+class TestDbWriteProtect:
+    """SISYPHUS_DB_PROTECT guards exactly one file — the daemon's database —
+    instead of making every SQLite connection read-only. The blanket flag made
+    a worker's own test run fail with ~540 'unable to open database' errors
+    on databases the daemon has never seen."""
+
+    def _fresh_db(self, tmp_path, monkeypatch, name):
+        import core.db as db
+        p = tmp_path / name
+        monkeypatch.setattr(db, "DB_PATH", str(p))
+        return db, str(p)
+
+    def test_other_databases_stay_writable_under_protect(self, tmp_path, monkeypatch):
+        db, mine = self._fresh_db(tmp_path, monkeypatch, "suite-tmp.db")
+        monkeypatch.setenv("SISYPHUS_DB_PROTECT", str(tmp_path / "daemon.db"))
+        monkeypatch.delenv("SISYPHUS_DB_READONLY", raising=False)
+        conn = db.get_conn()
+        conn.execute("CREATE TABLE t (x)")     # would raise on a ro connection
+        conn.close()
+
+    def test_the_protected_database_is_read_only(self, tmp_path, monkeypatch):
+        import sqlite3
+        import pytest as _pytest
+        db, mine = self._fresh_db(tmp_path, monkeypatch, "daemon.db")
+        sqlite3.connect(mine).close()          # the file must exist for mode=ro
+        monkeypatch.setenv("SISYPHUS_DB_PROTECT", mine)
+        monkeypatch.delenv("SISYPHUS_DB_READONLY", raising=False)
+        conn = db.get_conn()
+        with _pytest.raises(sqlite3.OperationalError):
+            conn.execute("CREATE TABLE t (x)")
+        conn.close()
+
+    def test_blanket_readonly_still_blankets(self, tmp_path, monkeypatch):
+        import sqlite3
+        import pytest as _pytest
+        db, mine = self._fresh_db(tmp_path, monkeypatch, "any.db")
+        sqlite3.connect(mine).close()
+        monkeypatch.setenv("SISYPHUS_DB_READONLY", "1")
+        monkeypatch.delenv("SISYPHUS_DB_PROTECT", raising=False)
+        conn = db.get_conn()
+        with _pytest.raises(sqlite3.OperationalError):
+            conn.execute("CREATE TABLE t (x)")
+        conn.close()
+
+    def test_the_check_hands_out_the_daemon_path(self, tmp_path, monkeypatch, db_path):
+        """verify.run_check passes PROTECT=<daemon db>, not the blanket flag,
+        so the suite it runs can write its own tmp databases."""
+        import subprocess as sp
+        import core.db as db
+        from core import verify
+        seen = {}
+        real_run = sp.run
+
+        def capture(cmd, **kw):
+            if kw.get("shell"):
+                seen.update(kw.get("env") or {})
+                return real_run("true", shell=True, capture_output=True, text=True)
+            return real_run(cmd, **kw)
+
+        # a real bare repo so the throwaway worktree can be created
+        bare = tmp_path / "bare"; wt = tmp_path / "seed"; wt.mkdir()
+        real_run(["git", "init", "-b", "main", str(wt)], capture_output=True)
+        real_run(["git", "-C", str(wt), "config", "user.email", "t@t"], capture_output=True)
+        real_run(["git", "-C", str(wt), "config", "user.name", "t"], capture_output=True)
+        (wt / "f").write_text("x")
+        real_run(["git", "-C", str(wt), "add", "-A"], capture_output=True)
+        real_run(["git", "-C", str(wt), "commit", "-m", "i"], capture_output=True)
+        real_run(["git", "clone", "--bare", str(wt), str(bare)], capture_output=True)
+
+        monkeypatch.setattr(verify, "check_command", lambda repo: "true")
+        monkeypatch.setattr(verify.subprocess, "run", capture)
+        res = verify.run_check({"repo": "r", "bare_path": str(bare), "source_branch": "main"})
+        assert res["ran"] is True
+        assert seen.get("SISYPHUS_DB_PROTECT") == db.DB_PATH
+        assert "SISYPHUS_DB_READONLY" not in seen
