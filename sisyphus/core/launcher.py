@@ -263,7 +263,8 @@ async def launch_agent(
     Path(env["WORKSPACE_ROOT"]).mkdir(parents=True, exist_ok=True)
     env["SISYPHUS_OUTPUT_DIR"] = str(output_dir)
     env["SISYPHUS_WORKTREE"] = str(worktree_path)
-    env["SISYPHUS_DB_READONLY"] = "1"
+    from .db import DB_PATH as _daemon_db
+    env["SISYPHUS_DB_PROTECT"] = _daemon_db
     if model_override or runner.get("model"):
         env["SISYPHUS_MODEL"] = model_override or runner["model"]
 

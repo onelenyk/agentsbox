@@ -44,7 +44,7 @@ def get_config(key=None, default=None):
 # these: WORKSPACE_ROOT in particular is what stops a worker's tool calls (and
 # its test runs) from resolving the live daemon database.
 _RESERVED_WORKER_ENV = ("WORKSPACE_ROOT", "SISYPHUS_OUTPUT_DIR", "SISYPHUS_WORKTREE",
-                        "SISYPHUS_DB_READONLY", "SISYPHUS_MODEL")
+                        "SISYPHUS_DB_READONLY", "SISYPHUS_DB_PROTECT", "SISYPHUS_MODEL")
 
 
 def worker_env(base=None):

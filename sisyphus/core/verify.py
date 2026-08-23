@@ -79,7 +79,8 @@ def run_check(mr: dict, timeout: int = DEFAULT_TIMEOUT) -> dict:
         from core.runner_detect import path_with_install_dirs
         env["PATH"] = path_with_install_dirs(env.get("PATH", ""))
         # The check reads the repo; it has no business reaching the daemon's DB.
-        env["SISYPHUS_DB_READONLY"] = "1"
+        from .db import DB_PATH as _daemon_db
+        env["SISYPHUS_DB_PROTECT"] = _daemon_db
 
         try:
             proc = subprocess.run(cmd, shell=True, cwd=wt, env=env,
