@@ -42,19 +42,20 @@ re-reading and repeating).
 ## Worker runs
 
 ### An engineer that finished its work times out instead of finishing
-**Status:** open, found 2026-08-23 (control task task-60088d8f).
-Twice in one task the engineer completed everything — restatement, edit,
-commit, open_mr — and then never called `finish`; the run sat until the 1800s
-total timeout and the orchestrator, seeing a worker end "without reporting a
-result", spawned a second engineer to redo a finished job. Cost: ~an hour of
-wall clock for a one-line change. The runner CLI (opencode) appears to stall
-after the last tool call rather than emit the finish call. Diagnose via the
-run logs under workspace/runs/<task>/; candidate mitigations: a sharper
-persona ending ("your LAST action is finish — nothing comes after"), or the
-launcher treating open_mr-then-silence as a soft finish.
+**Status:** CLOSED 2026-08-23 — root cause was ours, not the runner's, and the
+first diagnosis below was wrong. The run log shows the real chain: the open_mr
+MCP handler ran the repo's check (150s+) INSIDE the request; the runner's MCP
+client timed out at ~60s, dropped the server, the engineer retried open_mr 160
+times against an empty roster and burned to the 1800s total timeout. Fixed
+twice over: the check now runs off the request path (open_mr answers at once),
+and a stalled run that already opened its MR ends with an explicit
+"work is delivered — do NOT respawn an engineer" message for the decider.
 
 ### The suite a worker runs errors out on SISYPHUS_DB_READONLY
-**Status:** open, found 2026-08-23 (same control task).
+**Status:** CLOSED 2026-08-23 — replaced by SISYPHUS_DB_PROTECT=<path>: only
+the daemon's own database is read-only; a suite's per-test tmp databases write
+normally. Rehearsed under the exact worker env: full suite green. The blanket
+flag still works where explicitly set.
 Workers get SISYPHUS_DB_READONLY=1 (rightly — Seatbelt cannot block writes to
 the daemon DB, the flag is the only guard). But it makes every SQLite
 connection read-only including the per-test tmp databases, so an engineer who
@@ -65,6 +66,20 @@ telling engineers to unset the flag would reopen the very hole it guards.
 Candidates: persona note "the recorded MR check is the authoritative suite
 run; treat DB_READONLY errors as environmental", or a test-only DB path
 exemption in core/db.py (risky — needs care not to become a bypass).
+
+### A worker's tool roster carries the user's whole desktop
+**Status:** open, found 2026-08-23 (task-60088d8f run log).
+The engineer's available-tools list included figma, playwright, macos-use,
+engram, websearch and the oh-my-openagent plugin suite — the user's GLOBAL
+opencode config merges into every worker run. That is surface (an agent can
+drive the user's browser or Figma) and spend. Partially closed: the opencode
+env overlay now sets OPENCODE_DISABLE_DEFAULT_PLUGINS / _EXTERNAL_SKILLS /
+_CLAUDE_CODE_SKILLS (from the binary's own help text), which strips the plugin
+and skill share. Still open: globally configured MCP servers have no disable
+switch we could find; an empirical roster probe (invalid-tool trick) stalled
+— opencode ran headless for 5 minutes with zero output. Next candidates:
+project-config overrides disabling the global server names, or an upstream
+flag. claude-cli is already strict (--strict-mcp-config).
 
 ## Review loop
 
