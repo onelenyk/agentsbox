@@ -351,7 +351,10 @@ def _recorded_check(mr: dict, head: str) -> dict:
     ``covers_head`` is the honest half. A verdict is authoritative only for the
     commit it ran against; if the branch has moved since, it is history, and
     saying so is the difference between evidence and a number that merely looks
-    like one.
+    like one. When the record is silent about that commit — every MR checked
+    before the check_head column existed — it is a gap in our own bookkeeping,
+    not a sign the branch moved, and the reviewer has to re-run the check rather
+    than be told the verdict is stale.
     """
     status = (mr.get("check_status") or "").strip()
     if not status:
@@ -376,10 +379,21 @@ def _recorded_check(mr: dict, head: str) -> dict:
                             "configures no check command. Absence of a check is not a "
                             "pass; judge the diff itself.")
     elif not covers:
-        check["meaning"] = (
-            f"This verdict was recorded against {ran_head[:12] or 'an unknown commit'}, "
-            f"and the branch head is now {head[:12] or 'unknown'}. It does NOT cover the "
-            f"current diff — treat this branch as unverified.")
+        # A verdict recorded before the check_head column existed (every MR
+        # checked before 2026-08-24) carries no commit at all. Claiming it is
+        # stale accuses the branch of moving when the record just never said
+        # what it covered — the reviewer must re-run the check, not take that
+        # silence as proof of anything.
+        if not ran_head:
+            check["meaning"] = (
+                "The commit this verdict ran against was never recorded, so coverage "
+                "cannot be determined. Do NOT treat it as covering the current diff — "
+                "re-run the check itself before you lean on it.")
+        else:
+            check["meaning"] = (
+                f"This verdict was recorded against {ran_head[:12]}, and the branch head "
+                f"is now {head[:12] or 'unknown'}. It does NOT cover the current diff — "
+                f"treat this branch as unverified.")
     elif status == "passed":
         check["meaning"] = (
             "The daemon ran this command itself, unsandboxed, against exactly this "
