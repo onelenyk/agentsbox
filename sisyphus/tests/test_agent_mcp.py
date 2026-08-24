@@ -617,6 +617,21 @@ class TestTheReviewerCanSeeTheRecordedCheck:
         assert chk["covers_head"] is False
         assert "does NOT cover" in chk["meaning"]
 
+    def test_a_verdict_that_never_recorded_its_commit_cannot_be_stretched(
+            self, db_path, tmp_path):
+        """A check that ran before the check_head column existed (every MR
+        checked before 2026-08-24) carries no commit at all. That is a hole in
+        our record, not proof the branch moved — the reviewer must re-run the
+        check instead of being told the verdict is stale."""
+        result, _ = self._diff(db_path, tmp_path, status="passed",
+                               output="ok", command="pytest -q")
+        chk = result["recorded_check"]
+        assert chk["covers_head"] is False
+        assert "was never recorded" in chk["meaning"]
+        assert "coverage cannot be determined" in chk["meaning"]
+        assert "re-run the check" in chk["meaning"]
+        assert "unknown commit" not in chk["meaning"]
+
     def test_no_recorded_check_never_reads_as_a_pass(self, db_path, tmp_path):
         result, _ = self._diff(db_path, tmp_path)
         chk = result["recorded_check"]
