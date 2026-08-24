@@ -174,6 +174,68 @@ def tool_prefix(rtype: str, server_name: str) -> str:
 
 # ── MCP wiring ──────────────────────────────────────────────────────────
 
+PROBE_TIMEOUT = 20
+
+
+def foreign_mcp_servers(binary: str) -> List[str]:
+    """Every MCP server opencode would merge into a run from OUTSIDE the
+    project — the user's own machine.
+
+    A live run's roster carried figma, playwright, macos-use, engram, websearch,
+    context7, grep_app and android, because opencode merges the user's global
+    configuration into every run (docs/known-gaps.md). That is surface — an
+    agent that can drive the user's browser or Figma — and it is spend.
+
+    Asked rather than assumed: `opencode debug config` prints the resolved
+    configuration, so this reads what THIS binary will actually load instead of
+    guessing at config file locations. Probed from an empty directory, so what
+    comes back is only what arrives from outside a project — a repo's own
+    opencode.json is the repo's business, not a leak.
+
+    Neither OPENCODE_CONFIG_DIR nor OPENCODE_CONFIG suppresses those entries
+    (both were measured: the global servers survive both). A project-level
+    ``{"enabled": false}`` does, for local and remote servers alike — which is
+    why this returns names for the project config to disable rather than an
+    environment switch to set.
+
+    Deliberately not cached: the probe costs under a second against a run that
+    lasts minutes, and a cache would keep a newly added global server invisible
+    until the daemon restarts. Any failure returns nothing — a run must never
+    fail because we could not enumerate what to disable.
+    """
+    import subprocess
+    import tempfile
+
+    if not binary:
+        return []
+    probe_dir = tempfile.mkdtemp(prefix="sisyphus-cfgprobe-")
+    try:
+        # Captured to a FILE, not a pipe. The resolved config runs past 64KB and
+        # opencode exits before a pipe drains — through capture_output the JSON
+        # comes back cut mid-string every time, which parses as a probe failure
+        # and silently leaves the whole roster enabled. A file write is
+        # synchronous and comes back whole.
+        out_path = os.path.join(probe_dir, "resolved.json")
+        with open(out_path, "w") as out:
+            r = subprocess.run([binary, "debug", "config"], cwd=probe_dir,
+                               stdout=out, stderr=subprocess.DEVNULL,
+                               timeout=PROBE_TIMEOUT)
+        if r.returncode != 0:
+            logger.warning("opencode config probe exited %s — leaving the global "
+                           "MCP roster in place", r.returncode)
+            return []
+        with open(out_path) as fh:
+            mcp = (json.load(fh) or {}).get("mcp") or {}
+        return sorted(str(k) for k in mcp)
+    except Exception:  # noqa: BLE001
+        logger.warning("could not probe %r for its global MCP roster — leaving it "
+                       "in place", binary, exc_info=True)
+        return []
+    finally:
+        import shutil
+        shutil.rmtree(probe_dir, ignore_errors=True)
+
+
 def write_mcp_config(
     rtype: str,
     *,
@@ -184,6 +246,7 @@ def write_mcp_config(
     env: dict,
     agent_name: str,
     model: str = "",
+    binary: str = "",
 ) -> Optional[str]:
     """Write the CLI's config so it launches our stdio MCP bridge.
 
@@ -251,18 +314,27 @@ def write_mcp_config(
             "hangs on a primary agent that does not name one", agent_name,
         )
 
+    # Disable, by name, every MCP server the user's global config would merge
+    # in. A bare {"enabled": false} is enough — measured against both local and
+    # remote entries — and it is deliberately bare: copying the original entry
+    # to flip a flag would write the user's own server URLs and environment
+    # (credentials included) into a file inside the worktree, where the agent
+    # reads it. The stub says "off" and nothing else.
+    mcp: dict = {
+        name: {"enabled": False}
+        for name in foreign_mcp_servers(binary) if name != server_name
+    }
+    mcp[server_name] = {
+        "type": "local",
+        "command": list(command),
+        "environment": dict(env),
+        "enabled": True,
+    }
     config = {
         "$schema": "https://opencode.ai/config.json",
         "plugin": [],
         "agent": {agent_name: agent_def},
-        "mcp": {
-            server_name: {
-                "type": "local",
-                "command": list(command),
-                "environment": dict(env),
-                "enabled": True,
-            }
-        },
+        "mcp": mcp,
     }
     Path(worktree_path, "opencode.json").write_text(json.dumps(config, indent=2))
     return None
