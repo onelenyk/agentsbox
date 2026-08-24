@@ -41,8 +41,10 @@ your local runner.
   **webhook** (jira/github/gitlab) and create tasks; `{{payload}}` templating.
 - **Guardrails** — restart recovery, total/idle timeouts, a global worker-concurrency
   cap, per-task & daily **budget caps**, circuit breakers, and a startup preflight.
-- **Observability** — Mission Control dashboard, per-task token/cost, statistics,
-  rotating logs, a live health heartbeat, and browser notifications.
+- **Observability** — Mission Control dashboard, a **watch rail** on the board
+  (who is running right now, and a per-loop heartbeat for the daemon's
+  background watchers), per-task token/cost, statistics, rotating logs, a live
+  health heartbeat, and browser notifications.
 - **Backups** — one-click SQLite snapshots (`VACUUM INTO`) with a reversible restore.
 - **Four surfaces** — Web UI, JSON API (`/api/v1`), MCP server (agent tools), and a
   `sisyphus` CLI.

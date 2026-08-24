@@ -4,18 +4,46 @@
    column that suits text pages #}
 {% block main_class %}main--board{% endblock %}
 {% block content %}
-<div class="page-head">
-    <div>
-        <h1>Tasks</h1>
-        <div class="sub">Autonomous work, coordinated on one thread per task.</div>
+<div class="board-shell">
+    {# The watch holds its own space: knowing who is working is ambient, and a
+       panel you have to open is a panel nobody looks at. The copilot stays a
+       drawer on the right — conversation is transient, a watch is not. #}
+    <aside id="watch" class="watch">
+        <div class="watch__head">
+            <span class="watch__title">👁 Watch</span>
+            <button class="watch__toggle btn btn--ghost btn--sm" onclick="watchToggle()" title="Collapse the watch">‹</button>
+        </div>
+        <div id="watch-body" class="watch__body"
+             hx-get="/api/board/watch" hx-trigger="load, every 5s, taskUpdated from:body" hx-swap="innerHTML">
+            <div class="empty">Loading…</div>
+        </div>
+    </aside>
+    <script>
+        // Restore before first paint of the rail's contents, so a collapsed
+        // rail never flashes open on every board load.
+        function watchToggle() {
+            const el = document.getElementById('watch');
+            el.classList.toggle('watch--min');
+            try { localStorage.setItem('watchMin', el.classList.contains('watch--min') ? '1' : '0'); } catch (e) { }
+        }
+        try { if (localStorage.getItem('watchMin') === '1') document.getElementById('watch').classList.add('watch--min'); } catch (e) { }
+    </script>
+
+    <div class="board-main">
+        <div class="page-head">
+            <div>
+                <h1>Tasks</h1>
+                <div class="sub">Autonomous work, coordinated on one thread per task.</div>
+            </div>
+            <div class="actions">
+                <button class="btn btn--ghost" onclick="cpToggle()">💬 Copilot</button>
+                <button class="btn btn--primary" hx-get="/api/tasks/new-form" hx-target="#modal-container">+ New Task</button>
+            </div>
+        </div>
+        <div id="tasks-list" hx-get="/api/tasks/list" hx-trigger="load, taskCreated from:body, taskUpdated from:body, every 7s" hx-swap="innerHTML">
+            <div class="empty">Loading…</div>
+        </div>
     </div>
-    <div class="actions">
-        <button class="btn btn--ghost" onclick="cpToggle()">💬 Copilot</button>
-        <button class="btn btn--primary" hx-get="/api/tasks/new-form" hx-target="#modal-container">+ New Task</button>
-    </div>
-</div>
-<div id="tasks-list" hx-get="/api/tasks/list" hx-trigger="load, taskCreated from:body, taskUpdated from:body, every 7s" hx-swap="innerHTML">
-    <div class="empty">Loading…</div>
 </div>
 
 <aside id="copilot" class="copilot">

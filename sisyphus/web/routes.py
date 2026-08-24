@@ -755,6 +755,24 @@ async def workers_live(request: Request):
     return _tmpl().TemplateResponse(request, "workers_live.html",
                                     {"sessions": _enrich_sessions(sessions.list_active())})
 
+# ── Watch rail (board) ───────────────────────────────────────────────────
+
+@router.get("/api/board/watch", response_class=HTMLResponse)
+async def board_watch(request: Request):
+    """Who is on duty: the product owner, the agents running right now, and the
+    daemon's background loops. Every row is backed by something recorded — a
+    live session, or a heartbeat a loop actually stamped."""
+    from core import heartbeat, orchestrator
+    watchers = heartbeat.list_all()
+    for w in watchers:
+        if w["kind"] == "event":
+            w["depth"] = orchestrator.queue_depth()
+    return _tmpl().TemplateResponse(request, "watch_rail.html", {
+        "sessions": _enrich_sessions(sessions.list_active()),
+        "watchers": watchers,
+        "po": None,          # the product owner does not exist yet — say so
+    })
+
 # ── Agents ──────────────────────────────────────────────────────────────
 
 @router.get("/agents", response_class=HTMLResponse)

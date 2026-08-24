@@ -963,3 +963,57 @@ def test_runner_edit_keeps_required_fields_on_blank(db_path):
     client.post(f"/api/runners/{r['id']}/edit", data={"name": "", "binary": "", "type": ""})
     row = get_runner(r["id"])
     assert row["name"] == "keepname" and row["binary"] == "opencode"
+
+
+# ── The board's watch rail ───────────────────────────────────────────────
+
+
+class TestWatchRail:
+    """The rail reports who is on duty. Every row must come from something the
+    system recorded — a live session or a heartbeat a loop stamped."""
+
+    def test_rail_reports_each_registered_watcher(self, db_path):
+        from core import heartbeat
+        heartbeat.clear()
+        heartbeat.register("dispatcher", kind="event", note="waiting for an event")
+        heartbeat.register("watchdog", every=120)
+        heartbeat.beat("watchdog", note="nothing stalled")
+        heartbeat.register("forge poll", every=300)
+        heartbeat.mark_off("forge poll", "forge_poll.enabled is false")
+        try:
+            html = _make_client().get("/api/board/watch").text
+        finally:
+            heartbeat.clear()
+        # the depth is whatever the queue holds right now — assert the shape,
+        # not a number another test may have left behind
+        assert "dispatcher" in html and "waiting · queue" in html
+        assert "nothing stalled" in html
+        assert "off · forge_poll.enabled is false" in html
+        assert "led dead" not in html          # nothing here is broken
+
+    def test_rail_is_honest_when_nothing_is_running(self, db_path):
+        from core import heartbeat, sessions
+        heartbeat.clear()
+        sessions.clear()
+        html = _make_client().get("/api/board/watch").text
+        assert "No agents running." in html
+        assert "not configured" in html        # the product owner does not exist yet
+        assert "the daemon's loops have not started" in html
+
+    def test_rail_lists_a_running_agent(self, db_path):
+        from core import heartbeat, sessions, store
+        heartbeat.clear()
+        sessions.clear()
+        t = store.create_task("Wire the rail", repo="sisyphus")
+        sessions.mint(t["id"], "engineer", instruction="add the panel",
+                      model="deepseek/v4", runner="opencode")
+        try:
+            html = _make_client().get("/api/board/watch").text
+        finally:
+            sessions.clear()
+        assert "engineer" in html and "add the panel" in html and "deepseek/v4" in html
+
+    def test_board_page_carries_the_rail(self, db_path):
+        html = _make_client().get("/tasks").text
+        assert 'id="watch"' in html
+        assert "/api/board/watch" in html
