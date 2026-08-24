@@ -13,21 +13,8 @@
     <div class="stack">
         <section class="panel">
             <div class="panel__h"><span class="led {{ 'live' if live_sessions else 'idle' }}"></span><span class="t">Agents at work</span><span class="c">{{ live_sessions|length }} running</span></div>
-            <div class="panel__b">
-                {% if live_sessions %}
-                {% set icons = {'orchestrator':'🧭','engineer':'🔧','reviewer':'🔍','explorer':'🔭','planner':'🗺️'} %}
-                {% for s in live_sessions %}
-                {% set xtone = 'orchestrator' if s.kind == 'decider' else 'worker' %}
-                <a class="live-row" href="/tasks/{{ s.task_id }}">
-                    <div class="who"><span class="av av--sm av--{{ xtone }}" title="{{ s.role }}">{{ icons.get(s.role, '⚙️') }}</span><span class="led live"></span><span class="role">{{ s.role }}</span><span class="badge {{ 'badge--accent' if s.kind == 'decider' else '' }}">{{ s.kind }}</span></div>
-                    <div class="goal">{{ s.task_title }} <small>· {{ s.instruction }}</small></div>
-                    <div class="meta">{{ s.elapsed_mins }}m{% if s.model %} · {{ s.model }}{% endif %}{% if s.runner %} · {{ s.runner }}{% endif %}</div>
-                </a>
-                {% endfor %}
-                {% else %}
-                <div class="empty">No active tasks — the board is quiet.</div>
-                {% endif %}
-            </div>
+            {# one copy of the live-worker row, shared with the board's watch rail #}
+            <div class="panel__b">{% with sessions = live_sessions %}{% include "workers_live.html" %}{% endwith %}</div>
         </section>
 
         <section class="panel">

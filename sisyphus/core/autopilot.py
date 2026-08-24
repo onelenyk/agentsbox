@@ -322,20 +322,35 @@ def tick_once() -> int:
     return fired
 
 
+def next_due_at() -> Optional[str]:
+    """UTC ISO time the soonest enabled schedule autopilot fires next, or None."""
+    conn = get_conn()
+    row = conn.execute("""SELECT next_run FROM autopilots
+                           WHERE enabled = 1 AND next_run != ''
+                        ORDER BY next_run ASC LIMIT 1""").fetchone()
+    conn.close()
+    return row["next_run"] if row else None
+
+
 async def run_forever() -> None:
     """Daemon background loop: reconcile on boot, then fire due autopilots every
     autopilot_tick_seconds."""
     import asyncio
+    from core import heartbeat
     from core.config import get_config
 
     tick = int(get_config("autopilot_tick_seconds", 30) or 30)
+    heartbeat.register("autopilot", every=tick, note="firing due automations")
     try:
         reconcile_next_runs()
     except Exception:  # noqa: BLE001
         logger.exception("autopilot: reconcile_on_boot failed")
     while True:
         try:
-            tick_once()
+            fired = tick_once()
+            heartbeat.beat("autopilot",
+                           note=(f"fired {fired}" if fired else "nothing due"),
+                           next_due=next_due_at() or "")
         except Exception:  # noqa: BLE001
             logger.exception("autopilot: tick failed")
         await asyncio.sleep(tick)

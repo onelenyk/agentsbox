@@ -509,7 +509,10 @@ async def poll_forever() -> None:
     No exception escapes. A loop that dies on one bad response is worse than
     useless: the daemon keeps running and silently stops noticing anything.
     """
+    from core import heartbeat
+    heartbeat.register("forge poll", every=poll_interval(), note="tracking PRs")
     if not poll_enabled():
+        heartbeat.mark_off("forge poll", "forge_poll.enabled is false")
         logger.info("forge_poll: disabled (forge_poll.enabled) — PRs will not be tracked")
         return
     interval = poll_interval()
@@ -517,6 +520,10 @@ async def poll_forever() -> None:
     while True:
         try:
             summary = await asyncio.to_thread(poll_once)
+            heartbeat.beat("forge poll",
+                           note=(f"checked {summary['checked']}"
+                                 + (f" · {len(summary['errors'])} errors"
+                                    if summary["errors"] else "")))
             if summary["changed"] or summary["errors"]:
                 logger.info("forge_poll: checked=%d changed=%d skipped=%d errors=%d",
                             summary["checked"], summary["changed"],

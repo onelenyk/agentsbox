@@ -19,7 +19,7 @@ from typing import Awaitable, Callable, Literal, Optional
 
 from pydantic import BaseModel, ValidationError
 
-from . import store
+from . import heartbeat, store
 from .worker import spawn_worker
 
 logger = logging.getLogger(__name__)
@@ -63,6 +63,15 @@ def _get_queue() -> "asyncio.Queue[Event]":
     if _queue is None:
         _queue = asyncio.Queue()
     return _queue
+
+
+def queue_depth() -> int:
+    """How many events are waiting for a dispatcher pass. 0 with the loop idle
+    is the normal, healthy reading."""
+    try:
+        return _get_queue().qsize()
+    except RuntimeError:
+        return 0             # no running loop — nothing is dispatching anyway
 
 
 def reset_queue() -> None:
@@ -161,10 +170,13 @@ async def dispatch_forever() -> None:
     _loop_thread = threading.current_thread().ident
 
     queue = _get_queue()
+    heartbeat.register("dispatcher", kind="event", every=0,
+                       note="waiting for an event")
     while True:
         event = await queue.get()
         try:
             await handle_event(event.task_id, event.type)
+            heartbeat.beat("dispatcher", note=f"last: {event.type} · {event.task_id}")
         except Exception:
             logger.exception(
                 "orchestrator pass failed for task %s (event=%s)", event.task_id, event.type
@@ -826,10 +838,13 @@ def rescue_stalled(stall_after: int = STALL_AFTER_SECONDS) -> int:
 
 async def watchdog_forever(interval: int = WATCHDOG_INTERVAL_SECONDS,
                            stall_after: int = STALL_AFTER_SECONDS) -> None:
+    heartbeat.register("watchdog", every=interval, note="guarding stalled tasks")
     while True:
         await asyncio.sleep(interval)
         try:
-            rescue_stalled(stall_after)
+            rescued = rescue_stalled(stall_after)
+            heartbeat.beat("watchdog",
+                           note=(f"rescued {rescued}" if rescued else "nothing stalled"))
         except Exception:
             # a watchdog that dies on one bad row stops guarding everything
             logger.warning("watchdog pass failed", exc_info=True)
