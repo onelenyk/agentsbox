@@ -420,6 +420,24 @@ def test_mr_merge_refused_for_pending_without_force(db_path):
     assert mergerequests.get_mr(mr["id"])["status"] == "open"
 
 
+def test_mr_merge_refused_when_reviewer_died_without_force(db_path):
+    mr = _open_mr(review_status="died")
+    client = _make_client()
+    with patch("core.mergerequests.merge_branch") as mock_merge:
+        r = client.post(f"/api/mr/{mr['id']}/merge")
+    assert r.status_code == 200
+    assert "reviewer died" in r.text
+    mock_merge.assert_not_called()
+    assert mergerequests.get_mr(mr["id"])["status"] == "open"
+
+
+def test_mr_modal_says_a_review_died_not_silence(db_path):
+    mr = _open_mr(review_status="died")
+    r = _make_client().get(f"/api/mr/{mr['id']}/view")
+    assert r.status_code == 200
+    assert "review died" in r.text
+
+
 def test_mr_merge_allowed_for_changes_requested_with_force(db_path):
     mr = _open_mr(review_status="changes_requested")
     client = _make_client()

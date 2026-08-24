@@ -171,6 +171,11 @@ class TestTheCardPredictsTheButton:
         assert "unreviewed" in html
         assert "ready to merge" not in html
 
+    def test_a_review_that_died_says_so_not_silence(self, db_path, tmp_path):
+        html = self._card(db_path, tmp_path, review="died", check="passed")
+        assert "review died" in html
+        assert "ready to merge" not in html
+
     def test_the_badge_and_the_gate_cannot_disagree(self, db_path, tmp_path):
         """gate_state asks merge_block_reason rather than re-deriving it."""
         for i, (review, check, ready) in enumerate((("approved", "passed", True),
