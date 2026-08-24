@@ -76,10 +76,15 @@ def ensure_review_task(mr: dict) -> Optional[dict]:
         f"request_changes(reason=...). Read-only — never commit/merge.\n"
         f"\n"
         f"Automated check (run by the daemon, not by you): {check_line}\n"
-        f"Its full output is on the thread. This is the authoritative result for "
-        f"this branch — do not substitute your own test run for it, and do not "
-        f"approve over a failing check. If no check ran, say so in your verdict "
-        f"rather than implying the branch was verified.\n"
+        f"get_mr_diff returns that verdict in full — status, the exact command, "
+        f"the commit it ran against and the tail of its output. This is the "
+        f"authoritative result for this branch: do not substitute your own test "
+        f"run for it, and do not approve over a failing check. Your own worktree "
+        f"is sandboxed and fails some tests for environmental reasons, so where "
+        f"your run and the record disagree ABOUT THE SAME COMMIT, the record "
+        f"wins — report the discrepancy in your verdict instead of asking a "
+        f"human to adjudicate it. If no check ran, or it ran against an older "
+        f"commit, say so rather than implying the branch was verified.\n"
     )
 
     return store.create_task(

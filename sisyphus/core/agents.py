@@ -53,7 +53,37 @@ def init_agents_table() -> None:
     # (Phase 1 → Phase 2 upgrade) — without it, _decide has no agent to run.
     if conn.execute("SELECT COUNT(*) FROM agents WHERE kind = 'orchestrator'").fetchone()[0] == 0:
         _seed_orchestrator(conn)
+    _ensure_pinned_workers(conn)
     conn.close()
+
+
+# Agents the CODE pins by name, as opposed to ones a decider may choose. Missing
+# one is not a matter of taste: core.reviews creates a task pinned to
+# 'mr-reviewer' for every opened MR, and on a database where nobody had created
+# that agent by hand the task could never run — the review simply never
+# happened. Same reasoning as _seed_orchestrator, which is why this is a
+# create-if-absent and never an update: a persona someone has tuned is theirs.
+PINNED_BY_CODE = ("mr-reviewer",)
+
+
+def _ensure_pinned_workers(conn) -> None:
+    from .roles import ROLES
+
+    now = _now()
+    for name in PINNED_BY_CODE:
+        spec = ROLES.get(name)
+        if not spec:
+            continue
+        if conn.execute("SELECT 1 FROM agents WHERE name = ?", (name,)).fetchone():
+            continue
+        conn.execute(
+            """INSERT INTO agents (id, name, persona, tools, runner_id, model,
+               kind, enabled, is_builtin, created_at, updated_at)
+               VALUES (?, ?, ?, ?, NULL, '', 'worker', 1, 1, ?, ?)""",
+            (f"agent-{uuid4().hex[:8]}", name, spec["persona"],
+             json.dumps(spec["tools"]), now, now),
+        )
+    conn.commit()
 
 
 def _seed_workers(conn) -> None:

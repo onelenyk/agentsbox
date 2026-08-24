@@ -252,6 +252,12 @@ def init_mr_table() -> None:
         conn.execute("ALTER TABLE merge_requests ADD COLUMN check_output TEXT")
         conn.execute("ALTER TABLE merge_requests ADD COLUMN check_command TEXT")
         conn.execute("ALTER TABLE merge_requests ADD COLUMN check_ran_at TEXT")
+    # Which commit the verdict is ABOUT. Without it a check that passed before
+    # three more commits landed still reads as this branch's verdict, and the
+    # whole point of recording a machine's number is that it cannot be stretched
+    # to cover work it never saw.
+    if "check_head" not in cols:
+        conn.execute("ALTER TABLE merge_requests ADD COLUMN check_head TEXT")
     # Where this change lives on a forge, and the last state we observed there.
     # Polling is the only way this daemon hears about a PR it opened — it listens
     # on 127.0.0.1, so no forge can ever call in (core.forge_poll). The poller
@@ -300,15 +306,20 @@ def diff_range(mr: dict) -> dict:
     }
 
 
-def set_check_result(mr_id: str, status: str, output: str = "", command: str = "") -> None:
+def set_check_result(mr_id: str, status: str, output: str = "", command: str = "",
+                     head: str = "") -> None:
     """Record what the daemon's own check found: 'passed', 'failed' or
-    'not_run'. Never derived from anything an agent said."""
+    'not_run'. Never derived from anything an agent said.
+
+    *head* is the commit the check actually ran against, so a later reader can
+    tell a current verdict from one the branch has since moved past."""
     conn = get_conn()
     now = _now()
     conn.execute(
         "UPDATE merge_requests SET check_status = ?, check_output = ?, "
-        "check_command = ?, check_ran_at = ?, updated_at = ? WHERE id = ?",
-        (status, output, command, now, now, mr_id),
+        "check_command = ?, check_ran_at = ?, check_head = ?, updated_at = ? "
+        "WHERE id = ?",
+        (status, output, command, now, head, now, mr_id),
     )
     conn.commit()
     conn.close()
