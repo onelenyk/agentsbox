@@ -102,7 +102,25 @@ left open until a probe that costs a second rather than a run turned up.
 claude-cli is already strict (--strict-mcp-config).
 
 ### The global opencode plugin loads in every worker, and its tools come with it
-**Status:** open, measured 2026-08-24 (task-2ff103e9, first comment on the thread).
+**Status:** CLOSED 2026-08-24 as accepted, not fixed. The owner uses
+oh-my-opencode as their personal plugin and wants it. Nothing here is a defect
+to repair; what follows is what we are accepting, so that a future run behaving
+strangely is diagnosed in one step instead of ten.
+
+Accepted: every worker's roster carries `call_omo_agent`, `skill`, `skill_mcp`,
+`look_at`, `session_*`, `ast_grep_*`, `interactive_bash` and `background_*` on
+top of its own tools. `call_omo_agent` lets a worker start agents Sisyphus did
+not authorise, and `skill_mcp` reintroduces the indirection layer that once
+swallowed our tool calls entirely. Neither has misbehaved since: today's runs
+opened MRs and reported results with the plugin loaded throughout.
+
+Not accepted silently: if a run ever reports tools it should not have, or our
+own `sisyphus_agent_*` tools stop reaching the model, this is the first place to
+look — and the roster probe below tells you in one run rather than by reading
+source. Sisyphus's own MCP tools stay restricted server-side by session token
+regardless; the plugin cannot widen those.
+
+Measured 2026-08-24 (task-2ff103e9, first comment on the thread).
 A worker was asked to report its own tool roster verbatim before doing anything
 else. The MCP half of the isolation held — not one of the eight globally
 configured servers appeared. The plugin half did not:
