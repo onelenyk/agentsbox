@@ -276,6 +276,94 @@ class TestPinnedTaskSurvivesAStop:
         assert store.get_task(task["id"])["status"] != "failed"
 
 
+class TestAPinnedRunThatReturnsNothingIsRetried:
+    """Six of the seven failed tasks in the ledger died the same way: a pinned
+    mr-reviewer ended without reporting a result — idle timeout, or a run that
+    never called its finishing tool — and the task was failed on the spot, so
+    the review simply never happened until a human noticed. One silent
+    subprocess is not a verdict about the work.
+    """
+
+    _EMPTY = "mr-reviewer ended without reporting a result (status=timeout): no output"
+
+    def _ran(self, task_id, text=None):
+        store.post_message(task_id, "system", kind="worker_queued", text="queued")
+        store.post_message(task_id, "system", kind="worker_started", text="go")
+        store.post_message(task_id, "system", kind="worker_finished",
+                           text=text or self._EMPTY)
+
+    @pytest.mark.asyncio
+    async def test_the_first_empty_run_is_retried_not_failed(self, db_path):
+        task = store.create_task("Review-of-MR: mr-1", repo="sisyphus", agent="explorer")
+        self._ran(task["id"])
+
+        with patch("core.orchestrator._spawn_worker_safe", return_value=None):
+            decision, _ = await orchestrator.handle_event(task["id"], "worker_finished")
+
+        assert decision.action == "spawn_worker", decision.why
+        assert store.get_task(task["id"])["status"] != "failed"
+        assert any("[retry]" in m["text"] for m in store.get_thread(task["id"])), \
+            "the retry must be on the record, not silent"
+
+    @pytest.mark.asyncio
+    async def test_a_second_empty_run_fails_the_task(self, db_path):
+        """The retry is one extra run, not a loop: a broken runner still stops."""
+        task = store.create_task("Review-of-MR: mr-1", repo="sisyphus", agent="explorer")
+        self._ran(task["id"])
+        self._ran(task["id"])
+
+        with patch("core.orchestrator._spawn_worker_safe", return_value=None):
+            decision, _ = await orchestrator.handle_event(task["id"], "worker_finished")
+
+        assert decision.action == "fail"
+        assert store.get_task(task["id"])["status"] == "failed"
+        assert any("2 attempts" in m["text"] for m in store.get_thread(task["id"])), \
+            "the failure should say how many runs it cost"
+
+    @pytest.mark.asyncio
+    async def test_a_run_that_never_started_is_bounded_too(self, db_path):
+        """A worker that fails to start posts worker_finished with no
+        worker_started before it. That used to re-enter the 'has not run yet'
+        branch every time, which is an unbounded spawn loop."""
+        task = store.create_task("pinned work", repo="sisyphus", agent="explorer")
+        for _ in range(2):
+            store.post_message(task["id"], "system", kind="worker_queued", text="queued")
+            store.post_message(task["id"], "system", kind="worker_finished",
+                               text="explorer failed to start: unknown agent")
+
+        with patch("core.orchestrator._spawn_worker_safe", return_value=None):
+            decision, _ = await orchestrator.handle_event(task["id"], "worker_finished")
+
+        assert decision.action == "fail"
+
+    @pytest.mark.asyncio
+    async def test_a_human_answer_buys_a_fresh_budget(self, db_path):
+        """Reopen + reply is how a human says "try again" — the runs already
+        spent must not keep the task dead."""
+        task = store.create_task("Review-of-MR: mr-1", repo="sisyphus", agent="explorer")
+        self._ran(task["id"])
+        self._ran(task["id"])
+        store.set_status(task["id"], "waiting")
+        store.post_message(task["id"], "human", kind="answer", text="the runner is fixed, retry")
+
+        with patch("core.orchestrator._spawn_worker_safe", return_value=None):
+            decision, _ = await orchestrator.handle_event(task["id"], "human_replied")
+
+        assert decision.action == "spawn_worker", decision.why
+
+    @pytest.mark.asyncio
+    async def test_a_reported_result_still_completes_on_the_first_run(self, db_path):
+        task = store.create_task("Review-of-MR: mr-1", repo="sisyphus", agent="explorer")
+        store.post_message(task["id"], "system", kind="worker_started", text="go")
+        store.post_message(task["id"], "explorer", kind="result", text="APPROVED")
+        store.post_message(task["id"], "system", kind="worker_finished", text="explorer finished")
+
+        decision, _ = await orchestrator.handle_event(task["id"], "worker_finished")
+
+        assert decision.action == "done"
+        assert store.get_task(task["id"])["status"] == "done"
+
+
 class TestReopen:
     def test_reopen_only_applies_to_terminal_tasks(self, db_path):
         task = store.create_task("still running")

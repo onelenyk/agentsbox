@@ -341,6 +341,26 @@ def _consecutive_worker_failures(task_id: str) -> int:
     return n
 
 
+SINGLE_AGENT_ATTEMPTS = 2   # one retry: a flaky run is cheap next to a dead task
+
+
+def _runs_ended_since_human(task_id: str) -> int:
+    """How many worker runs have ENDED since the last human answer.
+
+    Counts worker_finished, not the wording of a failure: this is the number of
+    times we have actually spent a run, which is what a retry budget is really
+    about. A human answer resets it — the human has looked and asked to
+    continue, exactly as in _consecutive_worker_failures.
+    """
+    n = 0
+    for m in reversed(store.get_thread(task_id)):
+        if m["kind"] == "answer":
+            break
+        if m["kind"] == "worker_finished":
+            n += 1
+    return n
+
+
 def _consecutive_repeat(task_id: str) -> int:
     """How many times in a row the orchestrator posted the EXACT same note.
 
@@ -547,8 +567,9 @@ async def handle_event(
 
 async def _handle_single_agent(task: dict) -> tuple:
     """Drive a task pinned to one agent, with no orchestrator in the loop:
-    spawn the agent once; when it reports back, its result completes the task
-    (or its absence fails it). One shot — no dispatch, no reviewer, no retry."""
+    spawn the agent once; when it reports back, its result completes the task.
+    No dispatch and no reviewer — but a run that ends with nothing to show is
+    retried once (SINGLE_AGENT_ATTEMPTS) before the task is failed."""
     task_id = task["id"]
     thread = store.get_thread(task_id)
 
@@ -560,23 +581,51 @@ async def _handle_single_agent(task: dict) -> tuple:
     # re-entered this branch and failed it again. Re-run instead; the worker
     # sees the whole thread, so the human's new instruction comes with it.
     stopped = was_stopped_by_a_human(thread)
-    if stopped or not any(m["kind"] == "worker_started" for m in thread):
+    if stopped:
         store.set_status(task_id, "active")
         bg = asyncio.create_task(
             _spawn_worker_safe(task_id, task["agent"], task["goal"], task.get("repo"))
         )
-        why = (f"single-agent task — re-running {task['agent']} after a human stop"
-               if stopped else f"single-agent task — running {task['agent']}")
-        return Decision(action="spawn_worker", role=task["agent"], why=why), bg
+        return Decision(
+            action="spawn_worker", role=task["agent"],
+            why=f"single-agent task — re-running {task['agent']} after a human stop"), bg
 
-    # The agent has run. A reported result (finish/approve) → done; none → failed.
+    # A reported result (finish/approve) → done.
     if any(m["kind"] == "result" for m in thread):
         store.post_message(task_id, "orchestrator", kind="note",
                            text=f"[done] {task['agent']} completed the task")
         await _terminate(task_id, "done")
         return Decision(action="done", why="pinned agent completed"), None
-    store.post_message(task_id, "orchestrator", kind="note",
-                       text=f"[fail] {task['agent']} ended without a result")
+
+    # Nothing to show — either the agent has not run yet, or it ran and reported
+    # nothing. Both are answered by spending a run, and both are bounded by the
+    # same budget: the number of runs already ended (plus the task budget guard
+    # above), so a broken runner still stops instead of respawning forever.
+    #
+    # The half that changed: a run that ended empty used to fail the task on the
+    # spot, and six of the seven failures in the ledger died exactly there — an
+    # mr-reviewer that hit its idle timeout or never called its finishing tool,
+    # on a review that then never happened until a human noticed. A silent
+    # subprocess is not a verdict about the work. The retry re-reads the whole
+    # thread, so the second attempt starts knowing how the first one died.
+    runs = _runs_ended_since_human(task_id)
+    if runs < SINGLE_AGENT_ATTEMPTS:
+        store.set_status(task_id, "active")
+        bg = asyncio.create_task(
+            _spawn_worker_safe(task_id, task["agent"], task["goal"], task.get("repo"))
+        )
+        if runs:
+            why = (f"{task['agent']} ended without a result — retrying "
+                   f"(attempt {runs + 1} of {SINGLE_AGENT_ATTEMPTS})")
+            store.post_message(task_id, "orchestrator", kind="note", text=f"[retry] {why}")
+        else:
+            why = f"single-agent task — running {task['agent']}"
+        return Decision(action="spawn_worker", role=task["agent"], why=why), bg
+
+    store.post_message(
+        task_id, "orchestrator", kind="note",
+        text=(f"[fail] {task['agent']} ended without a result "
+              f"({runs} attempt{'' if runs == 1 else 's'})"))
     await _terminate(task_id, "failed")
     return Decision(action="fail", reason="pinned agent produced no result",
                     why="single-agent failure"), None
