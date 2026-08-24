@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+"""Progress against the north star in docs/GOAL.md — "Sisyphus builds Sisyphus".
+
+Every number is recounted from what the system already records: git history for
+what landed on the trunk, sisyphus.db for how it got there, known-gaps.md for
+what is still owed. Nothing is estimated, nothing is cached — the report has no
+state of its own, so it cannot drift away from the truth it reports on.
+
+    python3 tools/goal_report.py             # last 30 days
+    python3 tools/goal_report.py --days 7
+    python3 tools/goal_report.py --json
+"""
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+from datetime import datetime, timedelta, timezone
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from core.db import get_readonly_conn
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SISYPHUS_DIR = os.path.dirname(HERE)
+KNOWN_GAPS = os.path.join(SISYPHUS_DIR, "docs", "known-gaps.md")
+
+# A merge that carries a worker's branch home. Sisyphus names every task branch
+# sisyphus/task-<id>, so the trunk itself records which commits it authored.
+MERGE_SUBJECT = "Merge sisyphus/task-"
+
+TARGET_SELF_BUILD = 50   # north star: more than half of the trunk, agent-built
+
+
+def _rate(part: int, whole: int) -> float:
+    """Percent, one decimal. An empty denominator is 0.0, never a crash."""
+    return round(100.0 * part / whole, 1) if whole else 0.0
+
+
+def _cutoff(days: int) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+
+def _git(repo_root: str, *args: str) -> str:
+    out = subprocess.run(["git", "-C", repo_root, *args],
+                         capture_output=True, text=True, timeout=60)
+    if out.returncode != 0:
+        raise RuntimeError(f"git {' '.join(args)}: {out.stderr.strip()}")
+    return out.stdout.strip()
+
+
+def repo_root(start: str = SISYPHUS_DIR) -> str:
+    return _git(start, "rev-parse", "--show-toplevel")
+
+
+# ---------------------------------------------------------------- the metrics
+
+def self_build(root: str, days: int) -> dict:
+    """Primary metric: the share of the trunk that arrived through a Sisyphus MR.
+
+    Counted in commits, not merges — one merge may carry seven commits, and it
+    is the code that matters, not the ceremony. Merge commits themselves are
+    excluded from both sides so the ratio compares like with like.
+    """
+    since = f"--since={days} days ago"
+    merges = [m for m in _git(root, "log", "--merges", "-F",
+                              f"--grep={MERGE_SUBJECT}", since,
+                              "--format=%H").splitlines() if m]
+    delivered = 0
+    for sha in merges:
+        try:
+            delivered += int(_git(root, "rev-list", "--count", "--no-merges",
+                                  f"{sha}^1..{sha}^2"))
+        except (RuntimeError, ValueError):
+            continue          # a merge with one parent tells us nothing
+    total = int(_git(root, "rev-list", "--count", "--no-merges", since, "HEAD"))
+    return {"delivered": delivered, "total": total,
+            "merges": len(merges), "rate": _rate(delivered, total)}
+
+
+def autonomy(conn, days: int) -> dict:
+    """Of the tasks that actually delivered an MR, how many needed no human turn.
+
+    A task that opened an MR is one that did the work; the rest of the board is
+    autopilot scans and review-of-MR passes, and counting those would flatter
+    the number without anything having shipped.
+    """
+    cut = _cutoff(days)
+    rows = conn.execute("""
+        SELECT t.id,
+               (SELECT COUNT(*) FROM messages m
+                 WHERE m.task_id = t.id AND m.author = 'human')  AS human,
+               (SELECT COUNT(*) FROM messages m
+                 WHERE m.task_id = t.id AND m.kind = 'question') AS asked
+          FROM tasks t
+         WHERE t.created_at >= ?
+           AND EXISTS (SELECT 1 FROM messages m
+                        WHERE m.task_id = t.id AND m.kind = 'mr')
+    """, (cut,)).fetchall()
+    clean = sum(1 for r in rows if r["human"] == 0)
+    return {"delivering": len(rows), "clean": clean,
+            "questions": sum(r["asked"] for r in rows),
+            "rate": _rate(clean, len(rows))}
+
+
+def evidence(conn, days: int) -> dict:
+    """Of the MRs merged, how many rest on a record rather than on a claim:
+    a reviewer's approval AND a check the daemon ran and recorded itself."""
+    cut = _cutoff(days)
+    rows = conn.execute("""
+        SELECT review_status, check_status FROM merge_requests
+         WHERE status = 'merged' AND created_at >= ?
+    """, (cut,)).fetchall()
+    backed = sum(1 for r in rows
+                 if r["review_status"] == "approved" and r["check_status"] == "passed")
+    approved = sum(1 for r in rows if r["review_status"] == "approved")
+    return {"merged": len(rows), "backed": backed, "approved": approved,
+            "rate": _rate(backed, len(rows))}
+
+
+def reliability(conn, days: int) -> dict:
+    """Terminal tasks that failed, and how many failed the one way we keep
+    seeing: a worker that ran and returned nothing at all."""
+    cut = _cutoff(days)
+    rows = conn.execute("""
+        SELECT id, status FROM tasks
+         WHERE created_at >= ? AND status IN ('done', 'failed')
+    """, (cut,)).fetchall()
+    failed = [r["id"] for r in rows if r["status"] == "failed"]
+    silent = 0
+    for tid in failed:
+        hit = conn.execute("""
+            SELECT 1 FROM messages
+             WHERE task_id = ? AND (text LIKE '%ended without a result%'
+                                 OR text LIKE '%agent_no_result%') LIMIT 1
+        """, (tid,)).fetchone()
+        if hit:
+            silent += 1
+    return {"terminal": len(rows), "failed": len(failed), "silent": silent,
+            "rate": _rate(len(failed), len(rows))}
+
+
+def open_gaps(path: str = KNOWN_GAPS) -> dict:
+    """The ledger's own count. An entry whose status is not CLOSED is open —
+    including one that forgot to say, which is the safe way to be wrong."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            body = fh.read()
+    except OSError:
+        return {"open": 0, "closed": 0, "titles": []}
+    entries = re.split(r"^### ", body, flags=re.M)[1:]
+    open_titles = []
+    closed = 0
+    for e in entries:
+        title = e.splitlines()[0].strip()
+        status = re.search(r"^\*\*Status:\*\*\s*(\S+)", e, flags=re.M)
+        if status and status.group(1).upper().startswith("CLOSED"):
+            closed += 1
+        else:
+            open_titles.append(title)
+    return {"open": len(open_titles), "closed": closed, "titles": open_titles}
+
+
+def report(days: int = 30) -> dict:
+    conn = get_readonly_conn()
+    try:
+        return {
+            "days": days,
+            "target": TARGET_SELF_BUILD,
+            "self_build": self_build(repo_root(), days),
+            "autonomy": autonomy(conn, days),
+            "evidence": evidence(conn, days),
+            "reliability": reliability(conn, days),
+            "gaps": open_gaps(),
+        }
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------- the printout
+
+def _bar(pct: float, width: int = 28) -> str:
+    filled = min(width, int(round(width * pct / 100.0)))
+    return "█" * filled + "·" * (width - filled)
+
+
+def render(r: dict) -> str:
+    sb, au, ev, rel, gaps = (r["self_build"], r["autonomy"], r["evidence"],
+                             r["reliability"], r["gaps"])
+    lines = [
+        f"Sisyphus builds Sisyphus — last {r['days']} days",
+        "",
+        f"  SELF-BUILD   {sb['rate']:5.1f}%  {_bar(sb['rate'])}  target {r['target']}%",
+        f"               {sb['delivered']} of {sb['total']} commits on the trunk, "
+        f"through {sb['merges']} Sisyphus merges",
+        "",
+        f"  autonomy     {au['rate']:5.1f}%  {_bar(au['rate'])}",
+        f"               {au['clean']} of {au['delivering']} delivering tasks "
+        f"needed no human turn ({au['questions']} questions asked)",
+        "",
+        f"  evidence     {ev['rate']:5.1f}%  {_bar(ev['rate'])}",
+        f"               {ev['backed']} of {ev['merged']} merges cite approval + a "
+        f"recorded check ({ev['approved']} approved)",
+        "",
+        f"  reliability  {100 - rel['rate']:5.1f}%  {_bar(100 - rel['rate'])}",
+        f"               {rel['failed']} of {rel['terminal']} terminal tasks failed, "
+        f"{rel['silent']} of them silently",
+        "",
+        f"  known gaps   {gaps['open']} open, {gaps['closed']} closed",
+    ]
+    lines += [f"               · {t}" for t in gaps["titles"]]
+    return "\n".join(lines)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--days", type=int, default=30, help="window in days (default 30)")
+    ap.add_argument("--json", action="store_true", help="machine-readable output")
+    args = ap.parse_args()
+    try:
+        r = report(args.days)
+    except RuntimeError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+    print(json.dumps(r, indent=2) if args.json else render(r))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
