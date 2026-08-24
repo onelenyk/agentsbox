@@ -140,20 +140,29 @@ Three candidates tried on 2026-08-24, all measured, none sufficient:
   where the plugin demonstrably does not come from the files it names. It is
   still the right oracle for MCP servers, which do respond to config.
 
-**Root cause, found 2026-08-24.** The `opencode` on PATH is not opencode. It is
-a Superset wrapper shell script that ends:
+**A wrong root cause, corrected the same day.** It looked like the `opencode`
+on PATH — a Superset wrapper that ends `export OPENCODE_CONFIG_DIR=<its own
+dir>` then `exec` — was overwriting our environment. It is not: the runner row
+already points at the real binary, `~/.opencode/bin/opencode`, so that wrapper
+never runs for a worker. The explanation was tidy, fit every symptom, and was
+false. Recorded because the next person will find the wrapper too.
 
-    export OPENCODE_CONFIG_DIR="/Users/lenyk/.superset/hooks/opencode"
-    exec "$REAL_BIN" "$@"
+**Where it actually comes from.** The plugin is installed into opencode's own
+package registry — `~/.cache/opencode/packages/package.json` carries
+`{"dependencies": {"oh-my-opencode": "latest"}}` — and loads from there.
+`opencode plugin <module>` is the command that puts it there.
 
-That directory's `opencode.json` carries `"plugin": ["oh-my-openagent@latest"]`.
-The export happens after our environment is built, so **no variable we set can
-survive** — which is why every env-based attempt failed identically.
+Everything config-shaped was tried and none of it removes the plugin:
+project-level `"plugin": []`, all three `OPENCODE_DISABLE_*` switches,
+`--pure`, `OPENCODE_CONFIG`, `OPENCODE_CONFIG_DIR`, `XDG_CONFIG_HOME` (which
+does move the config dir — `debug paths` confirms it) and `XDG_CACHE_HOME`
+(which makes it worse: a fresh install registers MORE servers, `lsp` and
+`codegraph`). Under every one of them the plugin is still listed, and where
+measured on a live roster, still loaded.
 
-Next candidate: point the runner row at the real binary
-(`~/.opencode/bin/opencode`) instead of the wrapper. That is a user decision,
-not ours: the wrapper may do other things the user wants, and rewiring their
-runner to skip it is a change to their tooling, not to Sisyphus.
+So this is not a setting Sisyphus can pass. The lever that would work is
+removing the plugin from the user's opencode install — their tooling and their
+decision, not something a worker launcher should do behind their back.
 
 How to re-measure in one run, without reading any source: create a task whose
 first instruction is "call comment() with the EXACT list of tool names you can
