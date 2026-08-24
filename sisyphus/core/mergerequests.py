@@ -335,6 +335,26 @@ def merge_block_reason(mr: dict) -> Optional[str]:
     return None
 
 
+def gate_state(mr: dict) -> str:
+    """The gate's verdict as one short tag, for a board card that has no room
+    for a sentence: ready | unreviewed | pending | changes | check-failed.
+
+    Asks merge_block_reason for the ready/not-ready decision rather than
+    re-deriving it, and classifies the reason from the ROW, never by matching
+    that function's wording — a badge that drifts out of step with the button
+    it predicts is worse than no badge. The order below mirrors the gate's own:
+    a missing approval outranks a failing check, because without a review there
+    is nothing for the check to contradict.
+    """
+    if not merge_block_reason(mr):
+        return "ready"
+    review = (mr.get("review_status") or "").strip()
+    if review != "approved":
+        return {"pending": "pending",
+                "changes_requested": "changes"}.get(review, "unreviewed")
+    return "check-failed"
+
+
 def verdict_line(mr: dict) -> str:
     """What this merge rests on, in one line for the thread — so the record of a
     merge names its evidence instead of leaving a reader to go looking for it."""
