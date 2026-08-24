@@ -328,6 +328,8 @@ def merge_block_reason(mr: dict) -> Optional[str]:
     """
     review = (mr.get("review_status") or "").strip()
     if review != "approved":
+        if review == "died":
+            return "the reviewer died without a verdict — a human must decide"
         return ("no review verdict is recorded — nobody has approved this"
                 if not review else f"review is {review}")
     if (mr.get("check_status") or "").strip() == "failed":
@@ -337,7 +339,7 @@ def merge_block_reason(mr: dict) -> Optional[str]:
 
 def gate_state(mr: dict) -> str:
     """The gate's verdict as one short tag, for a board card that has no room
-    for a sentence: ready | unreviewed | pending | changes | check-failed.
+    for a sentence: ready | unreviewed | pending | changes | died | check-failed.
 
     Asks merge_block_reason for the ready/not-ready decision rather than
     re-deriving it, and classifies the reason from the ROW, never by matching
@@ -351,7 +353,8 @@ def gate_state(mr: dict) -> str:
     review = (mr.get("review_status") or "").strip()
     if review != "approved":
         return {"pending": "pending",
-                "changes_requested": "changes"}.get(review, "unreviewed")
+                "changes_requested": "changes",
+                "died": "died"}.get(review, "unreviewed")
     return "check-failed"
 
 

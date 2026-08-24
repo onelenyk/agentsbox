@@ -65,6 +65,7 @@
                         'check-failed': ('✗ check failed', 'bad'),
                         'changes':      ('✗ changes requested', 'bad'),
                         'pending':      ('⏳ in review', ''),
+                        'died':         ('✗ review died', 'bad'),
                         'unreviewed':   ('○ unreviewed', ''),
                     }[t.gate] %}
                     <span class="badge{% if not gate_badge[1] %} badge--mono{% endif %}"
