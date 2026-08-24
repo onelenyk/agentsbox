@@ -25,7 +25,8 @@ TIERS = {
         "test_orchestrator", "test_preflight", "test_repo_context",
         "test_repos", "test_reviews",
         "test_runlogs", "test_runner_detect", "test_runner_profiles",
-        "test_runner_smoke", "test_runners", "test_sessions",
+        "test_runner_home", "test_runner_smoke", "test_runners",
+        "test_sessions",
         "test_small_modules", "test_store", "test_usage", "test_worker_env",
     ],
     "component": [

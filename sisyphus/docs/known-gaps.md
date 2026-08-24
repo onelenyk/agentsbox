@@ -102,91 +102,57 @@ left open until a probe that costs a second rather than a run turned up.
 claude-cli is already strict (--strict-mcp-config).
 
 ### The global opencode plugin loads in every worker, and its tools come with it
-**Status:** CLOSED 2026-08-24 as accepted, not fixed. The owner uses
-oh-my-opencode as their personal plugin and wants it. Nothing here is a defect
-to repair; what follows is what we are accepting, so that a future run behaving
-strangely is diagnosed in one step instead of ten.
+**Status:** CLOSED 2026-08-24 — worker runs get a HOME of our own
+(`core/runner_home.py`), and the roster went from 33 tools to 15.
 
-Accepted: every worker's roster carries `call_omo_agent`, `skill`, `skill_mcp`,
-`look_at`, `session_*`, `ast_grep_*`, `interactive_bash` and `background_*` on
-top of its own tools. `call_omo_agent` lets a worker start agents Sisyphus did
-not authorise, and `skill_mcp` reintroduces the indirection layer that once
-swallowed our tool calls entirely. Neither has misbehaved since: today's runs
-opened MRs and reported results with the plugin loaded throughout.
+Before (task-2ff103e9, a worker asked to name its own tools verbatim):
 
-Not accepted silently: if a run ever reports tools it should not have, or our
-own `sisyphus_agent_*` tools stop reaching the model, this is the first place to
-look — and the roster probe below tells you in one run rather than by reading
-source. Sisyphus's own MCP tools stay restricted server-side by session token
-regardless; the plugin cannot widen those.
+    ast_grep_replace ast_grep_search background_cancel background_output bash
+    call_omo_agent edit glob grep interactive_bash look_at lsp_diagnostics
+    lsp_find_references lsp_goto_definition lsp_prepare_rename lsp_rename
+    lsp_symbols read session_info session_list session_read session_search
+    sisyphus_agent_* skill skill_mcp todowrite webfetch write
 
-Measured 2026-08-24 (task-2ff103e9, first comment on the thread).
-A worker was asked to report its own tool roster verbatim before doing anything
-else. The MCP half of the isolation held — not one of the eight globally
-configured servers appeared. The plugin half did not:
+After:
 
-    call_omo_agent  skill  skill_mcp  look_at  session_info  session_list
-    session_read  session_search  ast_grep_search  ast_grep_replace
-    interactive_bash  background_cancel  background_output
+    bash edit glob grep read write webfetch todowrite skill task
+    sisyphus_agent_attach sisyphus_agent_comment sisyphus_agent_get_context
+    sisyphus_agent_finish sisyphus_agent_propose_subtasks
 
-Those are `oh-my-openagent`, loaded despite `"plugin": []` in the worktree's own
-opencode.json AND all three OPENCODE_DISABLE_* switches (8638138). So the
-comment in `core/runner_profiles.write_mcp_config` — *"plugin: [] overrides (not
-merges with) the user's global plugin list"* — states an intention that the
-roster contradicts. A comment asserting something measured false is worse than
-no comment; fixing the mechanism and fixing that sentence are the same job.
+**HOME was the lever, and there wasn't a second one.** opencode resolves config,
+cache, data and state from `$HOME` ahead of everything meant to move them. All
+of these were measured and left the roster unchanged: project-level
+`"plugin": []`, all three `OPENCODE_DISABLE_*` switches, `--pure` (it strips
+only REMOTE MCP servers — and, correcting an older note, does NOT strip our own
+project-local one), `OPENCODE_CONFIG`, `OPENCODE_CONFIG_DIR`, `XDG_CONFIG_HOME`
+(which really does move the config dir — `debug paths` confirms — and still
+changed nothing) and `XDG_CACHE_HOME` (which made it worse: a fresh install
+registered `lsp` and `codegraph` on top).
 
-What is NOT claimed here: our own tools reached the model (`sisyphus_agent_*`
-are in the roster and the run opened its MR), so the skill_mcp indirection that
-originally motivated the empty-plugin array is not currently swallowing them.
-The cost is surface and spend, not a broken run: `call_omo_agent` lets a worker
-spawn agents we did not authorise, and `skill_mcp`/`skill` reintroduce the
-indirection layer that once did break tool calls.
+**A wrong root cause, corrected the same day.** It looked like the `opencode` on
+PATH — a Superset wrapper ending `export OPENCODE_CONFIG_DIR=<its own dir>` then
+`exec` — was overwriting our environment. It is not: the runner row already
+points at the real binary, so that wrapper never runs for a worker. The
+explanation was tidy, fit every symptom, and was false. Kept here because the
+next person will find the wrapper too.
 
-Three candidates tried on 2026-08-24, all measured, none sufficient:
+**The home is an allowlist**, and that is the durable part: `.local/share/
+opencode` (credentials — opencode keeps them in the DATA dir, apart from the
+config that carries plugins, which is what makes this possible at all),
+`.claude`/`.claude.json`, `.gitconfig`, `.ssh`. Nothing else arrives. A worker
+that needs something new fails visibly and someone adds a line with a reason —
+the opposite of a worker quietly carrying the whole machine.
 
-- **`--pure`** — strips only the REMOTE MCP servers (websearch, context7,
-  grep_app); local servers and the plugin survive. This also corrects the older
-  note above: our own project-local MCP server was NOT stripped.
-- **`XDG_CONFIG_HOME` at a scratch dir** — safe for credentials (they live in
-  the DATA dir, `~/.local/share/opencode/auth.json`; verified with
-  `opencode auth list` under the redirect), and it does drop `~/.config/opencode`
-  from the resolved config. The live roster was **unchanged**. Reverted rather
-  than shipped: isolation that isolates nothing reads as protection.
-- **`opencode debug config`** — no longer trustworthy for this question. It
-  reports the same plugin list under every configuration tried, including ones
-  where the plugin demonstrably does not come from the files it names. It is
-  still the right oracle for MCP servers, which do respond to config.
+Not a judgement on the plugin: the owner uses oh-my-opencode and wants it. It
+still loads in their terminal. A Sisyphus worker is a different context, and
+what reaches it is now a decision rather than a leak.
 
-**A wrong root cause, corrected the same day.** It looked like the `opencode`
-on PATH — a Superset wrapper that ends `export OPENCODE_CONFIG_DIR=<its own
-dir>` then `exec` — was overwriting our environment. It is not: the runner row
-already points at the real binary, `~/.opencode/bin/opencode`, so that wrapper
-never runs for a worker. The explanation was tidy, fit every symptom, and was
-false. Recorded because the next person will find the wrapper too.
-
-**Where it actually comes from.** The plugin is installed into opencode's own
-package registry — `~/.cache/opencode/packages/package.json` carries
-`{"dependencies": {"oh-my-opencode": "latest"}}` — and loads from there.
-`opencode plugin <module>` is the command that puts it there.
-
-Everything config-shaped was tried and none of it removes the plugin:
-project-level `"plugin": []`, all three `OPENCODE_DISABLE_*` switches,
-`--pure`, `OPENCODE_CONFIG`, `OPENCODE_CONFIG_DIR`, `XDG_CONFIG_HOME` (which
-does move the config dir — `debug paths` confirms it) and `XDG_CACHE_HOME`
-(which makes it worse: a fresh install registers MORE servers, `lsp` and
-`codegraph`). Under every one of them the plugin is still listed, and where
-measured on a live roster, still loaded.
-
-So this is not a setting Sisyphus can pass. The lever that would work is
-removing the plugin from the user's opencode install — their tooling and their
-decision, not something a worker launcher should do behind their back.
-
-How to re-measure in one run, without reading any source: create a task whose
-first instruction is "call comment() with the EXACT list of tool names you can
-see, one per line, verbatim". The roster is the measurement. `opencode debug
-config` is NOT sufficient — it lists plugins under every configuration tried,
-including ones where the question is precisely whether they load.
+**How to re-measure in one run, without reading any source:** create a task
+whose first instruction is "call comment() with the EXACT list of tool names you
+can see, one per line, verbatim". The roster is the measurement. `opencode debug
+config` is NOT sufficient for plugins — it reported the same list under every
+configuration tried, including ones where the plugin demonstrably was not
+loading.
 
 ### `daemon stop`/`restart` killed live workers without a word
 **Status:** CLOSED 2026-08-24 — both refuse while a run is in flight, and name
