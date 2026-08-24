@@ -136,6 +136,28 @@ config), an `OPENCODE_DISABLE_*` switch not in the binary's help text, or
 pointing HOME/XDG_CONFIG_HOME at a scratch dir for the run (needs checking that
 opencode auth lives in the data dir, not the config dir).
 
+### `daemon stop`/`restart` killed live workers without a word
+**Status:** CLOSED 2026-08-24 — both refuse while a run is in flight, and name
+what they would have killed:
+
+    Not restarting: 2 worker run(s) in flight.
+      engineer on task-97a05500 (13m in)
+      mr-reviewer on task-be11f605 (2m in)
+    Their work dies with the daemon and the run has to start over.
+    Wait for them, stop the tasks in the UI, or pass --force.
+
+Found by doing it: a restart to deploy a UI change killed a live engineer 72
+seconds into its run (task-97a05500). The task survived only because the pinned
+retry had landed that morning, then spent its second attempt from scratch and
+timed out. Nothing anywhere had said the run was there.
+
+The session registry lives in the daemon's memory and the CLI is a different
+process, which is why this was never checked — so `/api/v1/health` now carries
+`workers`, the one endpoint the CLI already calls without a token. A daemon that
+is down or too old reports nothing: that is not proof the machine is idle, but
+there is nothing we could name, and refusing to stop a daemon we cannot reach
+would be worse.
+
 ## Review loop
 
 ### Merging an MR reclaims worktrees out from under a live worker

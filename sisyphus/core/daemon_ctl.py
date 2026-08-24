@@ -152,7 +152,36 @@ def start() -> dict:
     return {"via": "manual"}
 
 
-def stop() -> dict:
+def running_workers() -> list:
+    """Worker runs in flight right now, from the daemon's own health endpoint.
+
+    The session registry lives in the daemon's memory and this process is not
+    the daemon, so asking over HTTP is the only honest answer. A daemon that is
+    down or too old to report has no workers we could name — an empty list, and
+    the caller must not read that as proof that nothing is running.
+    """
+    h = health()
+    return list((h or {}).get("workers") or [])
+
+
+def describe_workers(workers: list) -> str:
+    """One line per run, for a human about to kill them."""
+    return "\n".join(f"  {w.get('role') or 'worker'} on {w.get('task_id')} "
+                      f"({w.get('elapsed_mins', 0)}m in)" for w in workers)
+
+
+def stop(force: bool = False) -> dict:
+    """Stop the daemon. Refuses while a worker is mid-run unless *force*.
+
+    Killing the daemon kills its workers: the run dies, its worktree is left
+    behind, and the task only recovers on the next boot's reconcile — which
+    costs the whole run again. That happened here on a live task and nothing
+    warned anybody, so the guard is a refusal, not a message printed after the
+    fact.
+    """
+    busy = running_workers()
+    if busy and not force:
+        return {"blocked": busy}
     if is_installed():
         # Unload stops it and disables KeepAlive respawn; RunAtLoad brings it
         # back at next login (or `daemon start`).
@@ -167,8 +196,11 @@ def stop() -> dict:
     return {"via": "manual", "killed": killed}
 
 
-def restart() -> dict:
-    stop()
+def restart(force: bool = False) -> dict:
+    busy = running_workers()
+    if busy and not force:
+        return {"blocked": busy}
+    stop(force=True)      # already decided above; do not re-ask
     for _ in range(25):
         if not is_running():
             break

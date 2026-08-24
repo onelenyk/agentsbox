@@ -70,6 +70,28 @@ def list_active() -> list:
                   key=lambda s: s.get("created_at", ""))
 
 
+def running(now=None) -> list:
+    """The live worker runs, as plain data: {task_id, role, elapsed_mins}.
+
+    Exists so a caller outside the web layer can ask "is anyone working right
+    now" — the CLI's `daemon stop`/`restart` used to kill running workers
+    without a word, because this registry lives in the daemon's memory and the
+    CLI is a different process. It now asks over /api/v1/health.
+    """
+    from datetime import datetime, timezone
+
+    now = now or datetime.now(timezone.utc)
+    out = []
+    for s in list_active():
+        try:
+            mins = int((now - datetime.fromisoformat(s["created_at"])).total_seconds() // 60)
+        except Exception:  # noqa: BLE001 — an unreadable stamp is not a reason to hide the run
+            mins = 0
+        out.append({"task_id": s.get("task_id", ""), "role": s.get("role", ""),
+                    "elapsed_mins": mins})
+    return out
+
+
 def list_for_task(task_id: str) -> list:
     """Same as list_active(), filtered to one task."""
     return [s for s in list_active() if s.get("task_id") == task_id]

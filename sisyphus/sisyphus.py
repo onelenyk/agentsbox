@@ -208,21 +208,37 @@ def daemon_start():
         click.echo(f"Started ({res['via']}).")
 
 
+def _refuse_while_busy(res, d, what: str) -> bool:
+    """Print what would have been killed and how to proceed anyway."""
+    busy = res.get("blocked")
+    if not busy:
+        return False
+    click.echo(f"Not {what}: {len(busy)} worker run(s) in flight.", err=True)
+    click.echo(d.describe_workers(busy), err=True)
+    click.echo("Their work dies with the daemon and the run has to start over.\n"
+               "Wait for them, stop the tasks in the UI, or pass --force.", err=True)
+    return True
+
+
 @daemon.command("stop")
-def daemon_stop():
+@click.option("-f", "--force", is_flag=True, help="Stop even while workers are running.")
+def daemon_stop(force):
     """Stop the daemon."""
     from core import daemon_ctl as d
 
-    d.stop()
+    if _refuse_while_busy(d.stop(force=force), d, "stopping"):
+        raise SystemExit(1)
     click.echo("Stopped.")
 
 
 @daemon.command("restart")
-def daemon_restart():
+@click.option("-f", "--force", is_flag=True, help="Restart even while workers are running.")
+def daemon_restart(force):
     """Restart the daemon (to pick up new code)."""
     from core import daemon_ctl as d
 
-    d.restart()
+    if _refuse_while_busy(d.restart(force=force), d, "restarting"):
+        raise SystemExit(1)
     click.echo("Restarted." if d.is_running() else "Restart issued (still starting…).")
 
 

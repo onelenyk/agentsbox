@@ -110,10 +110,64 @@ def test_start_refuses_foreign_process(monkeypatch):
 
 
 def test_restart_refuses_foreign_process(monkeypatch):
-    monkeypatch.setattr(d, "stop", lambda: {"via": "launchd"})
+    monkeypatch.setattr(d, "health", lambda: {"ok": True, "workers": []})
+    monkeypatch.setattr(d, "stop", lambda force=False: {"via": "launchd"})
     monkeypatch.setattr(d, "is_running", lambda: False)
     monkeypatch.setattr(d, "_port_listen_pid", lambda: 999)
     monkeypatch.setattr(d, "_managed_pid", lambda: None)
     result = d.restart()
     assert "error" in result
     assert result["foreign_pid"] == 999
+
+
+class TestStoppingDoesNotSilentlyKillWork:
+    """Killing the daemon kills its workers: the run dies, its worktree is left
+    behind, and the task only recovers on the next boot's reconcile — at the
+    cost of the whole run. That happened here on a live task and nothing warned
+    anybody."""
+
+    def test_stop_refuses_while_a_worker_is_running(self, monkeypatch):
+        monkeypatch.setattr(d, "health", lambda: {"ok": True, "workers": [
+            {"task_id": "task-1", "role": "engineer", "elapsed_mins": 13}]})
+        called = []
+        monkeypatch.setattr(d, "is_installed", lambda: called.append("stopped") or False)
+
+        res = d.stop()
+
+        assert [w["task_id"] for w in res["blocked"]] == ["task-1"]
+        assert called == [], "it must not have started stopping"
+
+    def test_restart_refuses_too(self, monkeypatch):
+        monkeypatch.setattr(d, "health", lambda: {"ok": True, "workers": [
+            {"task_id": "task-1", "role": "mr-reviewer", "elapsed_mins": 2}]})
+        monkeypatch.setattr(d, "start", lambda: (_ for _ in ()).throw(
+            AssertionError("must not restart")))
+
+        assert d.restart()["blocked"]
+
+    def test_force_goes_through(self, monkeypatch):
+        monkeypatch.setattr(d, "health", lambda: {"ok": True, "workers": [
+            {"task_id": "task-1", "role": "engineer", "elapsed_mins": 1}]})
+        monkeypatch.setattr(d, "is_installed", lambda: True)
+        monkeypatch.setattr(d, "_launchctl", lambda *a: None)
+
+        assert d.stop(force=True) == {"via": "launchd"}
+
+    def test_an_idle_daemon_stops_as_before(self, monkeypatch):
+        monkeypatch.setattr(d, "health", lambda: {"ok": True, "workers": []})
+        monkeypatch.setattr(d, "is_installed", lambda: True)
+        monkeypatch.setattr(d, "_launchctl", lambda *a: None)
+
+        assert "blocked" not in d.stop()
+
+    def test_a_daemon_that_cannot_answer_names_no_workers(self, monkeypatch):
+        """A down or older daemon reports nothing. That is not proof the
+        machine is idle, but there is nothing we could name, and refusing to
+        stop a daemon we cannot even reach would be worse."""
+        monkeypatch.setattr(d, "health", lambda: None)
+        assert d.running_workers() == []
+
+    def test_the_refusal_names_the_run_and_how_long_it_has_been_going(self):
+        text = d.describe_workers([{"task_id": "task-97a05500", "role": "engineer",
+                                    "elapsed_mins": 13}])
+        assert "engineer" in text and "task-97a05500" in text and "13m" in text
