@@ -175,6 +175,7 @@ def tool_prefix(rtype: str, server_name: str) -> str:
 # ── MCP wiring ──────────────────────────────────────────────────────────
 
 PROBE_TIMEOUT = 20
+_FOREIGN_CACHE: dict = {}
 
 
 def foreign_mcp_servers(binary: str) -> List[str]:
@@ -208,6 +209,32 @@ def foreign_mcp_servers(binary: str) -> List[str]:
 
     if not binary:
         return []
+    # Probe under the HOME the RUN will use, not the daemon's. Since worker runs
+    # got a home of their own, probing with the daemon's home reported the
+    # user's eight global servers and wrote eight stubs disabling things that
+    # were never going to be there — dead weight that reads as protection. The
+    # mechanism stays: it is the belt to the private home's braces, and it now
+    # measures the same environment the worker gets.
+    from .runner_home import build as _build_home
+    home = _build_home(os.environ.get("WORKSPACE_ROOT", ""))
+
+    # Nothing to find, and asking costs 12 seconds. A private home carries no
+    # opencode config dir — the allowlist never links one — so there is no
+    # foreign entry that could exist, and spawning the binary against a home it
+    # has never seen makes it bootstrap its package cache first.
+    if not os.path.isdir(os.path.join(home, ".config", "opencode")):
+        return []
+
+    # Cacheable now, and it was not before. While this probed the DAEMON's home
+    # it was reading the user's own config, which they can change under us at
+    # any moment; under a home we assemble ourselves the answer only changes
+    # when we change it.
+    cached = _FOREIGN_CACHE.get((binary, home))
+    if cached is not None:
+        return list(cached)
+
+    env = dict(os.environ)
+    env["HOME"] = home
     probe_dir = tempfile.mkdtemp(prefix="sisyphus-cfgprobe-")
     try:
         # Captured to a FILE, not a pipe. The resolved config runs past 64KB and
@@ -217,7 +244,7 @@ def foreign_mcp_servers(binary: str) -> List[str]:
         # synchronous and comes back whole.
         out_path = os.path.join(probe_dir, "resolved.json")
         with open(out_path, "w") as out:
-            r = subprocess.run([binary, "debug", "config"], cwd=probe_dir,
+            r = subprocess.run([binary, "debug", "config"], cwd=probe_dir, env=env,
                                stdout=out, stderr=subprocess.DEVNULL,
                                timeout=PROBE_TIMEOUT)
         if r.returncode != 0:
@@ -226,7 +253,9 @@ def foreign_mcp_servers(binary: str) -> List[str]:
             return []
         with open(out_path) as fh:
             mcp = (json.load(fh) or {}).get("mcp") or {}
-        return sorted(str(k) for k in mcp)
+        found = sorted(str(k) for k in mcp)
+        _FOREIGN_CACHE[(binary, home)] = found
+        return list(found)
     except Exception:  # noqa: BLE001
         logger.warning("could not probe %r for its global MCP roster — leaving it "
                        "in place", binary, exc_info=True)

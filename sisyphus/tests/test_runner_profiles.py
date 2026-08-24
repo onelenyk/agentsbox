@@ -192,11 +192,26 @@ class TestWriteMcpConfig:
         assert "model" not in cfg["agent"]["sisyphus-worker"]
         assert "hangs" in caplog.text
 
-    def test_the_users_global_mcp_roster_is_disabled_by_name(self, tmp_path):
+    def _probeable(self, tmp_path, monkeypatch):
+        """A worker HOME that carries an opencode config dir.
+
+        The probe short-circuits when there is none, and in production there
+        never is — the allowlist in core.runner_home does not link one, so
+        there is nothing a foreign entry could come from, and spawning the
+        binary against a home it has never seen makes it bootstrap its package
+        cache first (12s per call, measured in this suite). These tests are
+        about what the probe does when there IS something to find."""
+        rp._FOREIGN_CACHE.clear()
+        ws = tmp_path / "ws"
+        (ws / "runner-home" / ".config" / "opencode").mkdir(parents=True)
+        monkeypatch.setenv("WORKSPACE_ROOT", str(ws))
+
+    def test_the_users_global_mcp_roster_is_disabled_by_name(self, tmp_path, monkeypatch):
         """A live run's roster carried figma, playwright, macos-use, engram and
         websearch: opencode merges the user's global config into every run.
         Neither OPENCODE_CONFIG_DIR nor OPENCODE_CONFIG suppresses that (both
         measured); a project-level {"enabled": false} does."""
+        self._probeable(tmp_path, monkeypatch)
         fake = tmp_path / "fake-opencode"
         fake.write_text(
             "#!/bin/sh\n"
@@ -216,10 +231,11 @@ class TestWriteMcpConfig:
         assert cfg["mcp"]["sisyphus_agent"]["enabled"] is True
 
     def test_disabling_never_copies_the_users_credentials_into_the_worktree(
-            self, tmp_path):
+            self, tmp_path, monkeypatch):
         """The stub is bare on purpose: flipping a flag on a copy of the
         original entry would write the user's own URLs and environment into a
         file inside the worktree, which the agent reads."""
+        self._probeable(tmp_path, monkeypatch)
         fake = tmp_path / "fake-opencode"
         fake.write_text(
             "#!/bin/sh\n"
@@ -241,10 +257,42 @@ class TestWriteMcpConfig:
         cfg = json.loads((tmp_path / "wt" / "opencode.json").read_text())
         assert cfg["mcp"]["sisyphus_agent"]["enabled"] is True
 
-    def test_the_probe_reads_what_the_binary_resolves(self, tmp_path):
+    def test_the_probe_runs_under_the_home_the_worker_will_get(self, tmp_path,
+                                                              monkeypatch):
+        """It used to probe with the DAEMON's home, so once worker runs got a
+        home of their own it reported the user's global servers and wrote stubs
+        disabling things that were never going to be there — dead weight that
+        reads as protection."""
+        fake = tmp_path / "fake-opencode"
+        fake.write_text('#!/bin/sh\necho "{\\"mcp\\": {\\"$HOME\\": {}}}"\n')
+        fake.chmod(0o755)
+        self._probeable(tmp_path, monkeypatch)
+
+        seen = rp.foreign_mcp_servers(str(fake))
+
+        assert seen and seen[0].endswith("runner-home"), seen
+
+    def test_a_home_with_no_config_is_not_worth_asking_about(self, tmp_path,
+                                                             monkeypatch):
+        """The production case. Our allowlist links no config dir, so there is
+        nothing a foreign server could come from — and asking anyway costs the
+        binary a full package-cache bootstrap against a home it has never
+        seen."""
+        rp._FOREIGN_CACHE.clear()
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path / "ws"))
+        ran = tmp_path / "ran"
+        fake = tmp_path / "fake-opencode"
+        fake.write_text(f"#!/bin/sh\ntouch {ran}\necho '{{}}'\n")
+        fake.chmod(0o755)
+
+        assert rp.foreign_mcp_servers(str(fake)) == []
+        assert not ran.exists(), "it must not have spawned the binary at all"
+
+    def test_the_probe_reads_what_the_binary_resolves(self, tmp_path, monkeypatch):
         """Asked, not assumed: `opencode debug config` prints the configuration
         the binary will actually load, so this cannot drift from wherever
         opencode decides its config files live."""
+        self._probeable(tmp_path, monkeypatch)
         fake = tmp_path / "fake-opencode"
         fake.write_text("#!/bin/sh\necho '{\"mcp\": {\"b\": {}, \"a\": {}}}'\n")
         fake.chmod(0o755)
