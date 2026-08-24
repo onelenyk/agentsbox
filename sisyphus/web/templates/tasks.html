@@ -70,6 +70,23 @@
 </aside>
 
 <script>
+    // The rail's "What next?" button. Deliberately not a new endpoint: the
+    // copilot already reads the board and already proposes one action behind a
+    // Confirm button, so this is the standing question typed for you, not a
+    // second way to do the same thing.
+    const WHAT_NEXT = "What is the single most useful thing to work on next? "
+        + "Use the board state: a merge request the gate would let land, a repeated "
+        + "cause of failed runs, or an open entry in the written-down backlog. Say "
+        + "which one you picked and why it beats the others in one line. If nothing "
+        + "is worth starting, say exactly that and propose nothing.";
+    function askWhatNext() {
+        const cp = document.getElementById('copilot');
+        if (!cp.classList.contains('open')) cpToggle();
+        const ta = document.getElementById('cp-text');
+        ta.value = WHAT_NEXT;
+        cpSend();
+    }
+
     function cpToggle() {
         document.getElementById('copilot').classList.toggle('open');
         document.getElementById('cp-text').focus();

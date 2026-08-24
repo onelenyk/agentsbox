@@ -160,6 +160,7 @@ a.watch-po:hover { background: var(--panel-2); }
 .watch-po__row .n { font-family: var(--mono); font-size: 12px; font-weight: 650; color: var(--accent-hi); }
 .watch-po__goal { margin-top: 5px; font-size: 12px; color: var(--text); }
 .watch-po__next { margin-top: 5px; font-size: 11px; line-height: 1.45; color: var(--muted); }
+.watch-po__ask { margin-top: 8px; width: 100%; }
 
 /* The dashboard's live row is a wide three-column grid; in a 280px rail it
    stacks instead of being squeezed. */
@@ -177,7 +178,7 @@ a.watch-po:hover { background: var(--panel-2); }
 
 .watch--min { width: 46px; }
 .watch--min .watch__title, .watch--min .watch-sec__h, .watch--min .watch-po__goal,
-.watch--min .watch-po__next, .watch--min .watch-po .badge, .watch--min .watch-w .n,
+.watch--min .watch-po__next, .watch--min .watch-po .badge, .watch--min .watch-po__ask, .watch--min .watch-w .n,
 .watch--min .watch-w .s, .watch--min .watch-w .d, .watch--min .live-row .role,
 .watch--min .live-row .goal, .watch--min .live-row .meta, .watch--min .empty { display: none; }
 .watch--min .watch__head { justify-content: center; padding: 10px 0; }
