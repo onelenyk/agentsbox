@@ -278,15 +278,17 @@ def write_mcp_config(
     # enforced server-side (by the session token), so this needs no tool
     # allowlist.
     #
-    # "plugin": [] overrides (not merges with) the user's global plugin list —
-    # this is what actually stops the global oh-my-openagent plugin from
-    # hijacking the run (it reroutes all tool calls through its own
-    # task/skill_mcp indirection and never lets the model see our raw tools).
+    # "plugin": [] was believed to override the user's global plugin list. A live
+    # roster says otherwise: a worker asked to name its own tools reported
+    # call_omo_agent, skill_mcp, session_* and ast_grep_* with this array empty
+    # AND every OPENCODE_DISABLE_* switch set (task-2ff103e9, docs/known-gaps).
+    # It stays because it is the documented way to say "no plugins" and costs
+    # nothing, but do not read it as isolation — that gap is open and measured.
+    # What the array does still buy: our own tools reach the model, so the
+    # skill_mcp indirection that once swallowed them is not doing so now.
     # --pure was tried first, but confirmed by live probing (opencode debug
     # logs + a direct tool-list run) to strip project-local MCP servers too —
-    # with --pure our own server never even connects. An explicit empty
-    # "plugin" array disables just the plugin, leaving project-local "mcp"
-    # entries (this one included) intact.
+    # with --pure our own server never even connects.
     #
     # "agent": {<agent_name>: {"mode": "primary"}} defines our OWN agent
     # entirely within project config, instead of asking opencode to run one of

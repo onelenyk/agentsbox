@@ -86,11 +86,8 @@ One trap worth keeping: the resolved config runs past 64KB and opencode exits
 before a pipe drains, so `capture_output` returns it cut mid-string every time —
 the probe writes to a file.
 
-Open question, not a known leak: `debug config` still lists the user's plugins
-(engram.ts, oh-my-openagent) even with `"plugin": []` and the DISABLE switches
-set. The plugin hijack was fixed behaviourally in 8211edd/8638138, so this may
-be resolution output rather than what loads. Nobody has re-checked it against a
-live run's roster.
+The plugin half of this is NOT closed and has its own entry below — the live
+roster settled it.
 
 Earlier state, kept for the reasoning: the engineer's available-tools list
 included figma, playwright, macos-use, engram, websearch and the oh-my-openagent
@@ -102,6 +99,42 @@ and skill share. An empirical roster probe (invalid-tool trick) stalled —
 opencode ran headless for 5 minutes with zero output — which is why this was
 left open until a probe that costs a second rather than a run turned up.
 claude-cli is already strict (--strict-mcp-config).
+
+### The global opencode plugin loads in every worker, and its tools come with it
+**Status:** open, measured 2026-08-24 (task-2ff103e9, first comment on the thread).
+A worker was asked to report its own tool roster verbatim before doing anything
+else. The MCP half of the isolation held — not one of the eight globally
+configured servers appeared. The plugin half did not:
+
+    call_omo_agent  skill  skill_mcp  look_at  session_info  session_list
+    session_read  session_search  ast_grep_search  ast_grep_replace
+    interactive_bash  background_cancel  background_output
+
+Those are `oh-my-openagent`, loaded despite `"plugin": []` in the worktree's own
+opencode.json AND all three OPENCODE_DISABLE_* switches (8638138). So the
+comment in `core/runner_profiles.write_mcp_config` — *"plugin: [] overrides (not
+merges with) the user's global plugin list"* — states an intention that the
+roster contradicts. A comment asserting something measured false is worse than
+no comment; fixing the mechanism and fixing that sentence are the same job.
+
+What is NOT claimed here: our own tools reached the model (`sisyphus_agent_*`
+are in the roster and the run opened its MR), so the skill_mcp indirection that
+originally motivated the empty-plugin array is not currently swallowing them.
+The cost is surface and spend, not a broken run: `call_omo_agent` lets a worker
+spawn agents we did not authorise, and `skill_mcp`/`skill` reintroduce the
+indirection layer that once did break tool calls.
+
+How to re-measure in one run, without reading any source: create a task whose
+first instruction is "call comment() with the EXACT list of tool names you can
+see, one per line, verbatim". The roster is the measurement. `opencode debug
+config` is NOT sufficient — it lists plugins under every configuration tried,
+including ones where the question is precisely whether they load.
+
+Candidates not yet tried: `--pure` (rejected once for stripping project-local
+MCP servers too — worth re-testing now that the servers are named in project
+config), an `OPENCODE_DISABLE_*` switch not in the binary's help text, or
+pointing HOME/XDG_CONFIG_HOME at a scratch dir for the run (needs checking that
+opencode auth lives in the data dir, not the config dir).
 
 ## Review loop
 
