@@ -2,6 +2,9 @@
 
 Living documents — kept current, read these first:
 
+- [`GOAL.md`](GOAL.md) — the north star (*Sisyphus builds Sisyphus*), the
+  metrics that measure the distance to it, and the backlog that closes it.
+  Its numbers come from `tools/goal_report.py`, never from a keyboard.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — the domain model and engine: Task + Thread,
   the cold orchestrator loop, workers, merge requests.
 - [`testing.md`](testing.md) — the test taxonomy (unit / component / process /
