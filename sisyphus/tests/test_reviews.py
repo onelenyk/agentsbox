@@ -22,6 +22,16 @@ class TestEnsureReviewTask:
         assert f"Review-of-MR: {mr['id']}" in task["goal"]
         assert f"Origin-task: {mr['task_id']}" in task["goal"]
 
+    def test_the_instruction_points_at_where_the_verdict_actually_is(self, db_path):
+        """It used to say "its full output is on the thread" — the ORIGIN
+        task's thread, which a review-of-MR task cannot read. The verdict now
+        travels with the diff, so the instruction has to name that."""
+        goal = reviews.ensure_review_task(_mr())["goal"]
+        assert "get_mr_diff returns that verdict" in goal
+        assert "full output is on the thread" not in goal
+        # and it must still say what to do when the two disagree
+        assert "the record wins" in goal.replace("\n", " ")
+
     def test_dedup_second_call_returns_none(self, db_path):
         mr = _mr()
         t1 = reviews.ensure_review_task(mr)

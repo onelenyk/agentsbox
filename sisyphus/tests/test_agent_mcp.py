@@ -548,6 +548,98 @@ def test_get_mr_diff_fresh_fails_falls_back(db_path):
     assert result["diff"] == "snapshot diff\n"
 
 
+def _repo_with_a_branch(tmp_path):
+    """A real bare-ish clone so diff_range can resolve a head SHA."""
+    repo = tmp_path / "clone"
+    repo.mkdir()
+    git = ["git", "-C", str(repo)]
+    subprocess.run(git + ["init", "-b", "main"], capture_output=True)
+    subprocess.run(git + ["-c", "user.email=t@t", "-c", "user.name=t",
+                          "commit", "--allow-empty", "-m", "base"], capture_output=True)
+    subprocess.run(git + ["checkout", "-b", "sisyphus-task"], capture_output=True)
+    (repo / "file.txt").write_text("changed")
+    subprocess.run(git + ["add", "file.txt"], capture_output=True)
+    subprocess.run(git + ["-c", "user.email=t@t", "-c", "user.name=t",
+                          "commit", "-m", "change"], capture_output=True)
+    head = subprocess.run(git + ["rev-parse", "sisyphus-task"],
+                          capture_output=True, text=True).stdout.strip()
+    return repo, head
+
+
+class TestTheReviewerCanSeeTheRecordedCheck:
+    """A review-of-MR task is a DIFFERENT task from the one that produced the
+    MR, so core.verify's summary — posted to the origin task's thread — never
+    reached the reviewer reading it. The persona said "the recorded check is
+    authoritative" to an agent that had no way to see it, and three of the
+    eleven human questions in the ledger are a reviewer asking a human to
+    adjudicate sandbox-only failures while a green verdict sat unread."""
+
+    def _diff(self, db_path, tmp_path, **check):
+        from core import mergerequests
+        _grant("explorer", "get_mr_diff")
+        task_id, token = _session(db_path)
+        repo, head = _repo_with_a_branch(tmp_path)
+        mr = mergerequests.create_mr(task_id, "test-repo", "sisyphus-task", "main",
+                                     "Test", bare_path=str(repo))
+        if check:
+            mergerequests.set_check_result(mr["id"], **check)
+        out = _call(_client(), token, "get_mr_diff", {"mr_id": mr["id"]})
+        return json.loads(out["result"]["content"][0]["text"]), head
+
+    def test_a_passing_check_for_this_commit_is_handed_over_as_authoritative(
+            self, db_path, tmp_path):
+        from core import mergerequests
+        _grant("explorer", "get_mr_diff")
+        task_id, token = _session(db_path)
+        repo, head = _repo_with_a_branch(tmp_path)
+        mr = mergerequests.create_mr(task_id, "test-repo", "sisyphus-task", "main",
+                                     "Test", bare_path=str(repo))
+        mergerequests.set_check_result(mr["id"], "passed", output="1087 passed",
+                                       command="pytest -q", head=head)
+
+        out = _call(_client(), token, "get_mr_diff", {"mr_id": mr["id"]})
+        chk = json.loads(out["result"]["content"][0]["text"])["recorded_check"]
+
+        assert chk["status"] == "passed"
+        assert chk["covers_head"] is True
+        assert chk["command"] == "pytest -q"
+        assert "1087 passed" in chk["output_tail"]
+        assert "authoritative" in chk["meaning"]
+
+    def test_a_check_from_before_the_last_commit_does_not_cover_the_diff(
+            self, db_path, tmp_path):
+        """The whole point of a machine verdict is that it cannot be stretched
+        to cover work it never saw."""
+        result, _ = self._diff(db_path, tmp_path, status="passed",
+                               output="ok", command="pytest -q",
+                               head="0000000000000000000000000000000000000000")
+        chk = result["recorded_check"]
+        assert chk["covers_head"] is False
+        assert "does NOT cover" in chk["meaning"]
+
+    def test_no_recorded_check_never_reads_as_a_pass(self, db_path, tmp_path):
+        result, _ = self._diff(db_path, tmp_path)
+        chk = result["recorded_check"]
+        assert chk["status"] == "none"
+        assert "pass" not in chk["meaning"].lower() or "no machine verdict" in chk["meaning"]
+
+    def test_a_failing_check_is_not_the_reviewers_to_dismiss(self, db_path, tmp_path):
+        from core import mergerequests
+        _grant("explorer", "get_mr_diff")
+        task_id, token = _session(db_path)
+        repo, head = _repo_with_a_branch(tmp_path)
+        mr = mergerequests.create_mr(task_id, "test-repo", "sisyphus-task", "main",
+                                     "Test", bare_path=str(repo))
+        mergerequests.set_check_result(mr["id"], "failed", output="3 failed",
+                                       command="pytest -q", head=head)
+
+        out = _call(_client(), token, "get_mr_diff", {"mr_id": mr["id"]})
+        chk = json.loads(out["result"]["content"][0]["text"])["recorded_check"]
+
+        assert chk["status"] == "failed" and chk["covers_head"] is True
+        assert "Request changes" in chk["meaning"]
+
+
 def test_get_mr_diff_missing_errors(db_path):
     _grant("explorer", "get_mr_diff")
     _, token = _session(db_path)

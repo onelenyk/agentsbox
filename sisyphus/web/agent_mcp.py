@@ -336,6 +336,66 @@ def _list_mrs(session, repo="", **_):
             if not repo or m["repo"] == repo]
 
 
+def _recorded_check(mr: dict, head: str) -> dict:
+    """The verdict the DAEMON itself reached on this branch, handed over with
+    the diff.
+
+    A review-of-MR task is a different task from the one that produced the MR,
+    so core.verify's summary — posted to the ORIGIN task's thread — never
+    reached the reviewer reading it. The persona was told the recorded check is
+    authoritative over its own sandboxed run, and then had no way to see it:
+    three of the eleven human questions in the ledger are a reviewer asking a
+    human to adjudicate pre-existing environmental failures while a green
+    machine verdict for the same branch sat in the database unread.
+
+    ``covers_head`` is the honest half. A verdict is authoritative only for the
+    commit it ran against; if the branch has moved since, it is history, and
+    saying so is the difference between evidence and a number that merely looks
+    like one.
+    """
+    status = (mr.get("check_status") or "").strip()
+    if not status:
+        return {"status": "none",
+                "meaning": ("No automated check is recorded for this branch. You have "
+                            "no machine verdict to lean on — judge the diff itself, and "
+                            "say plainly what you could not verify.")}
+
+    ran_head = (mr.get("check_head") or "").strip()
+    covers = bool(ran_head) and bool(head) and ran_head == head
+    out = (mr.get("check_output") or "").strip().splitlines()
+    check = {
+        "status": status,                       # passed | failed | not_run
+        "command": mr.get("check_command") or "",
+        "ran_at": mr.get("check_ran_at") or "",
+        "ran_against": ran_head,
+        "covers_head": covers,
+        "output_tail": "\n".join(out[-12:]),
+    }
+    if status == "not_run":
+        check["meaning"] = ("The daemon tried and had nothing to run — this repo "
+                            "configures no check command. Absence of a check is not a "
+                            "pass; judge the diff itself.")
+    elif not covers:
+        check["meaning"] = (
+            f"This verdict was recorded against {ran_head[:12] or 'an unknown commit'}, "
+            f"and the branch head is now {head[:12] or 'unknown'}. It does NOT cover the "
+            f"current diff — treat this branch as unverified.")
+    elif status == "passed":
+        check["meaning"] = (
+            "The daemon ran this command itself, unsandboxed, against exactly this "
+            "commit, and it passed. It is authoritative over your own run: your "
+            "worktree is sandboxed and fails some tests for environmental reasons. "
+            "Do NOT ask a human to adjudicate a failure this record contradicts — "
+            "say which test failed for you, note that the recorded check passed, and "
+            "give your verdict on the diff.")
+    else:
+        check["meaning"] = (
+            "The daemon ran this command itself against exactly this commit and it "
+            "FAILED. This is not environmental and not yours to dismiss — the failing "
+            "output is below. Request changes.")
+    return check
+
+
 def _get_mr_diff(session, mr_id="", **_):
     mr = mergerequests.get_mr(mr_id)
     if not mr:
@@ -355,6 +415,8 @@ def _get_mr_diff(session, mr_id="", **_):
             f"commit on this branch and hides anything changed earlier on it."
         ),
     }
+
+    baseline["recorded_check"] = _recorded_check(mr, rng.get("head", ""))
 
     bare_path = mr.get("bare_path", "")
     if bare_path:
@@ -396,7 +458,8 @@ TOOLS = {
                  {"type": "object", "properties": {"title": {"type": "string"}, "description": {"type": "string"}}, "required": ["title"]}, _open_mr),
     "list_mrs": ("List open merge requests and their statuses.",
                  {"type": "object", "properties": {"repo": {"type": "string"}}}, _list_mrs),
-    "get_mr_diff": ("Get the diff/patch of a merge request.",
+    "get_mr_diff": ("Get the diff/patch of a merge request, plus the daemon's own "
+                    "recorded check verdict for that exact commit.",
                     {"type": "object", "properties": {"mr_id": {"type": "string"}}, "required": ["mr_id"]}, _get_mr_diff),
     "approve": ("Approve the reviewed work (a reviewer's way to finish).",
                 {"type": "object", "properties": {"summary": {"type": "string"}}}, _approve),

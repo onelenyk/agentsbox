@@ -10,6 +10,7 @@ from core.agents import (
     list_agents,
     update_agent,
 )
+from core.roles import ROLES
 
 
 @pytest.fixture
@@ -96,4 +97,28 @@ class TestUpgradeSeeding:
 
         init_agents_table()   # upgrade re-adds it, workers untouched
         assert get_agent("orchestrator")["kind"] == "orchestrator"
-        assert len(list_agents(kind="worker")) == 3
+        assert len(list_agents(kind="worker")) == len(ROLES)
+
+    def test_an_agent_the_code_pins_by_name_is_created_if_absent(self, db_path):
+        """core.reviews pins every review-of-MR task to 'mr-reviewer'. It lived
+        only as a row someone had made by hand, so on a database where nobody
+        had, every opened MR spawned a task pinned to an agent that does not
+        exist and the review never happened."""
+        from core.agents import get_agent, init_agents_table
+        from core.db import get_conn
+        conn = get_conn()
+        conn.execute("DELETE FROM agents WHERE name = 'mr-reviewer'")
+        conn.commit()
+        conn.close()
+        assert get_agent("mr-reviewer") is None
+
+        init_agents_table()
+        agent = get_agent("mr-reviewer")
+        assert agent and "get_mr_diff" in agent["tools"]
+
+    def test_a_tuned_persona_is_never_overwritten(self, db_path):
+        """Create-if-absent, not upsert: what someone edited is theirs."""
+        from core.agents import get_agent, init_agents_table, update_agent
+        update_agent("mr-reviewer", persona="my own words")
+        init_agents_table()
+        assert get_agent("mr-reviewer")["persona"] == "my own words"

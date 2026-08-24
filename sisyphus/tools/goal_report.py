@@ -18,13 +18,20 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from core.db import get_readonly_conn
-
 HERE = os.path.dirname(os.path.abspath(__file__))
 SISYPHUS_DIR = os.path.dirname(HERE)
 KNOWN_GAPS = os.path.join(SISYPHUS_DIR, "docs", "known-gaps.md")
+
+sys.path.insert(0, SISYPHUS_DIR)
+
+# core.db resolves DB_PATH at import time from WORKSPACE_ROOT, whose default is
+# the daemon's /workspace. Run from a shell the daemon did not set up — which is
+# every way a human runs this — that pointed at a file that does not exist. The
+# repo's own workspace/ is what `sisyphus.py daemon` uses; an explicit env var
+# still wins, so pointing the report at another install keeps working.
+os.environ.setdefault("WORKSPACE_ROOT", os.path.join(SISYPHUS_DIR, "workspace"))
+
+from core.db import DB_PATH, get_readonly_conn
 
 # A merge that carries a worker's branch home. Sisyphus names every task branch
 # sisyphus/task-<id>, so the trunk itself records which commits it authored.
@@ -163,6 +170,11 @@ def open_gaps(path: str = KNOWN_GAPS) -> dict:
 
 
 def report(days: int = 30) -> dict:
+    if not os.path.exists(DB_PATH):
+        # Say which file is missing. The bare sqlite error ("unable to open
+        # database file") names nothing and sends you reading source.
+        raise SystemExit(f"no database at {DB_PATH} — set WORKSPACE_ROOT to the "
+                         f"install you want to report on.")
     conn = get_readonly_conn()
     try:
         return {

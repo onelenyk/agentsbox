@@ -115,6 +115,24 @@ class TestRecording:
         assert row["check_command"] == "exit 3"
         assert row["check_ran_at"]
 
+    def test_the_verdict_records_which_commit_it_ran_against(self, repo, db_path,
+                                                             monkeypatch):
+        """A verdict without a commit can be stretched to cover work it never
+        saw. get_mr_diff reads this back to tell the reviewer whether the
+        recorded check still applies to the diff in front of it."""
+        import subprocess as sp
+        from core import mergerequests
+        mergerequests.init_mr_table()
+        mr = mergerequests.create_mr(task_id="t1", repo="r", source_branch="feature",
+                                     target_branch="main", title="", bare_path=str(repo),
+                                     base_branch="main", source_path=str(repo))
+        monkeypatch.setattr(verify, "check_command", lambda name: "true")
+        verify.run_and_record(mr)
+
+        head = sp.run(["git", "-C", str(repo), "rev-parse", "feature"],
+                      capture_output=True, text=True).stdout.strip()
+        assert mergerequests.get_mr(mr["id"])["check_head"] == head
+
     def test_unconfigured_repo_records_not_run(self, repo, db_path, monkeypatch):
         from core import mergerequests
         mergerequests.init_mr_table()

@@ -120,6 +120,14 @@ def run_and_record(mr: dict, timeout: int = DEFAULT_TIMEOUT) -> dict:
     task's thread so it is visible where the review happens."""
     from core import mergerequests, store
 
+    # Resolve the head BEFORE running: the verdict belongs to the commit the
+    # check saw, and a worker may push again while a long suite is running.
+    head = ""
+    try:
+        head = mergerequests.diff_range(mr).get("head", "")
+    except Exception:  # noqa: BLE001 — an unresolvable head is "unknown", not a failure
+        logger.exception("could not resolve head for %s", mr.get("id"))
+
     res = run_check(mr, timeout=timeout)
     try:
         mergerequests.set_check_result(
@@ -127,6 +135,7 @@ def run_and_record(mr: dict, timeout: int = DEFAULT_TIMEOUT) -> dict:
             status=("passed" if res.get("ok") else "failed") if res.get("ran") else "not_run",
             output=(res.get("output") or res.get("reason") or "")[:OUTPUT_TAIL],
             command=res.get("command", ""),
+            head=head,
         )
     except Exception:  # noqa: BLE001 — a bookkeeping failure must not lose the result
         logger.exception("could not record check result for %s", mr.get("id"))
