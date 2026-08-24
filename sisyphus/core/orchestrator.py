@@ -626,6 +626,14 @@ async def _handle_single_agent(task: dict) -> tuple:
         task_id, "orchestrator", kind="note",
         text=(f"[fail] {task['agent']} ended without a result "
               f"({runs} attempt{'' if runs == 1 else 's'})"))
+    try:
+        from .reviews import record_review_death
+        record_review_death(
+            task.get("goal", ""),
+            reason=f"ended without a result ({runs} attempt{'' if runs == 1 else 's'})",
+        )
+    except Exception:  # noqa: BLE001 — a bookkeeping error must not stop the fail
+        logger.exception("could not record review death for task %s", task_id)
     await _terminate(task_id, "failed")
     return Decision(action="fail", reason="pinned agent produced no result",
                     why="single-agent failure"), None
