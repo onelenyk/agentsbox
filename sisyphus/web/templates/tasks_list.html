@@ -56,7 +56,20 @@
                 {% endif %}
                 <div class="task-card__meta">
                     {% if t.child_total %}<span class="chip">⑂ {{ t.child_done }}/{{ t.child_total }}</span>{% endif %}
-                    {% if t.review_status == 'pending' %}<span class="badge badge--mono">⏳ review</span>{% elif t.review_status == 'approved' %}<span class="badge" style="color:var(--good);background:var(--good-bg);border-color:var(--good-bd)">✓ reviewed</span>{% elif t.review_status == 'changes_requested' %}<span class="badge" style="color:var(--bad);background:var(--bad-bg);border-color:var(--bad-bd)">✗ changes requested</span>{% endif %}
+                    {#- While the MR is open the badge is the merge gate's verdict, so the
+                        card predicts the button. Once it is settled it goes back to being a
+                        record of what the reviewer said. -#}
+                    {% if t.gate %}
+                    {% set gate_badge = {
+                        'ready':        ('✓ ready to merge', 'good'),
+                        'check-failed': ('✗ check failed', 'bad'),
+                        'changes':      ('✗ changes requested', 'bad'),
+                        'pending':      ('⏳ in review', ''),
+                        'unreviewed':   ('○ unreviewed', ''),
+                    }[t.gate] %}
+                    <span class="badge{% if not gate_badge[1] %} badge--mono{% endif %}"
+                          {%- if gate_badge[1] %} style="color:var(--{{ gate_badge[1] }});background:var(--{{ gate_badge[1] }}-bg);border-color:var(--{{ gate_badge[1] }}-bd)"{% endif %}>{{ gate_badge[0] }}</span>
+                    {% elif t.review_status == 'pending' %}<span class="badge badge--mono">⏳ review</span>{% elif t.review_status == 'approved' %}<span class="badge" style="color:var(--good);background:var(--good-bg);border-color:var(--good-bd)">✓ reviewed</span>{% elif t.review_status == 'changes_requested' %}<span class="badge" style="color:var(--bad);background:var(--bad-bg);border-color:var(--bad-bd)">✗ changes requested</span>{% endif %}
                     <span class="task-card__foot-info">🕐 <span class="reltime" data-created="{{ t.created_at }}"></span>{% if t.cost %} · 💰 {{ t.cost }}{% endif %}</span>
                 </div>
             </a>

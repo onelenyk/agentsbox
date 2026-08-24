@@ -141,6 +141,53 @@ class TestRoutes:
         assert mergerequests.get_mr(mr["id"])["status"] == "closed"
 
 
+class TestTheCardPredictsTheButton:
+    """A board card said "reviewed" and nothing else. The day the merge gate
+    started requiring a recorded check too, that badge stopped predicting the
+    button: a card over a failing check looked ready, and a branch nobody had
+    reviewed showed no badge at all — silence that reads as nothing to report.
+    """
+
+    def _card(self, db_path, tmp_path, **verdicts):
+        mr, real, bare = _mr(db_path, tmp_path, target="develop")
+        if "review" in verdicts:
+            mergerequests.set_review_status(mr["id"], verdicts["review"])
+        if "check" in verdicts:
+            mergerequests.set_check_result(mr["id"], verdicts["check"], command="pytest -q")
+        store.set_status(mr["task_id"], "done")
+        return TestClient(app).get("/api/tasks/list").text
+
+    def test_reviewed_and_checked_reads_as_ready(self, db_path, tmp_path):
+        html = self._card(db_path, tmp_path, review="approved", check="passed")
+        assert "ready to merge" in html
+
+    def test_an_approval_over_a_failing_check_never_reads_as_ready(self, db_path, tmp_path):
+        html = self._card(db_path, tmp_path, review="approved", check="failed")
+        assert "check failed" in html
+        assert "ready to merge" not in html
+
+    def test_a_branch_nobody_reviewed_says_so(self, db_path, tmp_path):
+        html = self._card(db_path, tmp_path)
+        assert "unreviewed" in html
+        assert "ready to merge" not in html
+
+    def test_the_badge_and_the_gate_cannot_disagree(self, db_path, tmp_path):
+        """gate_state asks merge_block_reason rather than re-deriving it."""
+        for i, (review, check, ready) in enumerate((("approved", "passed", True),
+                                                    ("approved", "failed", False),
+                                                    ("pending", "passed", False),
+                                                    (None, "passed", False))):
+            # Row logic only — no git needed, and _mr's real repo would collide
+            # with itself four times in one tmp_path.
+            mr = mergerequests.create_mr(f"t{i}", "myrepo", f"b{i}", "main", "t")
+            if review:
+                mergerequests.set_review_status(mr["id"], review)
+            mergerequests.set_check_result(mr["id"], check, command="pytest -q")
+            row = mergerequests.get_mr(mr["id"])
+            assert (mergerequests.gate_state(row) == "ready") is ready
+            assert (mergerequests.merge_block_reason(row) is None) is ready
+
+
 class TestBarePreservedForOpenMR:
     def test_cleanup_keeps_bare_while_mr_open_then_reclaims(self, db_path, tmp_path, monkeypatch):
         monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))

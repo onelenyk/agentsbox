@@ -929,6 +929,13 @@ async def tasks_list_view(request: Request):
                 t["child_done"] = sum(1 for c in kids if c["status"] == "done")
             mr = task_latest_mr.get(t["id"])
             t["review_status"] = mr.get("review_status") if mr and mr.get("review_status") else None
+            # While the branch can still land, the card shows what the MERGE
+            # GATE says, not just what a reviewer said. The two came apart the
+            # day the gate started requiring a recorded check as well: a card
+            # reading "reviewed" over a failing check looks ready and is not,
+            # and a branch nobody reviewed showed no badge at all — silence that
+            # reads as "nothing to report".
+            t["gate"] = mergerequests.gate_state(mr) if mr and mr["status"] == "open" else ""
 
             goal = t.get("goal", "")
             rest = goal.split("\n", 1)[1].strip() if "\n" in goal else ""

@@ -6,18 +6,14 @@
 
 <section class="watch-sec">
     <div class="watch-sec__h"><span class="t">Product owner</span></div>
-    {% if po %}
-    <a class="watch-po" href="/tasks/{{ po.task_id }}">
-        <div class="watch-po__row"><span class="led live"></span><span class="n">PO</span><span class="badge badge--accent">{{ po.state }}</span></div>
-        <div class="watch-po__goal">{{ po.goal }}</div>
-        <div class="watch-po__next">{{ po.next_action }}</div>
-    </a>
-    {% else %}
+    {# The absence stays visible on purpose: autonomy must not become switchable
+       on without a place that already shows it running. What needs a human is
+       NOT repeated here — the board's own "Needs you" and "To merge" columns
+       are three inches to the right and say it better. #}
     <div class="watch-po watch-po--none">
         <div class="watch-po__row"><span class="led idle"></span><span class="n">PO</span><span class="badge">not configured</span></div>
-        <div class="watch-po__next">No agent decides what to work on yet — goals still come from a human.</div>
+        <div class="watch-po__next">Nothing decides what to work on next yet — goals still come from you.</div>
     </div>
-    {% endif %}
 </section>
 
 <section class="watch-sec">
