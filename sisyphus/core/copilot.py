@@ -37,6 +37,39 @@ def board_snapshot() -> str:
             last = _last_meaningful(t["id"])
             lines.append(f"  - {t['id']} [{t.get('repo') or 'no repo'}] {t['goal']}"
                          + (f"  · {last}" if last else ""))
+    # Everything below was invisible to the copilot until now, which is why
+    # asking it "what should we work on?" produced guesses about task titles.
+    # A branch that cannot land, a run that died, and a gap someone wrote down
+    # are the three places real work actually comes from.
+    from core import ledger, mergerequests
+    open_mrs = mergerequests.list_mrs(status="open")
+    if open_mrs:
+        lines.append("\nOPEN MERGE REQUESTS:")
+        for mr in open_mrs[:15]:
+            blocked = mergerequests.merge_block_reason(mr)
+            state = f"BLOCKED: {blocked}" if blocked else "ready to merge (gate open)"
+            lines.append(f"  - {mr['id']} (task {mr['task_id']}) '{mr.get('title') or ''}' — {state}")
+
+    failed = [t for t in tasks if t["status"] == "failed"]
+    if failed:
+        # Dated on purpose. Without them, a failure from ten days ago reads as
+        # current: the first press of "What next?" proposed fixing a cause that
+        # had been fixed that morning, because every line looked like today.
+        lines.append("\nHOW RECENT RUNS DIED (dates matter — a cause last seen "
+                     "before a fix landed may already be gone; check the git log "
+                     "before proposing work on it):")
+        for t in failed[:8]:
+            when = (t.get("updated_at") or t.get("created_at") or "")[:10]
+            lines.append(f"  - {when} {t['id']}: "
+                         f"{_last_meaningful(t['id']) or 'no reason recorded'}")
+
+    for repo_name, gaps in ledger.open_gaps_by_repo().items():
+        if gaps["open"]:
+            lines.append(f"\nWRITTEN-DOWN BACKLOG for {repo_name} "
+                         f"(docs/known-gaps.md — {gaps['open']} open):")
+            for title in gaps["titles"][:10]:
+                lines.append(f"  - {title}")
+
     aps = autopilot.list_autopilots()
     if aps:
         lines.append("\nAUTOPILOTS:")

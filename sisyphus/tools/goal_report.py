@@ -31,7 +31,7 @@ sys.path.insert(0, SISYPHUS_DIR)
 # still wins, so pointing the report at another install keeps working.
 os.environ.setdefault("WORKSPACE_ROOT", os.path.join(SISYPHUS_DIR, "workspace"))
 
-from core.db import DB_PATH, get_readonly_conn
+from core.db import DB_PATH, get_readonly_conn  # noqa: E402
 
 # A merge that carries a worker's branch home. Sisyphus names every task branch
 # sisyphus/task-<id>, so the trunk itself records which commits it authored.
@@ -149,24 +149,11 @@ def reliability(conn, days: int) -> dict:
 
 
 def open_gaps(path: str = KNOWN_GAPS) -> dict:
-    """The ledger's own count. An entry whose status is not CLOSED is open —
-    including one that forgot to say, which is the safe way to be wrong."""
-    try:
-        with open(path, encoding="utf-8") as fh:
-            body = fh.read()
-    except OSError:
-        return {"open": 0, "closed": 0, "titles": []}
-    entries = re.split(r"^### ", body, flags=re.M)[1:]
-    open_titles = []
-    closed = 0
-    for e in entries:
-        title = e.splitlines()[0].strip()
-        status = re.search(r"^\*\*Status:\*\*\s*(\S+)", e, flags=re.M)
-        if status and status.group(1).upper().startswith("CLOSED"):
-            closed += 1
-        else:
-            open_titles.append(title)
-    return {"open": len(open_titles), "closed": closed, "titles": open_titles}
+    """The ledger's own count — parsed by core.ledger, which is also what the
+    board copilot reads, so the report and the board can never disagree about
+    what is still owed."""
+    from core.ledger import open_gaps as _parse
+    return _parse(path)
 
 
 def report(days: int = 30) -> dict:
