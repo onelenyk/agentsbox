@@ -4,7 +4,7 @@
             <div class="row" style="gap:10px">
                 <h2 style="font-size:15px">Merge request</h2>
                 <span class="status status--{{ 'done' if mr.status=='merged' else ('failed' if mr.status=='closed' else 'active') }}">{{ mr.status }}</span>
-                {% if mr.review_status == 'pending' %}<span class="badge badge--mono">⏳ review</span>{% elif mr.review_status == 'approved' %}<span class="badge" style="color:var(--good);background:var(--good-bg);border-color:var(--good-bd)">✓ reviewed</span>{% elif mr.review_status == 'changes_requested' %}<span class="badge" style="color:var(--bad);background:var(--bad-bg);border-color:var(--bad-bd)">✗ changes requested</span>{% endif %}
+                {% if mr.review_status == 'pending' %}<span class="badge badge--mono">⏳ review</span>{% elif mr.review_status == 'approved' %}<span class="badge" style="color:var(--good);background:var(--good-bg);border-color:var(--good-bd)">✓ reviewed</span>{% elif mr.review_status == 'changes_requested' %}<span class="badge" style="color:var(--bad);background:var(--bad-bg);border-color:var(--bad-bd)">✗ changes requested</span>{% elif mr.review_status == 'died' %}<span class="badge" style="color:var(--bad);background:var(--bad-bg);border-color:var(--bad-bd)">✗ review died</span>{% endif %}
             </div>
             <button type="button" class="btn btn--ghost btn--sm" onclick="this.closest('.modal-backdrop').remove()">Close</button>
         </div>

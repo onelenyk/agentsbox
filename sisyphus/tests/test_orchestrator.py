@@ -816,6 +816,38 @@ class TestSingleAgentMode:
         assert decision.action == "fail"
         assert store.get_task(task["id"])["status"] == "failed"
 
+    @pytest.mark.asyncio
+    async def test_review_of_mr_death_records_on_mr_and_tells_origin(self, db_path):
+        """A review-of-MR task whose runs all come back empty must, when it
+        finally fails, record the death on the MR row and tell the origin task
+        — not leave the MR 'pending' forever (mr-f7913881)."""
+        from core import mergerequests, reviews
+        origin = store.create_task("do some work", repo="sisyphus", agent="engineer")
+        mr = mergerequests.create_mr(task_id=origin["id"], repo="sisyphus",
+                                     source_branch="feature/x", target_branch="main",
+                                     title="Test MR")
+        mergerequests.set_review_status(mr["id"], "pending")
+        review = reviews.ensure_review_task(mr)
+        assert review is not None
+        assert review["agent"] == "mr-reviewer"
+
+        for _ in range(orchestrator.SINGLE_AGENT_ATTEMPTS):
+            store.post_message(review["id"], "mr-reviewer", kind="worker_started",
+                               text="spawning")
+            store.post_message(review["id"], "system", kind="worker_finished",
+                               text="mr-reviewer ended without reporting a result")
+            with patch("core.orchestrator._spawn_worker_safe", return_value=None), \
+                    patch("core.worker.cleanup_task"):
+                decision, bg = await handle_event(review["id"], "worker_finished")
+
+        assert decision.action == "fail"
+        assert store.get_task(review["id"])["status"] == "failed"
+        got = mergerequests.get_mr(mr["id"])
+        assert got["review_status"] == "died"
+        assert mergerequests.merge_block_reason(got) is not None
+        origin_msgs = store.get_thread(origin["id"])
+        assert any("review" in m["text"] and "died" in m["text"] for m in origin_msgs)
+
 
 class TestSpawnFailureNeverStalls:
     @pytest.mark.asyncio

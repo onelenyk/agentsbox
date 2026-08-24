@@ -104,3 +104,25 @@ def parse_review_marker(goal: str) -> Optional[dict]:
     o = _ORIGIN_PAT.search(goal)
     return {"mr_id": m.group(1).strip(), "origin_task": o.group(1).strip() if o else ""}
 
+
+def record_review_death(goal: str, reason: str) -> None:
+    """A review-of-MR task failed without ever delivering a verdict. Record the
+    death on the MR row (so the gate and the badge read it instead of a forever
+    'pending') and post a note on the origin task's thread, which is what the
+    rest of this module does for an approve/request_changes verdict."""
+    marker = parse_review_marker(goal)
+    if not marker:
+        return
+    if marker["mr_id"]:
+        try:
+            from . import mergerequests
+            mergerequests.set_review_status(marker["mr_id"], "died")
+        except Exception:  # noqa: BLE001 — the origin note must still be sent
+            logger.exception("could not record review death for %s", marker["mr_id"])
+    if marker["origin_task"]:
+        store.post_message(
+            marker["origin_task"], author="system", kind="note",
+            text=(f"the review of {marker['mr_id']} died — its reviewer "
+                  f"ended without a verdict: {reason}"),
+        )
+

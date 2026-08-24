@@ -86,6 +86,32 @@ class TestParseReviewMarker:
         assert marker["origin_task"] == ""
 
 
+class TestReviewDeath:
+    """A review-of-MR task that dies (all runs empty) must record the failure
+    on the MR row and tell the origin task — not leave the MR 'pending'
+    forever (regression: mr-f7913881, where the MR was then unmergeable with
+    nobody told)."""
+
+    def test_records_death_on_mr_and_tells_origin(self, db_path):
+        origin = store.create_task("do some work", agent="engineer")
+        mr = _mr(task_id=origin["id"])
+        mergerequests.set_review_status(mr["id"], "pending")
+        reviews.record_review_death(
+            f"Review-of-MR: {mr['id']}\nOrigin-task: {mr['task_id']}\n\nReview this MR.",
+            reason="mr-reviewer ended without a result (2 attempts)",
+        )
+        got = mergerequests.get_mr(mr["id"])
+        assert got["review_status"] == "died"
+        assert mergerequests.merge_block_reason(got) is not None
+        msgs = store.get_thread(mr["task_id"])
+        assert any("review" in m["text"] and "died" in m["text"] for m in msgs)
+
+    def test_noop_for_non_review_goal(self, db_path):
+        origin = store.create_task("some work", agent="engineer")
+        reviews.record_review_death("fix the login bug", reason="x")
+        assert store.get_thread(origin["id"]) == []
+
+
 class TestMergeRequestsMigration:
     def test_review_status_migration_is_idempotent(self, db_path):
         mergerequests.init_mr_table()
