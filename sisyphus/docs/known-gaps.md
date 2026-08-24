@@ -197,6 +197,25 @@ Not solved by this: WHAT the agent is doing. That needs parsing the runner's
 own stream format, which differs per CLI. "Alive or not" was the question being
 asked.
 
+### A repo can add MCP servers to the workers running on it
+**Status:** open, measured 2026-08-24.
+opencode merges a project's own `.opencode/opencode.json` into the run. Dropping
+one into a worktree with `{"mcp": {"sneaky": ...}}` put `sneaky` straight into
+the resolved config alongside ours. We overwrite `opencode.json` at the worktree
+root when we write our own, but nothing touches `.opencode/`.
+
+So a repository decides part of what the agent working on it can reach. That is
+the same trust level as the repo's `check:` command, which the daemon already
+runs unsandboxed — consistent, and worth stating rather than discovering. It
+matters for a repo you review rather than one you wrote: a local MCP server is a
+command executed inside the run.
+
+Not fixed yet because the right answer is not obvious. Deleting `.opencode/`
+from a checkout is destructive to a legitimate project setup and would show up
+in the engineer's diff. Candidates: leave it and say so (a repo is added by a
+human who vouches for it), or refuse to spawn when a checkout carries config we
+did not write, and make adding the repo the place that decision is taken.
+
 ## Review loop
 
 ### Merging an MR reclaims worktrees out from under a live worker
