@@ -796,12 +796,21 @@ class TestSingleAgentMode:
         assert store.get_task(task["id"])["status"] == "done"
 
     @pytest.mark.asyncio
-    async def test_no_result_fails_the_task(self, db_path):
+    async def test_no_result_costs_one_more_run_then_fails(self, db_path):
+        """An empty run buys a retry, not a verdict — but only one. See
+        tests/test_task_lifecycle.py for the ledger this came from."""
         task = store.create_task("solo", repo="sisyphus", agent="engineer")
         store.post_message(task["id"], "engineer", kind="worker_started", text="spawning")
         store.post_message(task["id"], "system", kind="worker_finished",
                            text="engineer ended without reporting a result")
 
+        with patch("core.orchestrator._spawn_worker_safe", return_value=None):
+            decision, bg = await handle_event(task["id"], "worker_finished")
+        assert decision.action == "spawn_worker"
+        assert store.get_task(task["id"])["status"] != "failed"
+
+        store.post_message(task["id"], "system", kind="worker_finished",
+                           text="engineer ended without reporting a result")
         with patch("core.worker.cleanup_task"):
             decision, bg = await handle_event(task["id"], "worker_finished")
         assert decision.action == "fail"
