@@ -70,7 +70,8 @@ async def _terminate_process(proc: asyncio.subprocess.Process) -> None:
         await proc.wait()
 
 
-async def _read_stream(stream: asyncio.StreamReader, buf: bytearray, activity: dict, cap: int) -> None:
+async def _read_stream(stream: asyncio.StreamReader, buf: bytearray, activity: dict,
+                       cap: int, on_output=None) -> None:
     """Read *stream* in chunks, stamping ``activity["ts"]`` on every chunk received.
 
     Reading incrementally (instead of waiting for EOF) is what makes idle
@@ -83,7 +84,16 @@ async def _read_stream(stream: asyncio.StreamReader, buf: bytearray, activity: d
         chunk = await stream.read(65536)
         if not chunk:
             return
-        activity["ts"] = time.monotonic()
+        now = time.monotonic()
+        # Report at most once a second. The point is "something is happening",
+        # and a chatty runner would otherwise touch the session on every 64KB.
+        if on_output is not None and now - activity.get("told", 0.0) >= 1.0:
+            activity["told"] = now
+            try:
+                on_output()
+            except Exception:  # noqa: BLE001 — telling nobody must not kill the read
+                logger.exception("progress callback failed")
+        activity["ts"] = now
         if len(buf) < cap:
             buf.extend(chunk[: cap - len(buf)])
 
@@ -94,6 +104,7 @@ async def _monitored_communicate(
     idle_timeout: Optional[int],
     cancel_event: Optional[asyncio.Event],
     poll_interval: float = 0.5,
+    on_output=None,
 ) -> tuple:
     """Drive a subprocess to completion while enforcing total/idle timeouts and cancellation.
 
@@ -104,8 +115,10 @@ async def _monitored_communicate(
     activity = {"ts": start_time}
     stdout_buf, stderr_buf = bytearray(), bytearray()
 
-    stdout_task = asyncio.create_task(_read_stream(proc.stdout, stdout_buf, activity, OUTPUT_SIZE_CAP))
-    stderr_task = asyncio.create_task(_read_stream(proc.stderr, stderr_buf, activity, OUTPUT_SIZE_CAP))
+    stdout_task = asyncio.create_task(
+        _read_stream(proc.stdout, stdout_buf, activity, OUTPUT_SIZE_CAP, on_output))
+    stderr_task = asyncio.create_task(
+        _read_stream(proc.stderr, stderr_buf, activity, OUTPUT_SIZE_CAP, on_output))
     waiters = {stdout_task, stderr_task}
     cancel_task = None
     if cancel_event is not None:
@@ -158,6 +171,7 @@ async def launch_agent(
     agent: Optional[str] = None,
     model_override: Optional[str] = None,
     mcp_config: Optional[str] = None,
+    on_output=None,
 ) -> AgentResult:
     """Spawn AI runner subprocess, capture output.
 
@@ -330,7 +344,8 @@ async def launch_agent(
                    runner=runner.get("name", "") if isinstance(runner, dict) else "")
     try:
         try:
-            status, err, stdout, stderr = await _monitored_communicate(proc, timeout, idle_timeout, cancel_event)
+            status, err, stdout, stderr = await _monitored_communicate(
+                proc, timeout, idle_timeout, cancel_event, on_output=on_output)
         except Exception as e:
             try:
                 proc.kill()

@@ -54,6 +54,14 @@ def _enrich_sessions(raw_sessions):
             s["elapsed_mins"] = int((now - started).total_seconds() // 60)
         except Exception:
             s["elapsed_mins"] = 0
+        # Seconds since the runner last wrote anything. None = not a byte yet,
+        # which on a run that has been going a while is the interesting case.
+        s["quiet_s"] = None
+        if s.get("last_output_at"):
+            try:
+                s["quiet_s"] = int((now - datetime.fromisoformat(s["last_output_at"])).total_seconds())
+            except Exception:  # noqa: BLE001
+                s["quiet_s"] = None
         task = store.get_task(s["task_id"])
         s["task_title"] = store.task_display_title(task) if task else (s["task_id"] or "")
         enriched.append(s)

@@ -525,6 +525,9 @@ async def spawn_worker(
                 model_override=model_override,
                 cancel_event=cancel_event,
                 mcp_config=mcp_config,
+                # So the UI can tell a worker that is thinking from one that
+                # has died. The thread stays empty either way.
+                on_output=lambda: sessions.note_output(task_id),
             )
     finally:
         cancellation.unregister(task_id, role)
@@ -628,6 +631,7 @@ async def spawn_decider(task_id: str, agent_name: str, thread_text: str,
             timeout=timeout, idle_timeout=idle_timeout, step_id=f"{task_id}-orchestrator",
             runner_name=runner_name, agent=_WORKER_AGENT,
             model_override=model_override, mcp_config=mcp_config,
+            on_output=lambda: sessions.note_output(task_id),
         )
         record_run(task_id, agent_name, result.model, result.usage, result.duration_ms)
         session = sessions.resolve(token)

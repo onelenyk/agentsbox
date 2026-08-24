@@ -96,6 +96,11 @@
         <div class="prop"><span class="k">Role</span><span class="v mono">{{ icons.get(s.role, '⚙️') }} {{ s.role }}{% if s.kind == 'decider' %} <span class="badge badge--accent">decider</span>{% endif %}</span></div>
         <div class="prop"><span class="k">Instruction</span><span class="v">{{ s.instruction }}</span></div>
         <div class="prop"><span class="k">Elapsed</span><span class="v mono">{{ s.elapsed_mins }}m{% if s.model %} · {{ s.model }}{% endif %}{% if s.runner %} · {{ s.runner }}{% endif %}</span></div>
+        {# An agent posts to the thread only when it chooses to, so a long
+           silence there looks the same whether it is working carefully or has
+           died. This line is the difference, and the daemon knew it all along —
+           it stamps the same activity to enforce the idle timeout. #}
+        <div class="prop"><span class="k">Runner</span><span class="v mono">{% if s.quiet_s is none %}no output yet{% elif s.quiet_s < 60 %}last output {{ s.quiet_s }}s ago{% else %}last output {{ (s.quiet_s // 60)|int }}m ago{% endif %}</span></div>
     </div>
     {% endfor %}
     {% endif %}
