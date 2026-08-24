@@ -68,8 +68,9 @@ run; treat DB_READONLY errors as environmental", or a test-only DB path
 exemption in core/db.py (risky — needs care not to become a bypass).
 
 ### A worker's tool roster carries the user's whole desktop
-**Status:** CLOSED 2026-08-24 — the worktree's own opencode.json now disables
-every foreign MCP server by name (`core.runner_profiles.foreign_mcp_servers`).
+**Status:** CLOSED 2026-08-24 — the MCP half. The plugin half has its own
+entry below, with its cause. The worktree's own opencode.json disables every
+foreign MCP server by name (`core.runner_profiles.foreign_mcp_servers`).
 Proven against the real binary: eight servers (websearch, context7, grep_app,
 engram, macos-use, playwright, android, figma) resolve `enabled=False` inside a
 generated worktree while ours stays enabled.
@@ -124,17 +125,41 @@ The cost is surface and spend, not a broken run: `call_omo_agent` lets a worker
 spawn agents we did not authorise, and `skill_mcp`/`skill` reintroduce the
 indirection layer that once did break tool calls.
 
+Three candidates tried on 2026-08-24, all measured, none sufficient:
+
+- **`--pure`** — strips only the REMOTE MCP servers (websearch, context7,
+  grep_app); local servers and the plugin survive. This also corrects the older
+  note above: our own project-local MCP server was NOT stripped.
+- **`XDG_CONFIG_HOME` at a scratch dir** — safe for credentials (they live in
+  the DATA dir, `~/.local/share/opencode/auth.json`; verified with
+  `opencode auth list` under the redirect), and it does drop `~/.config/opencode`
+  from the resolved config. The live roster was **unchanged**. Reverted rather
+  than shipped: isolation that isolates nothing reads as protection.
+- **`opencode debug config`** — no longer trustworthy for this question. It
+  reports the same plugin list under every configuration tried, including ones
+  where the plugin demonstrably does not come from the files it names. It is
+  still the right oracle for MCP servers, which do respond to config.
+
+**Root cause, found 2026-08-24.** The `opencode` on PATH is not opencode. It is
+a Superset wrapper shell script that ends:
+
+    export OPENCODE_CONFIG_DIR="/Users/lenyk/.superset/hooks/opencode"
+    exec "$REAL_BIN" "$@"
+
+That directory's `opencode.json` carries `"plugin": ["oh-my-openagent@latest"]`.
+The export happens after our environment is built, so **no variable we set can
+survive** — which is why every env-based attempt failed identically.
+
+Next candidate: point the runner row at the real binary
+(`~/.opencode/bin/opencode`) instead of the wrapper. That is a user decision,
+not ours: the wrapper may do other things the user wants, and rewiring their
+runner to skip it is a change to their tooling, not to Sisyphus.
+
 How to re-measure in one run, without reading any source: create a task whose
 first instruction is "call comment() with the EXACT list of tool names you can
 see, one per line, verbatim". The roster is the measurement. `opencode debug
 config` is NOT sufficient — it lists plugins under every configuration tried,
 including ones where the question is precisely whether they load.
-
-Candidates not yet tried: `--pure` (rejected once for stripping project-local
-MCP servers too — worth re-testing now that the servers are named in project
-config), an `OPENCODE_DISABLE_*` switch not in the binary's help text, or
-pointing HOME/XDG_CONFIG_HOME at a scratch dir for the run (needs checking that
-opencode auth lives in the data dir, not the config dir).
 
 ### `daemon stop`/`restart` killed live workers without a word
 **Status:** CLOSED 2026-08-24 — both refuse while a run is in flight, and name
