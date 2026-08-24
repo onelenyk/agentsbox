@@ -218,10 +218,12 @@ def foreign_mcp_servers(binary: str) -> List[str]:
     from .runner_home import build as _build_home
     home = _build_home(os.environ.get("WORKSPACE_ROOT", ""))
 
-    # Nothing to find, and asking costs 12 seconds. A private home carries no
-    # opencode config dir — the allowlist never links one — so there is no
-    # foreign entry that could exist, and spawning the binary against a home it
-    # has never seen makes it bootstrap its package cache first.
+    # Nothing to find, and asking costs 12 seconds: spawning the binary against
+    # a home it has never seen makes it bootstrap its package cache first. The
+    # allowlist in core.runner_home links no config dir, so normally there is
+    # none. That is not a guarantee — opencode CREATES one when something asks
+    # it to install a plugin (docs/known-gaps.md: a repo's own .opencode config
+    # can) — which is precisely why this checks rather than assumes.
     if not os.path.isdir(os.path.join(home, ".config", "opencode")):
         return []
 

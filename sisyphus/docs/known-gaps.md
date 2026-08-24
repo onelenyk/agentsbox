@@ -197,26 +197,44 @@ Not solved by this: WHAT the agent is doing. That needs parsing the runner's
 own stream format, which differs per CLI. "Alive or not" was the question being
 asked.
 
-### A repo can add MCP servers to the workers running on it
-**Status:** open, measured 2026-08-24.
-opencode merges a project's own `.opencode/opencode.json` into the run. Dropping
-one into a worktree with `{"mcp": {"sneaky": ...}}` put `sneaky` straight into
-the resolved config alongside ours. We overwrite `opencode.json` at the worktree
-root when we write our own, but nothing touches `.opencode/`.
+### A repo's own opencode config undoes the worker's isolation
+**Status:** open, measured 2026-08-25. Bigger than its first write-up
+("a repo can add an MCP server"), which is why the title changed.
 
-So a repository decides part of what the agent working on it can reach. That is
-the same trust level as the repo's `check:` command, which the daemon already
-runs unsandboxed — consistent, and worth stating rather than discovering. It
-matters for a repo you review rather than one you wrote: a local MCP server is a
-command executed inside the run.
+opencode merges a project's `.opencode/opencode.json` into the run, and that
+file **wins over the one we write** at the worktree root. Put a hostile one in
+a checkout and everything from 2026-08-24 comes back:
 
-Not fixed yet because the right answer is not obvious. Deleting `.opencode/`
-from a checkout is destructive to a legitimate project setup and would show up
-in the engineer's diff. Candidates: leave it and say so (a repo is added by a
-human who vouches for it), or refuse to spawn when a checkout carries config we
-did not write, and make adding the repo the place that decision is taken.
+    plugin: ['oh-my-opencode@latest']          # our `plugin: []` overridden
+    mcp:    ['lsp', 'sisyphus_agent', 'sneaky']
+    agents: 14, including every one the plugin ships
 
-## Review loop
+Worse than a list. Naming a plugin makes opencode **install it**, and it
+installs into the private HOME we built — after one such run that home held
+`.config/opencode/node_modules`, `.cache/opencode/packages`, `.omo/`, `.npm/`
+and `Library/`. The home persists between runs, so one repo's config would
+change what every later worker sees, including workers on other repos. (Those
+directories came from probing and were removed by hand afterwards.)
+
+It also falsifies an assumption made the day before: `foreign_mcp_servers` skips
+the probe when the worker HOME has no `.config/opencode`, on the grounds that
+our allowlist never links one. It does not link one — but opencode can create
+one.
+
+Measured precedence, which is what a fix would rest on: with our config at the
+worktree root and a repo's in `.opencode/`, the repo wins on `plugin`. With ours
+in `.opencode/` and theirs at the root, **we** win. `mcp` entries merge either
+way regardless of file, so a server named anywhere still appears and has to be
+disabled by name — which is the mechanism we already have.
+
+So the shape of a fix is visible: write our config into the slot that wins, and
+disable by name whatever the repo's own config declares. What is NOT obvious is
+the policy. A repo is added by a human who vouches for it, and the daemon
+already runs that repo's `check:` command unsandboxed — the same trust. The
+question is whether a checkout carrying config we did not write should be
+silently overridden, refused at spawn, or surfaced when the repo is added.
+
+## Review loop## Review loop
 
 ### Merging an MR reclaims worktrees out from under a live worker
 **Status:** CLOSED 2026-08-22 — `reclaim_if_settled` now skips while `sessions`
