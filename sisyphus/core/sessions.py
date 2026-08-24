@@ -43,6 +43,22 @@ def mint(task_id: str, role: str, worktree: str = "", instruction: str = "",
     return token
 
 
+def note_output(task_id: str) -> None:
+    """The runner for *task_id* just produced something on stdout/stderr.
+
+    This is the only signal that separates a worker which is thinking from one
+    that has died. The thread stays empty either way — a run posts to it only
+    when the agent chooses to call `comment` — so "13 minutes and no message"
+    reads identically for a run doing careful work and a run that is already a
+    corpse. The daemon has always known the difference (it stamps the same
+    activity to enforce the idle timeout); it simply never told anyone.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    for s in _SESSIONS.values():
+        if s.get("task_id") == task_id:
+            s["last_output_at"] = now
+
+
 def resolve(token: str):
     """Return the session dict for *token*, or None if unknown/revoked."""
     return _SESSIONS.get(token)
@@ -88,7 +104,8 @@ def running(now=None) -> list:
         except Exception:  # noqa: BLE001 — an unreadable stamp is not a reason to hide the run
             mins = 0
         out.append({"task_id": s.get("task_id", ""), "role": s.get("role", ""),
-                    "elapsed_mins": mins})
+                    "elapsed_mins": mins,
+                    "last_output_at": s.get("last_output_at", "")})
     return out
 
 

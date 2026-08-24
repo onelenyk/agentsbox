@@ -158,6 +158,27 @@ is down or too old reports nothing: that is not proof the machine is idle, but
 there is nothing we could name, and refusing to stop a daemon we cannot reach
 would be worse.
 
+### A working agent and a dead one looked exactly the same
+**Status:** CLOSED 2026-08-24 — the task page now says when the runner last
+produced anything: `no output yet` / `last output 4s ago` / `last output 3m ago`.
+
+An agent writes to the thread only when it chooses to call `comment`. One run
+posted "Understood: ..." and then said nothing for thirteen minutes while it
+read code — and there was no way, from the page, to tell that from a corpse.
+The role and the elapsed minutes were already shown; neither answers the
+question anyone actually has.
+
+The daemon knew all along. `launcher._read_stream` stamps `activity["ts"]` on
+every chunk to enforce the idle timeout, and simply never told anyone. It now
+also calls an `on_output` callback — throttled to once a second, so a chatty
+runner cannot touch the session on every 64KB, and wrapped so that telling
+nobody can never break the read. `sessions.note_output` stamps it on every live
+session for that task.
+
+Not solved by this: WHAT the agent is doing. That needs parsing the runner's
+own stream format, which differs per CLI. "Alive or not" was the question being
+asked.
+
 ## Review loop
 
 ### Merging an MR reclaims worktrees out from under a live worker

@@ -129,3 +129,55 @@ class TestTimeouts:
 
         assert status == "completed", "output should have kept the idle timer alive"
         assert out.count(b"still working") == 12
+
+
+class TestProgressReporting:
+    """The read loop already stamps activity to enforce the idle timeout. It
+    now also tells someone, so the UI can say "last output 4s ago" instead of
+    leaving a working run indistinguishable from a dead one."""
+
+    @pytest.mark.asyncio
+    async def test_each_chunk_reports_at_most_once_a_second(self):
+        import asyncio
+        from core import launcher
+
+        told = []
+        activity = {"ts": 0.0}
+        stream = asyncio.StreamReader()
+        for _ in range(5):
+            stream.feed_data(b"x" * 10)
+        stream.feed_eof()
+
+        await launcher._read_stream(stream, bytearray(), activity, 1000,
+                                    lambda: told.append(1))
+
+        # Five chunks arrive back to back; the throttle collapses them to one.
+        assert len(told) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_failing_callback_never_breaks_the_read(self):
+        import asyncio
+        from core import launcher
+
+        buf = bytearray()
+        stream = asyncio.StreamReader()
+        stream.feed_data(b"hello")
+        stream.feed_eof()
+
+        def boom():
+            raise RuntimeError("nobody is listening")
+
+        await launcher._read_stream(stream, buf, {"ts": 0.0}, 1000, boom)
+        assert bytes(buf) == b"hello"
+
+    @pytest.mark.asyncio
+    async def test_no_callback_is_fine(self):
+        import asyncio
+        from core import launcher
+
+        buf = bytearray()
+        stream = asyncio.StreamReader()
+        stream.feed_data(b"hello")
+        stream.feed_eof()
+        await launcher._read_stream(stream, buf, {"ts": 0.0}, 1000)
+        assert bytes(buf) == b"hello"

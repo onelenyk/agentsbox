@@ -87,3 +87,46 @@ class TestTokenNeverLeaks:
         sessions.mint("task-x", "reviewer")
         for s in sessions.list_for_task("task-x"):
             assert "token" not in s
+
+
+class TestTellingThinkingFromDead:
+    """A run posts to the thread only when the agent chooses to call `comment`.
+    So "13 minutes and no message" reads identically for a worker doing careful
+    work and one that is already a corpse. The daemon has always known the
+    difference — it stamps the same activity to enforce the idle timeout — it
+    just never told anyone."""
+
+    def test_a_fresh_session_has_produced_nothing(self):
+        sessions.clear()
+        sessions.mint("task-1", "engineer")
+        assert sessions.running()[0]["last_output_at"] == ""
+
+    def test_output_is_stamped_on_the_run(self):
+        sessions.clear()
+        sessions.mint("task-1", "engineer")
+        sessions.note_output("task-1")
+        assert sessions.running()[0]["last_output_at"]
+
+    def test_it_stamps_every_session_of_that_task_and_no_other(self):
+        sessions.clear()
+        sessions.mint("task-1", "engineer")
+        sessions.mint("task-1", "reviewer")
+        sessions.mint("task-2", "engineer")
+        sessions.note_output("task-1")
+        by_task = {}
+        for s in sessions.running():
+            by_task.setdefault(s["task_id"], []).append(bool(s["last_output_at"]))
+        assert by_task["task-1"] == [True, True]
+        assert by_task["task-2"] == [False]
+
+    def test_a_stamp_for_a_task_with_no_session_is_harmless(self):
+        """The callback fires from the launcher's read loop; a session revoked
+        mid-run must not turn that into an exception."""
+        sessions.clear()
+        sessions.note_output("task-gone")
+
+    def test_running_reports_what_the_cli_needs_to_name_a_run(self):
+        sessions.clear()
+        sessions.mint("task-1", "engineer")
+        row = sessions.running()[0]
+        assert set(row) == {"task_id", "role", "elapsed_mins", "last_output_at"}
