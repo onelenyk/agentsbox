@@ -1339,9 +1339,15 @@ def _mr_view_ctx(request, mr):
     patch = attachments.read(mr["task_id"], "change.patch") or ""
     lines, adds, dels = _classify_diff(patch)
     resolved_files = [p for p in (mr.get("merge_resolved") or "").split("\n") if p.strip()]
+    # The template asks the gate rather than re-deriving it. It used to carry its
+    # own copy of the rule ("pending or changes_requested"), which is how a NULL
+    # review status ended up rendering a plain Merge button for a branch nobody
+    # had reviewed.
     return {"request": request, "mr": mr, "branches": branches, "merge": merge,
             "lines": lines, "adds": adds, "dels": dels,
-            "resolved_files": resolved_files}
+            "resolved_files": resolved_files,
+            "blocked": mergerequests.merge_block_reason(mr),
+            "verdict": mergerequests.verdict_line(mr)}
 
 @router.get("/api/mr/{mr_id}/view", response_class=HTMLResponse)
 async def mr_view(request: Request, mr_id: str):
@@ -1386,16 +1392,22 @@ async def mr_merge(request: Request, mr_id: str, force: str = Form("")):
     if mr["status"] != "open":
         ctx = _mr_view_ctx(request, mr); ctx["error"] = f"MR is already {mr['status']}"
         return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
-    status = mr.get("review_status")
-    if status in ("pending", "changes_requested") and not force:
+    blocked = mergerequests.merge_block_reason(mr)
+    if blocked and not force:
         ctx = _mr_view_ctx(request, mr)
-        ctx["error"] = f"review is {status} — merge blocked; use Merge anyway to override"
+        ctx["error"] = f"{blocked} — merge blocked; use Merge anyway to override"
         return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
     res = mergerequests.merge_branch(mr, mr["target_branch"])
     if res.get("ok"):
         mergerequests.mark_merged(mr_id, res["sha"])
+        # Name the evidence in the same breath as the merge. An override says so
+        # out loud: a merge that skipped the gate must not read like one that
+        # cleared it.
+        cite = mergerequests.verdict_line(mr)
+        if blocked:
+            cite = f"OVERRIDDEN by the human — {blocked} ({cite})"
         store.post_message(mr["task_id"], "system", kind="note",
-                           text=f"Merged {mr['source_branch']} into {res['target']} ({res['sha'][:8]}) in {mr['source_path']}")
+                           text=f"Merged {mr['source_branch']} into {res['target']} ({res['sha'][:8]}) in {mr['source_path']} — {cite}")
         mr = mergerequests.get_mr(mr_id)
         ctx = _mr_view_ctx(request, mr)
         ctx["flash"] = f"Merged into {res['target']} as {res['sha'][:8]} — reversible with git reset --hard @{{1}}"
@@ -1427,10 +1439,10 @@ async def mr_merge_resolve(request: Request, mr_id: str, force: str = Form("")):
     if mr["status"] != "open":
         ctx = _mr_view_ctx(request, mr); ctx["error"] = f"MR is already {mr['status']}"
         return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
-    status = mr.get("review_status")
-    if status in ("pending", "changes_requested") and not force:
+    blocked = mergerequests.merge_block_reason(mr)
+    if blocked and not force:
         ctx = _mr_view_ctx(request, mr)
-        ctx["error"] = f"review is {status} — merge blocked; use Merge anyway to override"
+        ctx["error"] = f"{blocked} — merge blocked; use Merge anyway to override"
         return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
 
     ctx = _mr_view_ctx(request, mr)
@@ -1451,11 +1463,14 @@ async def mr_merge_resolve(request: Request, mr_id: str, force: str = Form("")):
 
     resolved = res.get("resolved") or []
     mergerequests.mark_merged(mr_id, res["sha"], resolved)
+    cite = mergerequests.verdict_line(mr)
+    if blocked:
+        cite = f"OVERRIDDEN by the human — {blocked} ({cite})"
     note = (f"Merged {mr['source_branch']} into {res['target']} ({res['sha'][:8]}) in "
-            f"{mr['source_path']} — conflicts AI-resolved in: {', '.join(resolved)}"
+            f"{mr['source_path']} — conflicts AI-resolved in: {', '.join(resolved)}; {cite}"
             if resolved else
             f"Merged {mr['source_branch']} into {res['target']} ({res['sha'][:8]}) in "
-            f"{mr['source_path']} — no conflicts remained, nothing was AI-resolved")
+            f"{mr['source_path']} — no conflicts remained, nothing was AI-resolved; {cite}")
     store.post_message(mr["task_id"], "system", kind="note", text=note)
     ctx = _mr_view_ctx(request, mergerequests.get_mr(mr_id))
     ctx["flash"] = (

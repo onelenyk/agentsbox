@@ -108,9 +108,32 @@ class TestRoutes:
 
     def test_mr_merge_route_marks_merged(self, db_path, tmp_path):
         mr, real, bare = _mr(db_path, tmp_path, target="develop")
+        mergerequests.set_review_status(mr["id"], "approved")
         r = TestClient(app).post(f"/api/mr/{mr['id']}/merge")
         assert r.status_code == 200
         assert mergerequests.get_mr(mr["id"])["status"] == "merged"
+
+    def test_the_merge_note_cites_what_it_rested_on(self, db_path, tmp_path):
+        """A merge that leaves no record of its evidence is why twelve of the
+        twenty-six merges in the ledger cannot say who approved them."""
+        mr, real, bare = _mr(db_path, tmp_path, target="develop")
+        mergerequests.set_review_status(mr["id"], "approved")
+        mergerequests.set_check_result(mr["id"], "passed", output="1095 passed",
+                                       command="pytest -q", head="deadbeefcafe")
+        TestClient(app).post(f"/api/mr/{mr['id']}/merge")
+
+        notes = [m["text"] for m in store.get_thread(mr["task_id"])]
+        assert any("review approved" in n and "check passed (pytest -q)" in n
+                   for n in notes), notes
+
+    def test_an_override_says_so_on_the_record(self, db_path, tmp_path):
+        """A merge that skipped the gate must not read like one that cleared
+        it."""
+        mr, real, bare = _mr(db_path, tmp_path, target="develop")
+        TestClient(app).post(f"/api/mr/{mr['id']}/merge", data={"force": "1"})
+
+        notes = [m["text"] for m in store.get_thread(mr["task_id"])]
+        assert any("OVERRIDDEN by the human" in n for n in notes), notes
 
     def test_mr_close_route(self, db_path, tmp_path):
         mr, real, bare = _mr(db_path, tmp_path)

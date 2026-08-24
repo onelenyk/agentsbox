@@ -23,6 +23,19 @@
                 </form>
             </div>
 
+            {# What this merge would rest on. A human pressing Merge could not see
+               the daemon's own verdict at all — it lived on the MR row and in
+               the origin task's thread, never in the modal where the decision
+               is actually made. #}
+            <div class="mr-merge {{ 'ok' if mr.check_status == 'passed' else ('bad' if mr.check_status == 'failed' else 'muted') }}"
+                 style="margin-top:10px">
+                {% if mr.check_status == 'passed' %}✓{% elif mr.check_status == 'failed' %}✗{% else %}○{% endif %}
+                {{ verdict }}
+                {% if mr.check_output %}
+                <details style="margin-top:6px"><summary class="muted" style="cursor:pointer">check output</summary><pre style="white-space:pre-wrap;font-size:11px;margin:6px 0 0">{{ mr.check_output[-1200:] }}</pre></details>
+                {% endif %}
+            </div>
+
             {% if merge.ok %}
                 {% if merge.mergeable %}
                 <div class="mr-merge ok">🟢 merges cleanly into {{ mr.target_branch }}</div>
@@ -37,10 +50,10 @@
             <div class="row" style="gap:8px;margin:14px 0 4px">
                 <button type="button" class="btn btn--ghost btn--sm" hx-post="/api/mr/{{ mr.id }}/land" hx-target="#modal-container" hx-swap="innerHTML"
                         hx-confirm="Fetch {{ mr.source_branch }} into your real repo ({{ mr.source_path }})? Adds a branch — nothing else is touched.">Land branch</button>
-                {% if mr.review_status in ('pending', 'changes_requested') %}
+                {% if blocked %}
                 <button type="button" class="btn btn--primary btn--sm" {% if not (merge.ok and merge.mergeable) %}disabled{% endif %}
                         hx-post="/api/mr/{{ mr.id }}/merge" hx-vals='{"force": "1"}' hx-target="#modal-container" hx-swap="innerHTML"
-                        hx-confirm="Review is {{ mr.review_status }} — merge anyway? This overrides the review verdict.">Merge anyway</button>
+                        hx-confirm="{{ blocked|capitalize }} — merge anyway? The merge will be recorded as an override.">Merge anyway</button>
                 {% else %}
                 <button type="button" class="btn btn--primary btn--sm" {% if not (merge.ok and merge.mergeable) %}disabled{% endif %}
                         hx-post="/api/mr/{{ mr.id }}/merge" hx-target="#modal-container" hx-swap="innerHTML"
@@ -50,8 +63,8 @@
                 {# Offered only for a branch git cannot merge on its own — never the default path. #}
                 <button type="button" class="btn btn--ghost btn--sm"
                         hx-post="/api/mr/{{ mr.id }}/merge-resolve" hx-target="#modal-container" hx-swap="innerHTML"
-                        {% if mr.review_status in ('pending', 'changes_requested') %}hx-vals='{"force": "1"}'{% endif %}
-                        hx-confirm="Let the local model rewrite {{ merge.conflicts|length }} conflicting file(s) — {{ merge.conflicts|join(', ') }} — preserving both sides, then merge into {{ mr.target_branch }}{% if mr.review_status in ('pending', 'changes_requested') %} (review is {{ mr.review_status }} — this overrides it){% endif %}. If any file cannot be resolved, nothing is merged and {{ mr.target_branch }} stays untouched. The merged hunks will be model-written — read them before pushing.">🤖 Resolve conflicts with AI &amp; merge</button>
+                        {% if blocked %}hx-vals='{"force": "1"}'{% endif %}
+                        hx-confirm="Let the local model rewrite {{ merge.conflicts|length }} conflicting file(s) — {{ merge.conflicts|join(', ') }} — preserving both sides, then merge into {{ mr.target_branch }}{% if blocked %} ({{ blocked }} — this overrides it){% endif %}. If any file cannot be resolved, nothing is merged and {{ mr.target_branch }} stays untouched. The merged hunks will be model-written — read them before pushing.">🤖 Resolve conflicts with AI &amp; merge</button>
                 {% endif %}
                 <button type="button" class="btn btn--danger btn--sm" hx-post="/api/mr/{{ mr.id }}/close" hx-target="#modal-container" hx-swap="innerHTML"
                         hx-confirm="Close this merge request without merging?">Close MR</button>

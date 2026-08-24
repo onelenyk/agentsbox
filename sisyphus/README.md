@@ -27,7 +27,8 @@ your local runner.
 - **Repo-less tasks** — research / planning / Q&A run read-only in a scratch dir.
 - **Local Merge Requests** — mergeability dry-run (🟢/🔴 conflicts), merge into a
   chosen branch, land, close — reversible, never force. Merging is gated on the
-  review verdict (with an explicit override).
+  record: a reviewer's approval must exist and the daemon's own check must not
+  have failed (with an explicit override, which the thread records as one).
 - **Machine-verified checks** — if a repo configures a `check:` command, the
   daemon runs it in a throwaway worktree against every MR and records the exit
   code, so an approval cites a number no agent authored.
