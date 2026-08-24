@@ -394,10 +394,12 @@ def _open_mr_with_review(db_path, review_status):
     return task["id"], mr
 
 
-@pytest.mark.parametrize("review_status", ["changes_requested", "pending"])
+@pytest.mark.parametrize("review_status", ["changes_requested", "pending", None])
 def test_auto_merge_skipped_when_review_gated(db_path, monkeypatch, review_status):
-    """An MR whose review is pending/changes_requested is never auto-merged: no
-    git changes, the MR stays open, and a clear note lands on the thread."""
+    """An MR without a recorded approval is never auto-merged: no git changes,
+    the MR stays open, and a clear note lands on the thread. NULL is in this
+    list on purpose — it means nobody ever reviewed, and it used to sail through
+    a gate that only knew how to stop the two verdicts it could name."""
     from core import mergerequests
     task_id, mr = _open_mr_with_review(db_path, review_status)
     merged, marked, cleaned = [], [], []
@@ -412,12 +414,30 @@ def test_auto_merge_skipped_when_review_gated(db_path, monkeypatch, review_statu
     assert merged == [] and marked == [] and cleaned == []
     assert mergerequests.get_mr(mr["id"])["status"] == "open"   # MR left open
     notes = [m for m in store.get_thread(task_id) if m["kind"] == "note"]
-    assert any(f"auto-merge skipped: review is {review_status}" in n["text"] for n in notes)
+    expected = (f"auto-merge skipped: review is {review_status}" if review_status
+                else "auto-merge skipped: no review verdict is recorded")
+    assert any(expected in n["text"] for n in notes)
 
 
-@pytest.mark.parametrize("review_status", [None, "approved"])
+def test_auto_merge_skipped_when_the_daemons_own_check_failed(db_path, monkeypatch):
+    """The machine contradicting the approval outranks the approval."""
+    from core import mergerequests
+    task_id, mr = _open_mr_with_review(db_path, "approved")
+    mergerequests.set_check_result(mr["id"], "failed", output="3 failed",
+                                   command="pytest -q")
+    monkeypatch.setattr("core.mergerequests.check_mergeability",
+                        lambda *a: {"ok": True, "mergeable": True})
+
+    planner._auto_merge_task(task_id)
+
+    assert mergerequests.get_mr(mr["id"])["status"] == "open"
+    notes = [m["text"] for m in store.get_thread(task_id) if m["kind"] == "note"]
+    assert any("check FAILED" in n for n in notes), notes
+
+
+@pytest.mark.parametrize("review_status", ["approved"])
 def test_auto_merge_proceeds_when_review_allows(db_path, monkeypatch, review_status):
-    """review_status NULL or 'approved' auto-merges exactly as before."""
+    """A recorded approval — and only that — auto-merges."""
     from core import mergerequests
     task_id, mr = _open_mr_with_review(db_path, review_status)
     cleaned = []

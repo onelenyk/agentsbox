@@ -440,14 +440,46 @@ def test_mr_merge_allowed_for_approved(db_path):
     assert mergerequests.get_mr(mr["id"])["status"] == "merged"
 
 
-def test_mr_merge_allowed_for_null_review_status(db_path):
+def test_mr_merge_blocked_when_no_review_is_recorded(db_path):
+    """NULL means nobody ever reviewed. It used to pass every gate — all three
+    of them checked for the two verdicts they could name and let the absence of
+    a verdict through, which is how twelve of the twenty-six merges in the
+    ledger ended up citing nothing at all."""
     mr = _open_mr(review_status=None)
     client = _make_client()
     with patch("core.mergerequests.merge_branch",
                return_value={"ok": True, "sha": "abc12345", "target": "main"}):
         r = client.post(f"/api/mr/{mr['id']}/merge")
     assert r.status_code == 200
-    assert mergerequests.get_mr(mr["id"])["status"] == "merged"
+    assert mergerequests.get_mr(mr["id"])["status"] == "open"
+    assert "no review verdict is recorded" in r.text
+    assert "Merge anyway" in r.text          # the override is still one click away
+
+
+def test_mr_merge_blocked_when_the_recorded_check_failed(db_path):
+    """An approval an agent typed does not outrank a number the daemon
+    produced."""
+    mr = _open_mr(review_status="approved")
+    mergerequests.set_check_result(mr["id"], "failed", output="3 failed",
+                                   command="pytest -q")
+    client = _make_client()
+    with patch("core.mergerequests.merge_branch",
+               return_value={"ok": True, "sha": "abc12345", "target": "main"}):
+        r = client.post(f"/api/mr/{mr['id']}/merge")
+    assert mergerequests.get_mr(mr["id"])["status"] == "open"
+    assert "check FAILED" in r.text
+
+
+def test_the_modal_shows_the_verdict_a_merge_would_rest_on(db_path):
+    """A human pressing Merge could not see the daemon's own check at all: it
+    lived on the MR row and in the origin task's thread, never in the modal
+    where the decision is made."""
+    mr = _open_mr(review_status="approved")
+    mergerequests.set_check_result(mr["id"], "passed", output="1097 passed",
+                                   command="pytest -q", head="abc123def456")
+    r = _make_client().get(f"/api/mr/{mr['id']}/view")
+    assert "review approved" in r.text
+    assert "check passed (pytest -q)" in r.text and "abc123de" in r.text
 
 
 def test_mr_modal_renders_merge_anyway_for_changes_requested(db_path):

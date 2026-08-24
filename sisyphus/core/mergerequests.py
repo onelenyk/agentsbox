@@ -306,6 +306,55 @@ def diff_range(mr: dict) -> dict:
     }
 
 
+# ── The merge gate ──────────────────────────────────────────────────────
+#
+# One statement of "may this branch land", because there are three merge call
+# sites (the MR modal, the AI-conflict merge, the planner's auto-merge) and they
+# had each written their own — a denylist of ('pending', 'changes_requested').
+# review_status NULL means NOBODY EVER REVIEWED, and it sailed through all three:
+# twelve of the twenty-six merges in the ledger carry no verdict at all. A gate
+# that only stops the two verdicts it can name is not a gate; the question is
+# whether an approval exists, not whether a rejection does.
+
+
+def merge_block_reason(mr: dict) -> Optional[str]:
+    """Why this MR must not be merged without an explicit override, or None.
+
+    Two facts must be on the row, and they are different kinds of evidence: a
+    reviewer's approval (an agent's judgement) and the daemon's own check (a
+    number no agent authored). A missing check is NOT blocking — a repo may
+    configure none, and 'not_run' is recorded honestly — but a FAILING one is,
+    because that is the machine contradicting the approval.
+    """
+    review = (mr.get("review_status") or "").strip()
+    if review != "approved":
+        return ("no review verdict is recorded — nobody has approved this"
+                if not review else f"review is {review}")
+    if (mr.get("check_status") or "").strip() == "failed":
+        return "the daemon's own check FAILED on this branch"
+    return None
+
+
+def verdict_line(mr: dict) -> str:
+    """What this merge rests on, in one line for the thread — so the record of a
+    merge names its evidence instead of leaving a reader to go looking for it."""
+    review = (mr.get("review_status") or "").strip() or "no review recorded"
+    check = (mr.get("check_status") or "").strip()
+    if check == "passed":
+        cmd = (mr.get("check_command") or "").strip()
+        head = (mr.get("check_head") or "").strip()
+        chk = f"check passed ({cmd})" if cmd else "check passed"
+        if head:
+            chk += f" against {head[:8]}"
+    elif check == "failed":
+        chk = "check FAILED"
+    elif check == "not_run":
+        chk = "no check command configured"
+    else:
+        chk = "no check recorded"
+    return f"review {review} · {chk}"
+
+
 def set_check_result(mr_id: str, status: str, output: str = "", command: str = "",
                      head: str = "") -> None:
     """Record what the daemon's own check found: 'passed', 'failed' or

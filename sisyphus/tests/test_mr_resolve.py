@@ -49,7 +49,11 @@ def _mr(tmp_path, source="B"):
     mr = mergerequests.create_mr(
         task_id=task["id"], repo="r", source_branch=source, target_branch="main",
         bare_path=str(src), base_branch="main", source_path=str(src))
-    return mr, src
+    # An MR that reached a merge button in the ordinary way has been reviewed:
+    # mergerequests.merge_block_reason requires a recorded approval, so leaving
+    # it unset here would be testing the override path, not this one.
+    mergerequests.set_review_status(mr["id"], "approved")
+    return mergerequests.get_mr(mr["id"]), src
 
 
 def _resolver(monkeypatch, result="MERGED\n"):

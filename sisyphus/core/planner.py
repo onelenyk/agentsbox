@@ -653,17 +653,18 @@ def on_task_terminal(task_id: str, status: str) -> None:
 def _auto_merge_task(task_id: str) -> None:
     """Merge a task's open MR into its target if it merges cleanly. Best-effort:
     a conflict or a missing/absent MR is left for the user to resolve by hand.
-    An MR whose review is still pending or requested changes is never auto-merged
-    — only the human MR modal may override that gate."""
+    The gate is mergerequests.merge_block_reason — an approval must be recorded
+    and the daemon's own check must not have failed. Auto-merge has no override:
+    only a human, in the MR modal, may merge past it."""
     try:
         from core import mergerequests, store
         mr = mergerequests.latest_for_task(task_id)
         if not mr or mr["status"] != "open":
             return
-        status = mr.get("review_status")
-        if status in ("pending", "changes_requested"):
+        blocked = mergerequests.merge_block_reason(mr)
+        if blocked:
             store.post_message(task_id, "system", kind="note",
-                               text=f"auto-merge skipped: review is {status} — merge manually from the MR modal")
+                               text=f"auto-merge skipped: {blocked} — merge manually from the MR modal")
             return
         check = mergerequests.check_mergeability(
             mr["bare_path"], mr["source_path"], mr["source_branch"], mr["target_branch"])
@@ -673,8 +674,10 @@ def _auto_merge_task(task_id: str) -> None:
         res = mergerequests.merge_branch(mr, mr["target_branch"])
         if res.get("ok"):
             mergerequests.mark_merged(mr["id"], res["sha"])
-            store.post_message(task_id, "system", kind="note",
-                               text=f"Auto-merged {mr['source_branch']} into {res['target']} ({res['sha'][:8]})")
+            store.post_message(
+                task_id, "system", kind="note",
+                text=(f"Auto-merged {mr['source_branch']} into {res['target']} "
+                      f"({res['sha'][:8]}) — {mergerequests.verdict_line(mr)}"))
             # Disk is reclaimed by mark_merged above — see
             # mergerequests.reclaim_if_settled.
         else:
