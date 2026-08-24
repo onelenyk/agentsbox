@@ -282,9 +282,11 @@ def write_mcp_config(
     # roster says otherwise: a worker asked to name its own tools reported
     # call_omo_agent, skill_mcp, session_* and ast_grep_* with this array empty
     # AND every OPENCODE_DISABLE_* switch set (task-2ff103e9, docs/known-gaps).
-    # The cause is now known and is not ours to set: the `opencode` on PATH is a
-    # wrapper script that re-exports OPENCODE_CONFIG_DIR at its own global
-    # config and then execs, so no variable this process sets survives.
+    # The cause is now known and is not a setting we can pass: the plugin is
+    # installed into opencode's own package registry (~/.cache/opencode/
+    # packages/package.json) and loads from there, immune to every config lever
+    # tried — this array, the DISABLE switches, --pure, OPENCODE_CONFIG(_DIR),
+    # XDG_CONFIG_HOME and XDG_CACHE_HOME alike.
     # It stays because it is the documented way to say "no plugins" and costs
     # nothing, but do not read it as isolation — that gap is open and measured.
     # What the array does still buy: our own tools reach the model, so the
