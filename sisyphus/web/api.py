@@ -49,11 +49,15 @@ api = APIRouter(prefix="/api/v1")
 async def health():
     """Liveness (ok) plus readiness: db reachable and the default runner's binary
     resolves. degraded=True means the process is up but can't run work."""
-    from core import preflight
+    from core import preflight, sessions
 
     pf = preflight.check()
     return {
         "ok": True,
+        # Who is mid-run. Carried on health because the CLI has no token and
+        # this is the only endpoint it already calls — and without it,
+        # `daemon stop`/`restart` killed live workers without a word.
+        "workers": sessions.running(),
         "version": "2.0",
         "ready": pf["ok"],
         "degraded": not pf["ok"],
