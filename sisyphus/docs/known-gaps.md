@@ -4,7 +4,7 @@ Things verified to be missing or wrong, with enough detail to act on. Each was
 found by using the system, not by reading it. Remove an entry when it is fixed —
 this file is only useful if it is true.
 
-Last reviewed: 2026-08-20.
+Last reviewed: 2026-08-24.
 
 Closed since the last review, kept only as a pointer to where the guard now
 lives: Stop racing a not-yet-started worker, and the subprocess kill having no
@@ -68,18 +68,40 @@ run; treat DB_READONLY errors as environmental", or a test-only DB path
 exemption in core/db.py (risky — needs care not to become a bypass).
 
 ### A worker's tool roster carries the user's whole desktop
-**Status:** open, found 2026-08-23 (task-60088d8f run log).
-The engineer's available-tools list included figma, playwright, macos-use,
-engram, websearch and the oh-my-openagent plugin suite — the user's GLOBAL
-opencode config merges into every worker run. That is surface (an agent can
-drive the user's browser or Figma) and spend. Partially closed: the opencode
-env overlay now sets OPENCODE_DISABLE_DEFAULT_PLUGINS / _EXTERNAL_SKILLS /
+**Status:** CLOSED 2026-08-24 — the worktree's own opencode.json now disables
+every foreign MCP server by name (`core.runner_profiles.foreign_mcp_servers`).
+Proven against the real binary: eight servers (websearch, context7, grep_app,
+engram, macos-use, playwright, android, figma) resolve `enabled=False` inside a
+generated worktree while ours stays enabled.
+
+The names are asked for, not assumed: `opencode debug config` prints the
+configuration that binary will actually load, probed from an empty directory so
+what comes back is only what arrives from outside a project. Two things were
+measured and rejected first — neither OPENCODE_CONFIG_DIR nor OPENCODE_CONFIG
+suppresses the global entries (both merge), while a project-level
+`{"enabled": false}` wins for local and remote servers alike. The stub is bare
+on purpose: copying the original entry to flip a flag would write the user's own
+URLs and environment, credentials included, into a file inside the worktree.
+One trap worth keeping: the resolved config runs past 64KB and opencode exits
+before a pipe drains, so `capture_output` returns it cut mid-string every time —
+the probe writes to a file.
+
+Open question, not a known leak: `debug config` still lists the user's plugins
+(engram.ts, oh-my-openagent) even with `"plugin": []` and the DISABLE switches
+set. The plugin hijack was fixed behaviourally in 8211edd/8638138, so this may
+be resolution output rather than what loads. Nobody has re-checked it against a
+live run's roster.
+
+Earlier state, kept for the reasoning: the engineer's available-tools list
+included figma, playwright, macos-use, engram, websearch and the oh-my-openagent
+plugin suite — the user's GLOBAL opencode config merges into every worker run.
+That is surface (an agent can drive the user's browser or Figma) and spend. The
+env overlay sets OPENCODE_DISABLE_DEFAULT_PLUGINS / _EXTERNAL_SKILLS /
 _CLAUDE_CODE_SKILLS (from the binary's own help text), which strips the plugin
-and skill share. Still open: globally configured MCP servers have no disable
-switch we could find; an empirical roster probe (invalid-tool trick) stalled
-— opencode ran headless for 5 minutes with zero output. Next candidates:
-project-config overrides disabling the global server names, or an upstream
-flag. claude-cli is already strict (--strict-mcp-config).
+and skill share. An empirical roster probe (invalid-tool trick) stalled —
+opencode ran headless for 5 minutes with zero output — which is why this was
+left open until a probe that costs a second rather than a run turned up.
+claude-cli is already strict (--strict-mcp-config).
 
 ## Review loop
 

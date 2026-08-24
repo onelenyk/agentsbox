@@ -95,6 +95,9 @@ async def smoke_test(runner: dict, timeout: int = DEFAULT_TIMEOUT) -> dict:
             # Without a model an opencode agent hangs with no output — the exact
             # failure this probe exists to surface, so pass the runner's own.
             model=runner.get("model", "") or "",
+            # The smoke test must run under the same isolation a real worker
+            # gets, or it proves a tool call works in a roster no worker sees.
+            binary=runner.get("binary", "") or "",
         )
 
         prompt = (

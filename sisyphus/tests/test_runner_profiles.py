@@ -192,6 +192,65 @@ class TestWriteMcpConfig:
         assert "model" not in cfg["agent"]["sisyphus-worker"]
         assert "hangs" in caplog.text
 
+    def test_the_users_global_mcp_roster_is_disabled_by_name(self, tmp_path):
+        """A live run's roster carried figma, playwright, macos-use, engram and
+        websearch: opencode merges the user's global config into every run.
+        Neither OPENCODE_CONFIG_DIR nor OPENCODE_CONFIG suppresses that (both
+        measured); a project-level {"enabled": false} does."""
+        fake = tmp_path / "fake-opencode"
+        fake.write_text(
+            "#!/bin/sh\n"
+            'echo \'{"mcp": {"figma": {"type": "remote", "url": "https://figma",'
+            ' "enabled": true}, "playwright": {"type": "local",'
+            ' "command": ["npx", "playwright"], "environment": {"TOKEN": "sekrit"},'
+            ' "enabled": true}}}\'\n')
+        fake.chmod(0o755)
+
+        a = self._args(tmp_path)
+        (tmp_path / "wt").mkdir()
+        rp.write_mcp_config("opencode", binary=str(fake), model="m", **a)
+        cfg = json.loads((tmp_path / "wt" / "opencode.json").read_text())
+
+        assert cfg["mcp"]["figma"] == {"enabled": False}
+        assert cfg["mcp"]["playwright"] == {"enabled": False}
+        assert cfg["mcp"]["sisyphus_agent"]["enabled"] is True
+
+    def test_disabling_never_copies_the_users_credentials_into_the_worktree(
+            self, tmp_path):
+        """The stub is bare on purpose: flipping a flag on a copy of the
+        original entry would write the user's own URLs and environment into a
+        file inside the worktree, which the agent reads."""
+        fake = tmp_path / "fake-opencode"
+        fake.write_text(
+            "#!/bin/sh\n"
+            'echo \'{"mcp": {"playwright": {"type": "local",'
+            ' "command": ["npx", "playwright"], "environment": {"TOKEN": "sekrit"},'
+            ' "enabled": true}}}\'\n')
+        fake.chmod(0o755)
+
+        a = self._args(tmp_path)
+        (tmp_path / "wt").mkdir()
+        rp.write_mcp_config("opencode", binary=str(fake), model="m", **a)
+        written = (tmp_path / "wt" / "opencode.json").read_text()
+        assert "sekrit" not in written and "npx" not in written
+
+    def test_a_binary_that_cannot_be_probed_never_breaks_the_run(self, tmp_path):
+        a = self._args(tmp_path)
+        (tmp_path / "wt").mkdir()
+        rp.write_mcp_config("opencode", binary=str(tmp_path / "nope"), model="m", **a)
+        cfg = json.loads((tmp_path / "wt" / "opencode.json").read_text())
+        assert cfg["mcp"]["sisyphus_agent"]["enabled"] is True
+
+    def test_the_probe_reads_what_the_binary_resolves(self, tmp_path):
+        """Asked, not assumed: `opencode debug config` prints the configuration
+        the binary will actually load, so this cannot drift from wherever
+        opencode decides its config files live."""
+        fake = tmp_path / "fake-opencode"
+        fake.write_text("#!/bin/sh\necho '{\"mcp\": {\"b\": {}, \"a\": {}}}'\n")
+        fake.chmod(0o755)
+        assert rp.foreign_mcp_servers(str(fake)) == ["a", "b"]
+        assert rp.foreign_mcp_servers("") == []
+
     def test_claude_ignores_model_in_config(self, tmp_path):
         # Claude Code takes its model on the command line, not in MCP config.
         a = self._args(tmp_path)

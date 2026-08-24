@@ -171,7 +171,8 @@ def _effective_model(model_override: Optional[str], runner_name: Optional[str]) 
 
 
 def _write_runner_config(rtype: str, worktree_path: str, output_dir: str,
-                         token: str, model: str = "") -> Optional[str]:
+                         token: str, model: str = "",
+                         binary: str = "") -> Optional[str]:
     """Point *rtype*'s CLI at our stdio MCP bridge for this one run.
 
     Returns a config path to hand back to the launcher, or None when the CLI
@@ -190,6 +191,7 @@ def _write_runner_config(rtype: str, worktree_path: str, output_dir: str,
             "SISYPHUS_DAEMON_URL": DAEMON_URL,
         },
         agent_name=_WORKER_AGENT,
+        binary=binary,
     )
 
 
@@ -486,9 +488,11 @@ async def spawn_worker(
     # tool names. Resolve once, through the same chain the launcher uses.
     from . import runner_profiles
     from .runners import resolve_runner
-    rtype = runner_profiles.normalize_type(resolve_runner(runner_name or ""))
+    runner_row = resolve_runner(runner_name or "")
+    rtype = runner_profiles.normalize_type(runner_row)
     mcp_config = _write_runner_config(rtype, worktree_path, output_dir, token,
-                                      model=_effective_model(model_override, runner_name))
+                                      model=_effective_model(model_override, runner_name),
+                                      binary=runner_row.get("binary", ""))
     prefix = runner_profiles.tool_prefix(rtype, _MCP_SERVER_NAME)
 
     prompt = _build_prompt(role_def, task["goal"], instruction,
@@ -600,9 +604,11 @@ async def spawn_decider(task_id: str, agent_name: str, thread_text: str,
 
     from . import runner_profiles
     from .runners import resolve_runner
-    rtype = runner_profiles.normalize_type(resolve_runner(runner_name or ""))
+    runner_row = resolve_runner(runner_name or "")
+    rtype = runner_profiles.normalize_type(runner_row)
     mcp_config = _write_runner_config(rtype, scratch, output_dir, token,
-                                      model=_effective_model(model_override, runner_name))
+                                      model=_effective_model(model_override, runner_name),
+                                      binary=runner_row.get("binary", ""))
 
     roster = [a["name"] for a in agents.list_agents(kind="worker") if a.get("enabled", 1)]
     prompt = _build_decider_prompt(
