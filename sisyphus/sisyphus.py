@@ -271,6 +271,16 @@ def dev_install_hooks():
     import sys
     from pathlib import Path
 
+    # The hook pins this interpreter for every future push. A stale one — the
+    # first pre-push in this repo ran Xcode's 3.9 with a fastapi from months
+    # earlier and rejected a push over failures the supported suite never had —
+    # is worse than none, so refuse anything below the floor the deps set.
+    if sys.version_info < (3, 10):
+        click.echo(f"Refusing to pin {sys.executable} (Python "
+                   f"{sys.version.split()[0]}): the suite needs 3.10+. "
+                   "Run install-hooks with the python you run Sisyphus with.", err=True)
+        sys.exit(1)
+
     here = Path(__file__).resolve().parent  # sisyphus/
     r = subprocess.run(["git", "rev-parse", "--absolute-git-dir"],
                        cwd=str(here), capture_output=True, text=True)
