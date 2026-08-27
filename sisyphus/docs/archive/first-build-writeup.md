@@ -1,3 +1,5 @@
+> **Archived 2026-08-27** — the day-one write-up (July 3–4, 2026), kept as the record of how the system began. The current design lives in [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
+
 # Sisyphus — Personal AI Agent Orchestration System
 
 > Built in one session. July 3-4, 2026. ~50 tasks, ~40 files, ~3,000 lines of code.

@@ -75,9 +75,27 @@ def update_repo(name):
         return True
     return False
 
+def _read_config_file() -> dict:
+    """The raw on-disk config, ${VAR} placeholders intact (this is what gets
+    written back). On a fresh checkout that is config.example.yaml — see
+    core.config.config_file — so the first write carries its keys over."""
+    from core.config import config_file
+    path = config_file()
+    if not path.exists():
+        return {}
+    return yaml.safe_load(path.read_text()) or {}
+
+
+def _write_config_file(config: dict) -> None:
+    # Always the real file: the example is a template, never written to.
+    real = Path(__file__).parent.parent / "config.yaml"
+    real.write_text(yaml.dump(config, default_flow_style=False, allow_unicode=True))
+    from core.config import reload_config
+    reload_config()
+
+
 def _save_repo_config(name, source, platform, branch):
-    config_path = Path(__file__).parent.parent / "config.yaml"
-    config = yaml.safe_load(config_path.read_text()) or {}
+    config = _read_config_file()
     repos = config.get("repos", [])
     repos = [r for r in repos if r.get("name") != name]
     entry = {"name": name, "source": source, "branch": branch}
@@ -85,9 +103,9 @@ def _save_repo_config(name, source, platform, branch):
         entry["platform"] = platform
     repos.append(entry)
     config["repos"] = repos
-    config_path.write_text(yaml.dump(config, default_flow_style=False, allow_unicode=True))
-    from core.config import reload_config
-    reload_config()
+    _write_config_file(config)
+
+
 def delete_repo(name):
     """Delete a repo from config and remove bare clone from disk."""
     import shutil
@@ -95,13 +113,10 @@ def delete_repo(name):
     if bare_path.exists():
         shutil.rmtree(str(bare_path), ignore_errors=True)
     # Remove from config
-    config_path = Path(__file__).parent.parent / "config.yaml"
-    config = yaml.safe_load(config_path.read_text()) or {}
+    config = _read_config_file()
     repos = config.get("repos", [])
     config["repos"] = [r for r in repos if r.get("name") != name]
-    config_path.write_text(yaml.dump(config, default_flow_style=False, allow_unicode=True))
-    from core.config import reload_config
-    reload_config()
+    _write_config_file(config)
 def update_repo_config(name, source=None, platform=None, branch=None):
     """Update repo configuration without re-cloning."""
     repos = load_repos()
@@ -115,12 +130,9 @@ def update_repo_config(name, source=None, platform=None, branch=None):
                 else:
                     r.pop("platform", None)
             break
-    config_path = Path(__file__).parent.parent / "config.yaml"
-    config = yaml.safe_load(config_path.read_text()) or {}
+    config = _read_config_file()
     config["repos"] = repos
-    config_path.write_text(yaml.dump(config, default_flow_style=False, allow_unicode=True))
-    from core.config import reload_config
-    reload_config()
+    _write_config_file(config)
 
 
 # ── Per-repo forge credentials ───────────────────────────────────────────

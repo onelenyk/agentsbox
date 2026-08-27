@@ -15,7 +15,7 @@ Configure per repo in config.yaml, alongside `check` (see core.verify):
 
     repos:
       - name: sample-app
-        source: /Users/dev/workproject/sample-app
+        source: /path/to/sample-app
         setup:
           copy:
             - local.properties           # <source>/local.properties → <worktree>/local.properties

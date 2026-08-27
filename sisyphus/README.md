@@ -83,7 +83,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the domain model in depth
 
 ## Quick start
 
-**Requirements:** Python 3.9+, git, and at least one runner CLI on your PATH —
+**Requirements:** Python 3.10+, git, and at least one runner CLI on your PATH —
 [opencode](https://opencode.ai) or [Claude Code](https://claude.com/claude-code)
 (**Runners → Detect** finds installed ones). An API key is optional: opencode can
 use its own logged-in providers (the model prefix picks the provider, e.g.
@@ -94,9 +94,9 @@ only if you route models through OpenRouter.
 # 1. install deps
 pip install -r requirements.txt
 
-# 2. configure secrets (loaded at startup; .env is gitignored; all optional)
-cp .env.example .env
-$EDITOR .env          # API/forge tokens if you use them
+# 2. configure (both files are gitignored; both optional — no file = defaults)
+cp .env.example .env                    # API / forge tokens
+cp config.example.yaml config.yaml      # budgets, worker cap, repos, check: commands
 
 # 3. run the daemon
 python sisyphus.py daemon start      # or: python -m uvicorn web.app:app --port 7677
@@ -167,7 +167,8 @@ sisyphus dev      install-hooks        # pre-push hook that runs the test suite
 
 - **`.env`** — secrets & env (`OPENROUTER_API_KEY`, `SISYPHUS_API_TOKEN`, forge
   tokens). Shell env wins over `.env`; `${VAR}` is expanded in `config.yaml`.
-- **`config.yaml`** — knobs:
+- **`config.yaml`** — copied from `config.example.yaml`; gitignored because the
+  daemon writes the `repos:` list into it. Knobs:
   - `max_concurrent_workers` (default 2) — global worker cap
   - `task_budget_usd` (default 5.0) / `daily_budget_usd` (0 = off) — budget guards
   - `autopilot_tick_seconds` (30) — schedule check cadence
@@ -224,7 +225,7 @@ docs/          architecture + feature notes
 ## Testing
 
 ```bash
-pytest -q                 # ~1050 unit tests
+pytest -q                 # 1150 unit tests
 pytest tests/e2e -q       # Playwright browser e2e — needs:
                           #   pip install -r requirements-dev.txt
                           #   python -m playwright install chromium

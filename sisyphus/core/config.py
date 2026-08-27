@@ -5,11 +5,21 @@ import yaml
 
 _config = None
 
+def config_file() -> Path:
+    """config.yaml when it exists, else the tracked config.example.yaml — so a
+    fresh checkout runs with documented defaults (and the ${VAR} placeholders
+    the .env keys plug into) instead of a silently empty config. The daemon's
+    first write (Repos → Add) materialises config.yaml from that base."""
+    root = Path(__file__).parent.parent
+    real = root / "config.yaml"
+    return real if real.exists() else root / "config.example.yaml"
+
+
 def load_config():
     global _config
     if _config is not None:
         return _config
-    config_path = Path(__file__).parent.parent / "config.yaml"
+    config_path = config_file()
     if not config_path.exists():
         _config = {}
         return _config

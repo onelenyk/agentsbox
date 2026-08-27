@@ -162,7 +162,7 @@ class TestForgeProviders:
 
     def test_gitlab_path_source_resolves_origin_and_pushes(self):
         remote = "git@gitlab.example.com:acme-apps/sample-app.git"
-        source = "/Users/dev/workproject/sample-app"
+        source = "/path/to/sample-app"
 
         def fake_run(cmd, *a, **kw):
             if "get-url" in cmd:

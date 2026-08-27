@@ -21,6 +21,8 @@ features came to be (each file carries an *Archived* stamp with its outcome):
 - [`archive/multi-repo-fanout.md`](archive/multi-repo-fanout.md)
 - [`archive/local-merge-requests.md`](archive/local-merge-requests.md)
 - [`archive/real-world-tests.md`](archive/real-world-tests.md)
+- [`archive/first-build-writeup.md`](archive/first-build-writeup.md) — the day-one
+  write-up, kept as the record of how the system began
 
 A plan doc lives in `docs/` while it is being executed and moves to `archive/`
 when it is done — it never gets silently deleted.

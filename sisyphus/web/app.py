@@ -13,14 +13,24 @@ os.environ.setdefault("WORKSPACE_ROOT", str(_REPO_ROOT / "workspace"))
 from core.logging_setup import setup_logging
 setup_logging()
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from web.routes import router
+from web.routes import router, startup
 from web.api import api as api_router
 from web.agent_mcp import agent_mcp
 from web.auth import api_token_guard
 
-app = FastAPI(title="Sisyphus", version="2.0")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    await startup()
+    yield
+
+
+app = FastAPI(title="Sisyphus", version="2.0", lifespan=lifespan)
 app.middleware("http")(api_token_guard)
 app.mount("/static", StaticFiles(directory=str(_REPO_ROOT / "web" / "static")), name="static")
 app.include_router(router)

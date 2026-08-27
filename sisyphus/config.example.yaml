@@ -1,0 +1,57 @@
+# Sisyphus configuration — copy to `config.yaml` and adjust. `config.yaml` is
+# gitignored because the daemon writes to it (Repos → Add / Edit / Delete).
+#
+#   cp config.example.yaml config.yaml
+#
+# Every key is optional; a missing config.yaml means "all defaults".
+# `${VAR}` is expanded from the environment (.env is loaded first).
+
+api:
+  allow_localhost: true          # loopback callers skip the bearer token
+  token: ${SISYPHUS_API_TOKEN}   # empty = JSON API open (local use)
+
+default_model: deepseek          # model for the seeded default runner
+max_concurrent_workers: 2        # global worker cap
+max_review_loops: 3              # engineer ↔ reviewer rounds before giving up
+task_budget_usd: 5.0             # per-task spend cap
+daily_budget_usd: 0              # 0 = off
+autopilot_tick_seconds: 30       # how often schedules are checked
+log_level: info
+
+forge_poll:                      # follow published PRs/MRs by polling
+  enabled: true
+  interval_seconds: 300
+
+# Forge credentials. A per-repo `token:` below beats these.
+github:
+  base_url: ${GITHUB_BASE_URL}
+  token: ${GITHUB_TOKEN}
+gitlab:
+  base_url: ${GITLAB_BASE_URL}
+  token: ${GITLAB_TOKEN}
+jira:
+  base_url: ${JIRA_BASE_URL}
+  email: ${JIRA_EMAIL}
+  token: ${JIRA_API_TOKEN}
+openrouter:
+  api_key: ${OPENROUTER_API_KEY}
+  base_url: https://openrouter.ai/api/v1
+webhooks:
+  secret: ${SISYPHUS_WEBHOOK_SECRET}
+
+# Environment handed to every worker subprocess (on top of the allowlisted HOME).
+worker_env:
+  PATH: /opt/homebrew/bin:${PATH}
+
+# Repositories. The UI manages this list (Repos → Add writes here); the keys
+# the UI does not know about — `check:`, `setup:`, `token:` — are yours to add.
+repos: []
+#  - name: my-app
+#    source: /path/to/my-app           # local path or a git URL
+#    branch: main
+#    platform: github                  # local | github | gitlab (inferred from source)
+#    token: ${MY_APP_TOKEN}            # per-repo forge credential
+#    check: python -m pytest -q        # run against every MR; exit code is the verdict
+#    setup:                            # things git does not carry into a fresh worktree
+#      copy: [local.properties]
+#      run: ./scripts/bootstrap-worktree.sh
