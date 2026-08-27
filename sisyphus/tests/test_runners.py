@@ -124,6 +124,10 @@ class TestRunnerHealth:
         working runtime as unhealthy."""
         init_runners_table()
         monkeypatch.delenv("SOME_ABSENT_KEY", raising=False)
+        # The claim is about the key, not the binary: CI has no opencode
+        # installed, and a missing binary is (rightly) fatal on its own.
+        import core.runner_detect
+        monkeypatch.setattr(core.runner_detect, "resolve", lambda b: "/usr/bin/true")
         r = add_runner("with-key-env", "opencode", "opencode",
                        api_key_env="SOME_ABSENT_KEY")
         result = asyncio.run(health_check(r["id"]))
