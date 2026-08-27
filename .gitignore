@@ -5,3 +5,8 @@
 /testrepo2/
 /testrepo-bug/
 logs/
+
+# One-off reports and stale captures — kept locally, not part of the published tree
+/board-screenshot.png
+/mr-scan-report.md
+/sisyphus-architecture.html

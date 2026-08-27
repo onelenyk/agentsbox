@@ -68,8 +68,8 @@ def _enrich_sessions(raw_sessions):
     return enriched
 
 
-@router.on_event("startup")
 async def startup():
+    """Daemon boot — registered as the app lifespan in web.app."""
     global _started
     if _started:
         # Expected under uvicorn reload/multiple mounts — a handled case, not a warning.

@@ -15,7 +15,7 @@ Configure per repo in config.yaml, alongside `check` (see core.verify):
 
     repos:
       - name: android-driver
-        source: /Users/lenyk/workproject/android-driver
+        source: /path/to/android-driver
         setup:
           copy:
             - local.properties           # <source>/local.properties → <worktree>/local.properties

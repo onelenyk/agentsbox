@@ -162,7 +162,7 @@ class TestForgeProviders:
 
     def test_gitlab_path_source_resolves_origin_and_pushes(self):
         remote = "git@sln-gtl.vanongo.com:sln-apps/android-driver.git"
-        source = "/Users/lenyk/workproject/android-driver"
+        source = "/path/to/android-driver"
 
         def fake_run(cmd, *a, **kw):
             if "get-url" in cmd:
