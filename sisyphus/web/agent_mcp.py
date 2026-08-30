@@ -529,7 +529,22 @@ def _handle(req: dict, session):
                 "error": {"code": -32001, "message": "invalid or missing session token"}}
 
     if method == "tools/list":
-        return {"jsonrpc": "2.0", "id": req_id, "result": {"tools": _tools_for_agent(session["role"])}}
+        tools = _tools_for_agent(session["role"])
+        if not tools:
+            # An empty roster is never a usable answer: a worker with no tools
+            # cannot even call finish, so the run can only end at its timeout.
+            # It is also the exact shape of the most expensive incident here
+            # (docs/known-gaps, 2026-08-23) — an engineer retrying open_mr 160
+            # times against nothing. agent_tools() returns [] for an agent that
+            # is not in the table, which a live session outlives: deleting a
+            # custom agent does not revoke the sessions running as it. Say what
+            # happened instead of answering "you have no tools".
+            return {"jsonrpc": "2.0", "id": req_id, "error": {
+                "code": -32002,
+                "message": (f"agent {session['role']!r} has no tools — it was deleted or "
+                            f"saved with an empty tool list, so this run cannot proceed"),
+            }}
+        return {"jsonrpc": "2.0", "id": req_id, "result": {"tools": tools}}
 
     if method == "tools/call":
         name = params.get("name", "")

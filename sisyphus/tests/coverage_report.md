@@ -236,7 +236,7 @@ in Tier 1 territory.
 | # | Gap | Severity | Status |
 |---|---|---|---|
 | 1 | G1 — gate accepts a stale check | high | **fixed** 2026-08-30 — `merge_block_reason(mr, head=None)` resolves the head itself; 7 tests |
-| 2 | `tools/agent_mcp_stdio.py` at 0%, never executed | high | open — needs a `process`-tier test that spawns the bridge and lists the roster |
+| 2 | `tools/agent_mcp_stdio.py` at 0%, never executed | high | **fixed** 2026-08-30 — 18 `process`-tier tests spawn the real bridge; a third bug fell out of it |
 | 3 | G2 — no-sandbox degradation untested and unexercised in CI | medium-high | **fixed** 2026-08-30 — `unconfined_reason()` + opt-in `sandbox.require`; 11 tests |
 | 4 | `autopilot` / `planner` / `orphans` under-covered where failures concentrate | medium | **worked** 2026-08-30 — see "Update" below; 85/77/78% → 91/88/90%, and two live bugs fell out of it |
 | 5 | `POST /api/mr/{id}/land` thin | medium | open — one component test |
@@ -291,6 +291,35 @@ no reply, no error, every later Send ignored) was one exception away.
 Still open from the list above: `tools/agent_mcp_stdio.py` at 0% (gap 2) and
 `POST /api/mr/{id}/land` (gap 5). `planner.project_context` and the
 `daemon_ctl` process-lifecycle paths remain the largest deliberate misses.
+
+## Update — 2026-08-30, gap 2, and a correction to this report
+
+`tests/test_agent_mcp_stdio.py` spawns the real script as a subprocess, speaks
+JSON-RPC to its stdin, and reads its stdout, with the daemon's own `/mcp/agent`
+router answering on a real socket (that router alone — the full app's lifespan
+starts the orchestrator and autopilot loops, and this is a test about a socket).
+18 tests: the roster arrives and is role-scoped, a tool call carries its
+arguments and writes the thread, a notification draws no reply and does not
+desync the stream, a malformed line is a parse error the process survives, and
+an unreachable daemon names the URL rather than hanging. Checked by mutation,
+not by passing: removing the Authorization header fails 7 of them, and
+answering notifications fails exactly the one about notifications.
+
+**Correction.** This report said the 0%s in `tools/` "were initially assumed to
+be a measurement artifact — coverage does not follow subprocesses. They are
+not." That was true when written and is now the reverse: `agent_mcp_stdio.py`
+still reports 0%, and that 0% is now exactly the artifact the earlier draft
+suspected. Read it as unmeasured, not untested. Making it a real number needs
+`COVERAGE_PROCESS_START` plumbed into the spawned environment — worth doing
+when the CI coverage job below lands, not before.
+
+The third bug of the week fell out of it, and it is the one that matters most:
+`/mcp/agent` answered `tools/list` with `{"result": {"tools": []}}` and HTTP 200
+for a session whose agent is not in the table. Deleting a custom agent does not
+revoke the sessions running as it, so that is reachable by an operator tidying
+up the Agents page while a worker runs. An empty roster is the exact shape of
+the 160-retry incident, and a worker holding no tools cannot even call `finish`
+— the run can only end at its timeout. It is a `-32002` error now.
 
 ## Recommendation on a floor
 
