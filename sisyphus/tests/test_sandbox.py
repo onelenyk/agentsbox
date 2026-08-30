@@ -80,3 +80,69 @@ def test_enforcement_blocks_protected_write_allows_workspace(tmp_path):
     blocked = run_write(escape)
     assert blocked.returncode != 0, "write into the protected repo was NOT blocked — sandbox failed"
     assert not escape.exists()
+
+
+class TestUnconfinedIsNeverSilent:
+    """There are two ways a run ends up unconfined and they need different
+    words. The launcher warned only about the platform having no backend, so
+    the one case somebody CHOSE — SISYPHUS_SANDBOX=0 — produced no log line at
+    all. `unconfined_reason` is the single sentence all callers now use, and
+    tests/test_sandbox.py previously skipped the whole no-backend path rather
+    than asserting anything about it (CI is macos-latest only, so that branch
+    ran nowhere)."""
+
+    def test_confined_run_has_no_reason(self, monkeypatch):
+        if not sandbox.available():
+            pytest.skip("no sandbox backend on this platform")
+        monkeypatch.delenv("SISYPHUS_SANDBOX", raising=False)
+        assert sandbox.unconfined_reason() is None
+
+    def test_a_platform_without_a_backend_says_which(self, monkeypatch):
+        monkeypatch.delenv("SISYPHUS_SANDBOX", raising=False)
+        monkeypatch.setattr(platform, "system", lambda: "Linux")
+        assert sandbox.backend() is None
+        reason = sandbox.unconfined_reason()
+        assert reason and "Linux" in reason and "unconfined" in reason
+
+    def test_switching_it_off_is_announced_too(self, monkeypatch):
+        """The previously silent case."""
+        monkeypatch.setenv("SISYPHUS_SANDBOX", "0")
+        reason = sandbox.unconfined_reason()
+        assert reason and "SISYPHUS_SANDBOX=0" in reason
+        assert sandbox.disabled_by_operator()
+
+    def test_wrap_is_a_noop_without_a_backend(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("SISYPHUS_SANDBOX", raising=False)
+        monkeypatch.setattr(platform, "system", lambda: "Linux")
+        args = ["opencode", "run", "hi"]
+        assert sandbox.wrap(args, str(tmp_path), str(tmp_path)) == args
+
+
+class TestSandboxCanBeRequired:
+    def test_not_required_by_default(self, monkeypatch):
+        monkeypatch.delenv("SISYPHUS_SANDBOX_REQUIRE", raising=False)
+        assert sandbox.required() is False
+
+    def test_env_can_require_it(self, monkeypatch):
+        monkeypatch.setenv("SISYPHUS_SANDBOX_REQUIRE", "1")
+        assert sandbox.required() is True
+
+    def test_env_can_also_say_no(self, monkeypatch):
+        monkeypatch.setenv("SISYPHUS_SANDBOX_REQUIRE", "0")
+        assert sandbox.required() is False
+
+    def test_config_can_require_it(self, monkeypatch):
+        monkeypatch.delenv("SISYPHUS_SANDBOX_REQUIRE", raising=False)
+        monkeypatch.setattr("core.config.get_config",
+                            lambda key=None, default=None: True if key == "sandbox.require" else default)
+        assert sandbox.required() is True
+
+    def test_an_unreadable_config_does_not_fail_closed(self, monkeypatch):
+        """A daemon that cannot read its config must still run; refusing every
+        launch because a YAML file is malformed is a worse failure than the one
+        this flag guards against."""
+        monkeypatch.delenv("SISYPHUS_SANDBOX_REQUIRE", raising=False)
+        def _boom(key=None, default=None):
+            raise RuntimeError("config is gibberish")
+        monkeypatch.setattr("core.config.get_config", _boom)
+        assert sandbox.required() is False

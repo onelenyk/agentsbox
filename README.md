@@ -22,10 +22,13 @@ goes through a local runner CLI ([opencode](https://opencode.ai) or
              (one decision per event, state lives in an append-only thread)
 ```
 
-A task is done only when a reviewer approves it. A merge is allowed only when
-that approval exists **and** the repo's own `check:` command passed in a
-throwaway worktree — a number no agent authored. Overriding the gate is one
-click, and the thread records that it was one.
+A task is done only when a reviewer approves it. A merge needs that approval,
+and it is refused whenever the repo's own `check:` command — run in a throwaway
+worktree, a number no agent authored — **contradicts** it: a failing check, or a
+passing one recorded against a commit the branch has since moved past. A repo
+that configures no check blocks nothing; absence is recorded honestly as
+`not_run` and never reads as a pass. Overriding the gate is one click, and the
+thread records that it was one.
 
 ## Highlights
 

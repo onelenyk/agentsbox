@@ -118,8 +118,12 @@ class TestRoutes:
         twenty-six merges in the ledger cannot say who approved them."""
         mr, real, bare = _mr(db_path, tmp_path, target="develop")
         mergerequests.set_review_status(mr["id"], "approved")
+        # Against the branch's REAL head: the gate refuses a pass recorded for
+        # some other commit, so a placeholder SHA here would be blocked rather
+        # than merged, and this test would be asserting the wrong thing.
         mergerequests.set_check_result(mr["id"], "passed", output="1095 passed",
-                                       command="pytest -q", head="deadbeefcafe")
+                                       command="pytest -q",
+                                       head=mergerequests.current_head(mr))
         TestClient(app).post(f"/api/mr/{mr['id']}/merge")
 
         notes = [m["text"] for m in store.get_thread(mr["task_id"])]
@@ -191,6 +195,65 @@ class TestTheCardPredictsTheButton:
             row = mergerequests.get_mr(mr["id"])
             assert (mergerequests.gate_state(row) == "ready") is ready
             assert (mergerequests.merge_block_reason(row) is None) is ready
+
+
+class TestAPassIsOnlyEvidenceForTheCommitItRanOn:
+    """The gate read check_status but never check_head, so a check that passed
+    on commit A kept the merge button open after the branch moved to B —
+    gate_state said 'ready' while verdict_line printed 'against aaaaaaaa' in the
+    same breath. web/agent_mcp.py had always told a reviewer agent the verdict
+    was history; only enforcement was not looking."""
+
+    def _row(self, ran_head, status="passed"):
+        return {"id": "mr-x", "review_status": "approved", "check_status": status,
+                "check_head": ran_head, "check_command": "pytest -q"}
+
+    def test_a_pass_on_a_commit_the_branch_moved_past_is_blocked(self):
+        blocked = mergerequests.merge_block_reason(self._row("aaaaaaaa"), head="bbbbbbbb")
+        assert blocked and "aaaaaaaa" in blocked and "bbbbbbbb" in blocked
+        assert mergerequests.gate_state(self._row("aaaaaaaa"), head="bbbbbbbb") == "check-stale"
+
+    def test_a_pass_on_the_current_commit_still_opens_the_gate(self):
+        assert mergerequests.merge_block_reason(self._row("aaaaaaaa"), head="aaaaaaaa") is None
+        assert mergerequests.gate_state(self._row("aaaaaaaa"), head="aaaaaaaa") == "ready"
+
+    def test_a_record_silent_about_its_commit_is_not_called_stale(self):
+        """Every MR checked before the check_head column existed carries no
+        commit. That is a gap in our bookkeeping, not evidence the branch moved,
+        and the gate blocks on contradiction, never on silence."""
+        assert mergerequests.merge_block_reason(self._row(""), head="bbbbbbbb") is None
+
+    def test_an_unresolvable_head_does_not_invent_a_block(self):
+        assert mergerequests.merge_block_reason(self._row("aaaaaaaa"), head="") is None
+
+    def test_a_failing_check_still_outranks_staleness(self):
+        blocked = mergerequests.merge_block_reason(self._row("aaaaaaaa", status="failed"),
+                                                   head="bbbbbbbb")
+        assert "FAILED" in blocked
+        assert mergerequests.gate_state(self._row("aaaaaaaa", status="failed"),
+                                        head="bbbbbbbb") == "check-failed"
+
+    def test_the_gate_resolves_the_head_itself_when_not_told(self, db_path, tmp_path):
+        """Correct by default: a call site that passes nothing must still get
+        the strong gate, or the next one added will quietly get the weak one."""
+        mr, real, bare = _mr(db_path, tmp_path)
+        mergerequests.set_review_status(mr["id"], "approved")
+        mergerequests.set_check_result(mr["id"], "passed", command="pytest -q",
+                                       head="deadbeefcafe")   # not this branch
+        row = mergerequests.get_mr(mr["id"])
+        assert mergerequests.merge_block_reason(row) is not None
+
+        mergerequests.set_check_result(mr["id"], "passed", command="pytest -q",
+                                       head=mergerequests.current_head(row))
+        assert mergerequests.merge_block_reason(mergerequests.get_mr(mr["id"])) is None
+
+    def test_a_stale_pass_cannot_be_merged_through_the_route(self, db_path, tmp_path):
+        mr, real, bare = _mr(db_path, tmp_path, target="develop")
+        mergerequests.set_review_status(mr["id"], "approved")
+        mergerequests.set_check_result(mr["id"], "passed", command="pytest -q",
+                                       head="deadbeefcafe")
+        TestClient(app).post(f"/api/mr/{mr['id']}/merge")
+        assert mergerequests.get_mr(mr["id"])["status"] == "open"
 
 
 class TestBarePreservedForOpenMR:

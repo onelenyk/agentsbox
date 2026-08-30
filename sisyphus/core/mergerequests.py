@@ -317,7 +317,44 @@ def diff_range(mr: dict) -> dict:
 # whether an approval exists, not whether a rejection does.
 
 
-def merge_block_reason(mr: dict) -> Optional[str]:
+def current_head(mr: dict) -> str:
+    """The commit the source branch points at right now, or "" if unresolvable.
+
+    Same value as ``diff_range(mr)["head"]``, resolved on its own because the
+    gate needs only this half and merge-base costs a second git call.
+    """
+    bare, source = mr.get("bare_path", ""), mr.get("source_branch", "")
+    if not (bare and source):
+        return ""
+    res = _run(["git", "-C", bare, "rev-parse", source])
+    return res.stdout.strip() if res.returncode == 0 else ""
+
+
+def _stale_check_reason(mr: dict, head: Optional[str]) -> Optional[str]:
+    """Why a recorded pass does not cover the branch as it stands, or None.
+
+    Only a PROVEN mismatch blocks. When the record never said which commit it
+    covered — every MR checked before the check_head column existed — that is a
+    gap in our own bookkeeping, not evidence the branch moved, and it stays
+    non-blocking for the same reason a missing check does: the gate blocks on
+    the machine contradicting the approval, never on the machine being silent.
+
+    *head* of "" means the caller explicitly opted out; None means resolve it.
+    """
+    if (mr.get("check_status") or "").strip() != "passed":
+        return None                      # nothing to be stale about
+    ran_head = (mr.get("check_head") or "").strip()
+    if not ran_head:
+        return None                      # record is silent — see docstring
+    if head is None:
+        head = current_head(mr)          # only now is the git call worth making
+    if not head or ran_head == head:
+        return None
+    return (f"the check passed against {ran_head[:8]}, but the branch is now at "
+            f"{head[:8]} — that verdict is history, re-run it")
+
+
+def merge_block_reason(mr: dict, head: Optional[str] = None) -> Optional[str]:
     """Why this MR must not be merged without an explicit override, or None.
 
     Two facts must be on the row, and they are different kinds of evidence: a
@@ -325,6 +362,19 @@ def merge_block_reason(mr: dict) -> Optional[str]:
     number no agent authored). A missing check is NOT blocking — a repo may
     configure none, and 'not_run' is recorded honestly — but a FAILING one is,
     because that is the machine contradicting the approval.
+
+    A pass is only evidence for the commit it ran against. The row records that
+    commit in ``check_head``, and ``web/agent_mcp.py`` has always told a reviewer
+    agent when a verdict no longer covers the branch — but the gate itself did
+    not look, so a check that passed on commit A opened the merge button after
+    the branch moved to B. gate_state said "ready" while verdict_line printed
+    "against aaaaaaaa" in the same breath. The bookkeeping was honest; only the
+    decision was not.
+
+    *head* is the source branch's current commit. Left as None it is resolved
+    here, and only when a stale pass is actually possible — so the gate is
+    correct by default and a new call site cannot accidentally get the weak
+    version. Pass "" to skip the check where the I/O is not wanted.
     """
     review = (mr.get("review_status") or "").strip()
     if review != "approved":
@@ -334,12 +384,13 @@ def merge_block_reason(mr: dict) -> Optional[str]:
                 if not review else f"review is {review}")
     if (mr.get("check_status") or "").strip() == "failed":
         return "the daemon's own check FAILED on this branch"
-    return None
+    return _stale_check_reason(mr, head)
 
 
-def gate_state(mr: dict) -> str:
+def gate_state(mr: dict, head: Optional[str] = None) -> str:
     """The gate's verdict as one short tag, for a board card that has no room
-    for a sentence: ready | unreviewed | pending | changes | died | check-failed.
+    for a sentence: ready | unreviewed | pending | changes | died | check-failed
+    | check-stale.
 
     Asks merge_block_reason for the ready/not-ready decision rather than
     re-deriving it, and classifies the reason from the ROW, never by matching
@@ -348,14 +399,16 @@ def gate_state(mr: dict) -> str:
     a missing approval outranks a failing check, because without a review there
     is nothing for the check to contradict.
     """
-    if not merge_block_reason(mr):
+    if not merge_block_reason(mr, head):
         return "ready"
     review = (mr.get("review_status") or "").strip()
     if review != "approved":
         return {"pending": "pending",
                 "changes_requested": "changes",
                 "died": "died"}.get(review, "unreviewed")
-    return "check-failed"
+    if (mr.get("check_status") or "").strip() == "failed":
+        return "check-failed"
+    return "check-stale"
 
 
 def verdict_line(mr: dict) -> str:

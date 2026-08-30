@@ -58,12 +58,61 @@ def available() -> bool:
     return backend() is not None
 
 
+def disabled_by_operator() -> bool:
+    """Whether SISYPHUS_SANDBOX=0 turned the sandbox off on a host that has one.
+
+    Kept apart from `available()` because the two unconfined states need
+    different words: one is a platform we have no backend for, the other is
+    somebody switching the guard off. The launcher warned about the first and
+    said nothing at all about the second, which is the one worth hearing.
+    """
+    return os.environ.get("SISYPHUS_SANDBOX", "").strip() in ("0", "false", "off", "no")
+
+
 def enabled() -> bool:
     """Sandbox is on by default where a backend exists; SISYPHUS_SANDBOX=0
     disables it (an escape hatch for debugging an over-tight profile)."""
-    if os.environ.get("SISYPHUS_SANDBOX", "").strip() in ("0", "false", "off", "no"):
+    if disabled_by_operator():
         return False
     return available()
+
+
+def required() -> bool:
+    """Whether a run must refuse to start rather than proceed unconfined.
+
+    Off by default: no backend exists outside macOS yet, so requiring one would
+    make the daemon unusable on Linux rather than safer. It is opt-in for hosts
+    where an unconfined worker is not an acceptable outcome —
+
+        sandbox:
+          require: true          # or SISYPHUS_SANDBOX_REQUIRE=1
+
+    — turning a silent downgrade of the isolation guarantee into a refusal.
+    """
+    env = os.environ.get("SISYPHUS_SANDBOX_REQUIRE", "").strip()
+    if env:
+        return env in ("1", "true", "on", "yes")
+    try:
+        from core.config import get_config
+        return bool(get_config("sandbox.require", False))
+    except Exception:  # noqa: BLE001 — an unreadable config must not fail closed
+        logger.exception("could not read sandbox.require — treating as not required")
+        return False
+
+
+def unconfined_reason() -> Optional[str]:
+    """Why this run would not be confined, or None if it would be.
+
+    One sentence, so the launcher, preflight and any future caller all say the
+    same thing about the same state instead of each phrasing it their own way.
+    """
+    if enabled():
+        return None
+    if disabled_by_operator():
+        return ("SISYPHUS_SANDBOX=0 — the filesystem sandbox is switched off, "
+                "the worker can write to any repo on this machine")
+    return (f"no filesystem sandbox backend on this platform "
+            f"({platform.system()}) — the worker runs unconfined")
 
 
 def wrap(args: List[str], worktree: str, output_dir: str) -> List[str]:

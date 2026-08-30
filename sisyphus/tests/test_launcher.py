@@ -321,3 +321,49 @@ class TestModelOverride:
         finally:
             shutil.rmtree(worktree, ignore_errors=True)
             shutil.rmtree(output_dir, ignore_errors=True)
+
+
+class TestSandboxCanBeRequired:
+    """With sandbox.require set, an unconfined run is refused rather than
+    merely announced — reported like any other refused launch so the worker
+    surfaces it through the path it already has."""
+
+    @pytest.mark.asyncio
+    async def test_required_but_unavailable_refuses_to_launch(self, db_path, monkeypatch):
+        monkeypatch.setenv("SISYPHUS_SANDBOX", "0")          # unconfined
+        monkeypatch.setenv("SISYPHUS_SANDBOX_REQUIRE", "1")  # and not allowed to be
+
+        worktree = pathlib.Path(os.environ["WORKSPACE_ROOT"]) / "worktree"
+        worktree.mkdir(parents=True, exist_ok=True)
+        _setup_run_shim(worktree)
+        output_dir = _make_output_dir("run-require", "require")
+
+        init_runners_table()
+        add_runner("mock-require", "python3", extra_args=["-c", "print('ran')"])
+
+        result = await launch_agent({"name": "T", "runner": "mock-require"},
+                                    "anything", str(worktree), output_dir,
+                                    timeout=5, step_id="require")
+
+        assert result.status == "error"
+        assert "sandbox is required" in (result.error or "")
+        assert "SISYPHUS_SANDBOX=0" in (result.error or "")
+
+    @pytest.mark.asyncio
+    async def test_unconfined_still_runs_when_not_required(self, db_path, monkeypatch):
+        monkeypatch.setenv("SISYPHUS_SANDBOX", "0")
+        monkeypatch.delenv("SISYPHUS_SANDBOX_REQUIRE", raising=False)
+
+        worktree = pathlib.Path(os.environ["WORKSPACE_ROOT"]) / "worktree"
+        worktree.mkdir(parents=True, exist_ok=True)
+        _setup_run_shim(worktree)
+        output_dir = _make_output_dir("run-norequire", "norequire")
+
+        init_runners_table()
+        add_runner("mock-norequire", "python3", extra_args=["-c", "print('ran')"])
+
+        result = await launch_agent({"name": "T", "runner": "mock-norequire"},
+                                    "anything", str(worktree), output_dir,
+                                    timeout=5, step_id="norequire")
+
+        assert result.status != "error", result.error
