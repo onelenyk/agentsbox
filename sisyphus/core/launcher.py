@@ -3,7 +3,6 @@ import asyncio
 import json
 import logging
 import os
-import platform
 import shutil
 import time
 from dataclasses import dataclass
@@ -313,14 +312,24 @@ async def launch_agent(
     child_argv = list(args)
 
     # Confine the runner's filesystem writes to the workspace (see core.sandbox).
-    # Without a backend the run proceeds unconfined — surface that once so it's
-    # never a silent assumption.
+    # Whenever the run would NOT be confined, say so — and say which of the two
+    # reasons it is. This used to warn only when the platform had no backend, so
+    # the one case an operator chose (SISYPHUS_SANDBOX=0) was also the one case
+    # that produced no log line at all. With sandbox.require set, an unconfined
+    # run is refused instead of merely announced.
     from . import sandbox
-    if sandbox.enabled():
+    unconfined = sandbox.unconfined_reason()
+    if unconfined is None:
         args = sandbox.wrap(args, str(worktree_path), str(output_dir))
-    elif not sandbox.available():
-        logger.warning("no filesystem sandbox on this platform (%s) — worker runs unconfined",
-                       platform.system())
+    elif sandbox.required():
+        # Reported the same way every other refused launch is, so the worker
+        # surfaces it through the path it already has instead of an exception
+        # unwinding through it.
+        logger.error("refusing to launch unconfined: %s", unconfined)
+        return AgentResult(status="error",
+                           error=f"sandbox is required but unavailable — {unconfined}")
+    else:
+        logger.warning("worker runs unconfined: %s", unconfined)
 
     try:
         proc = await asyncio.create_subprocess_exec(

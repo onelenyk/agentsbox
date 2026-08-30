@@ -4,7 +4,12 @@ Things verified to be missing or wrong, with enough detail to act on. Each was
 found by using the system, not by reading it. Remove an entry when it is fixed —
 this file is only useful if it is true.
 
-Last reviewed: 2026-08-24.
+Last reviewed: 2026-08-30.
+
+Closed 2026-08-30, found by a coverage pass over the whole suite
+(`tests/coverage_report.md`) rather than by a run: the merge gate accepting a
+stale check, the API token leaving the UI open, and an operator switching the
+sandbox off in silence — all three below.
 
 Closed since the last review, kept only as a pointer to where the guard now
 lives: Stop racing a not-yet-started worker, and the subprocess kill having no
@@ -176,6 +181,21 @@ is down or too old reports nothing: that is not proof the machine is idle, but
 there is nothing we could name, and refusing to stop a daemon we cannot reach
 would be worse.
 
+### Switching the sandbox off said nothing at all
+**Status:** CLOSED 2026-08-30 — every unconfined run is now announced, and can be
+refused.
+
+The launcher warned when the platform had no backend, so the case nobody chose
+was covered. `SISYPHUS_SANDBOX=0` — the case somebody did choose — produced no
+log line at all, because the warning sat behind `elif not sandbox.available()`
+and an explicitly disabled sandbox is still an available one. `unconfined_reason()`
+is now the single sentence both callers use and names which of the two it is. New
+`sandbox.require` (or `SISYPHUS_SANDBOX_REQUIRE=1`, default off) turns an
+unconfined launch into a refusal reported like any other refused launch. The old
+test skipped the whole no-backend path rather than asserting anything about it,
+and CI is macos-latest only, so that branch ran nowhere; it is now monkeypatched.
+Guarded by `tests/test_sandbox.py` and `tests/test_launcher.py::TestSandboxCanBeRequired`.
+
 ### A working agent and a dead one looked exactly the same
 **Status:** CLOSED 2026-08-24 — the task page now says when the runner last
 produced anything: `no output yet` / `last output 4s ago` / `last output 3m ago`.
@@ -234,7 +254,27 @@ already runs that repo's `check:` command unsandboxed — the same trust. The
 question is whether a checkout carrying config we did not write should be
 silently overridden, refused at spawn, or surfaced when the repo is added.
 
-## Review loop## Review loop
+## Review loop
+
+### A pass is evidence for one commit, and the gate never asked which
+**Status:** CLOSED 2026-08-30 — `merge_block_reason` now refuses a pass recorded
+against a commit the branch has moved past.
+
+The row has carried `check_head` since 2026-08-24, and `web/agent_mcp.py` used it
+properly: it computes `covers_head` and tells a reviewer agent, at length, that a
+verdict which no longer covers the branch "is history". The gate itself never
+read the column. So a check passed on commit A, a worker pushed commit B, and the
+merge button opened — `gate_state` returning "ready" while `verdict_line` printed
+"against aaaaaaaa" in the same breath. Enforcement was strictly weaker than the
+advice we were giving the agent.
+
+Only a PROVEN mismatch blocks: a row that never recorded which commit it covered
+(every MR checked before the column existed) stays non-blocking, because the gate
+blocks on the machine contradicting the approval, never on the machine being
+silent. `merge_block_reason(mr, head=None)` resolves the head itself when not
+told, so a call site that passes nothing still gets the strong gate — the weak
+one is not reachable by forgetting. Guarded by
+`tests/test_mr_actions.py::TestAPassIsOnlyEvidenceForTheCommitItRanOn`.
 
 ### Merging an MR reclaims worktrees out from under a live worker
 **Status:** CLOSED 2026-08-22 — `reclaim_if_settled` now skips while `sessions`
@@ -324,6 +364,25 @@ clone, or a command to run.
 ---
 
 ## Product surface
+
+### The API token gated the JSON API and left the UI wide open
+**Status:** CLOSED 2026-08-30 — the guard covers the whole surface.
+
+`web/auth.py` matched `/api/v1` only. The htmx UI is served from `/api/*` with no
+`/v1`, and carries 51 mutating POST routes — delete a repo, restore a backup, run
+an autopilot, merge a branch — plus the HTML pages that render tokens, run logs
+and diffs, and the `/mcp/agent` bridge. None of it was gated. The docstring
+promised "once it's exposed on a network, a shared bearer token gates it", and a
+test named `test_non_api_routes_unaffected` pinned the hole in place as if it were
+the design.
+
+Two things changed: the guard now covers everything except health, webhooks and
+static, and `_is_local` refuses the localhost exemption to any request carrying a
+forwarding header — behind a reverse proxy `request.client.host` is the proxy,
+very often 127.0.0.1, which would have handed the exemption to the internet. A
+browser cannot send a bearer token on a navigation, so remote UI access is an SSH
+tunnel by design. Guarded by
+`tests/test_auth.py::TestTheGuardCoversTheWholeSurface`.
 
 ### A reply to a blocked task is wiped while you type it
 **Status:** CLOSED 2026-08-20 — the reply input now carries `hx-preserve` with a

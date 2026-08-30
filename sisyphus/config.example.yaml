@@ -8,7 +8,15 @@
 
 api:
   allow_localhost: true          # loopback callers skip the bearer token
-  token: ${SISYPHUS_API_TOKEN}   # empty = JSON API open (local use)
+  token: ${SISYPHUS_API_TOKEN}   # empty = whole HTTP surface open (local use)
+                                 # set = token gates the UI and the API alike;
+                                 # reach the UI over an SSH tunnel, since a
+                                 # browser cannot send a bearer header
+
+sandbox:
+  require: false                 # true = refuse to launch a worker that would
+                                 # run unconfined (no backend outside macOS, or
+                                 # SISYPHUS_SANDBOX=0) instead of warning
 
 default_model: deepseek          # model for the seeded default runner
 max_concurrent_workers: 2        # global worker cap

@@ -39,6 +39,13 @@ MERGE_SUBJECT = "Merge sisyphus/task-"
 
 TARGET_SELF_BUILD = 50   # north star: more than half of the trunk, agent-built
 
+# The day the daemon started running the repo's own check and recording the
+# verdict on the MR (fd2f86c). Merges older than this carry no check_status at
+# all — not because the gate was skipped, but because nothing wrote the column
+# yet — so the evidence rate is counted from here and anything older is reported
+# separately as legacy. See evidence().
+CHECK_GATE_SINCE = "2026-08-17"
+
 
 def _rate(part: int, whole: int) -> float:
     """Percent, one decimal. An empty denominator is 0.0, never a crash."""
@@ -113,17 +120,32 @@ def autonomy(conn, days: int) -> dict:
 
 def evidence(conn, days: int) -> dict:
     """Of the MRs merged, how many rest on a record rather than on a claim:
-    a reviewer's approval AND a check the daemon ran and recorded itself."""
+    a reviewer's approval AND a check the daemon ran and recorded itself.
+
+    Counted only over merges the daemon could actually have checked. The check
+    landed in fd2f86c; before it, no merge carries a check_status because the
+    column had nothing writing to it. Counting those as unbacked measured the
+    age of the feature rather than the behaviour of the system — with a 30-day
+    window straddling the landing it read 21.4% while every merge after the gate
+    existed was backed, which is a metric steering the north star away from the
+    truth, in the direction that quietly devalues work already done.
+
+    Pre-gate merges are still counted and reported, as `legacy`, because
+    dropping them silently would be its own kind of flattery.
+    """
     cut = _cutoff(days)
     rows = conn.execute("""
-        SELECT review_status, check_status FROM merge_requests
+        SELECT review_status, check_status, created_at FROM merge_requests
          WHERE status = 'merged' AND created_at >= ?
     """, (cut,)).fetchall()
-    backed = sum(1 for r in rows
+    gated = [r for r in rows if (r["created_at"] or "") >= CHECK_GATE_SINCE]
+    legacy = len(rows) - len(gated)
+    backed = sum(1 for r in gated
                  if r["review_status"] == "approved" and r["check_status"] == "passed")
-    approved = sum(1 for r in rows if r["review_status"] == "approved")
-    return {"merged": len(rows), "backed": backed, "approved": approved,
-            "rate": _rate(backed, len(rows))}
+    approved = sum(1 for r in gated if r["review_status"] == "approved")
+    return {"merged": len(gated), "backed": backed, "approved": approved,
+            "legacy": legacy, "since": CHECK_GATE_SINCE,
+            "rate": _rate(backed, len(gated))}
 
 
 def reliability(conn, days: int) -> dict:
@@ -201,6 +223,8 @@ def render(r: dict) -> str:
         f"  evidence     {ev['rate']:5.1f}%  {_bar(ev['rate'])}",
         f"               {ev['backed']} of {ev['merged']} merges cite approval + a "
         f"recorded check ({ev['approved']} approved)",
+        *([f"               ({ev['legacy']} older merges excluded — the check "
+           f"did not exist before {ev['since']})"] if ev["legacy"] else []),
         "",
         f"  reliability  {100 - rel['rate']:5.1f}%  {_bar(100 - rel['rate'])}",
         f"               {rel['failed']} of {rel['terminal']} terminal tasks failed, "
