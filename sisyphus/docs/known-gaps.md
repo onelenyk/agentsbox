@@ -12,7 +12,9 @@ stale check, the API token leaving the UI open, and an operator switching the
 sandbox off in silence. Then, writing the tests the same pass said were
 missing, two more: an automation that could never fire and never said so, and
 the parser standing between every model reply and the UI — copied into three
-modules, drifted apart, and broken in both directions.
+modules, drifted apart, and broken in both directions. Then, giving the worker's
+MCP bridge its first test that executes it, a third: an empty tool roster served
+as a successful answer.
 
 Closed since the last review, kept only as a pointer to where the guard now
 lives: Stop racing a not-yet-started worker, and the subprocess kill having no
@@ -58,6 +60,30 @@ times against an empty roster and burned to the 1800s total timeout. Fixed
 twice over: the check now runs off the request path (open_mr answers at once),
 and a stalled run that already opened its MR ends with an explicit
 "work is delivered — do NOT respawn an engineer" message for the decider.
+
+### An empty tool roster was served as a successful answer
+**Status:** CLOSED 2026-08-30 — `tools/list` refuses to answer "you have no
+tools"; it says why instead.
+
+The entry above records what a worker does with an empty roster: retry, and
+keep retrying, until the run burns its total timeout. That incident's empty
+roster came from the runner's own MCP client dropping the server — but the
+daemon could produce the same shape on its own and call it success.
+`agents.agent_tools()` returns `[]` for an agent that is not in the table, and
+`/mcp/agent` wrapped that in `{"result": {"tools": []}}` with HTTP 200.
+
+Reachable, not theoretical: deleting a custom agent does not revoke the
+sessions running as it (`sessions.revoke_task` fires on task delete, nothing
+fires on agent delete), so a live worker outlives its own definition and its
+next `tools/list` comes back empty and successful. Saving an agent with no
+tools selected does the same thing. Measured against the real router: role
+`engineer` → 6 tools; an unknown role → `200 {"result": {"tools": []}}`.
+
+A worker with no tools cannot call `finish`, so such a run has no ending except
+the timeout. It is now a `-32002` error naming the agent and saying the run
+cannot proceed — the difference between an agent that retries against nothing
+and one that has something to report. Guarded through the real bridge, spawned
+as a subprocess, by `tests/test_agent_mcp_stdio.py`.
 
 ### The suite a worker runs errors out on SISYPHUS_DB_READONLY
 **Status:** CLOSED 2026-08-23 — replaced by SISYPHUS_DB_PROTECT=<path>: only

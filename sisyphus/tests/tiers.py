@@ -39,7 +39,8 @@ TIERS = {
         "test_worktree", "test_worktree_utils",
     ],
     "process": [
-        "test_daemon_ctl", "test_launcher", "test_orphans", "test_sandbox",
+        "test_agent_mcp_stdio", "test_daemon_ctl", "test_launcher", "test_orphans",
+        "test_sandbox",
     ],
     "e2e": [
         "test_end_to_end", "test_notifications_browser",
