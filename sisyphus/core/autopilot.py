@@ -59,23 +59,69 @@ def init_autopilot_table() -> None:
 
 # ── schedule math ───────────────────────────────────────────────────────
 
+def _cron_trigger(cron: str):
+    """(trigger, "") for a crontab string this scheduler can actually fire, or
+    (None, reason).
+
+    The single place a cron is parsed, so what the UI calls broken is exactly
+    what the tick cannot fire. Two parsers would eventually disagree, and the
+    one that disagreed quietly would be this one.
+    """
+    try:
+        from apscheduler.triggers.cron import CronTrigger
+        return CronTrigger.from_crontab(cron.strip(), timezone=timezone.utc), ""
+    except Exception as exc:  # noqa: BLE001
+        return None, str(exc)
+
+
 def compute_next_run(ap: dict, after: Optional[datetime] = None) -> Optional[str]:
     """Next fire time (ISO UTC) for a schedule autopilot, or None if not a
     schedule / not computable. Cron via apscheduler; interval via now+seconds."""
     now = after or datetime.now(timezone.utc)
     if (ap.get("cron") or "").strip():
-        try:
-            from apscheduler.triggers.cron import CronTrigger
-            trig = CronTrigger.from_crontab(ap["cron"].strip(), timezone=timezone.utc)
-            nxt = trig.get_next_fire_time(None, now)
-            return nxt.isoformat() if nxt else None
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("autopilot %s: bad cron %r (%s)", ap.get("id"), ap.get("cron"), exc)
+        trig, err = _cron_trigger(ap["cron"])
+        if trig is None:
+            logger.warning("autopilot %s: bad cron %r (%s)", ap.get("id"), ap.get("cron"), err)
             return None
+        try:
+            nxt = trig.get_next_fire_time(None, now)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("autopilot %s: cron %r yields no next fire time (%s)",
+                           ap.get("id"), ap.get("cron"), exc)
+            return None
+        return nxt.isoformat() if nxt else None
     secs = int(ap.get("interval_seconds") or 0)
     if secs > 0:
         return (now + timedelta(seconds=secs)).isoformat()
     return None
+
+
+def schedule_problem(ap: dict) -> Optional[str]:
+    """Why this automation's clock can never fire it, or None if it can.
+
+    A schedule autopilot whose cron the scheduler cannot parse is stored with
+    next_run NULL, and the list rendered NULL as the same "-" that a webhook
+    autopilot and a paused one show. Three states behind one dash: two of them
+    healthy, one that will never run again and says so nowhere once the
+    create-time warning has scrolled out of the daemon log. tick_once cannot
+    re-warn either -- it only considers rows whose next_run is set, so the
+    broken one is passed over in silence every tick, forever.
+
+    Only the clock is judged. A webhook autopilot fires on a callback and is
+    supposed to carry no next_run, and `enabled` is the operator's own choice:
+    a paused automation is not a broken one.
+    """
+    if (ap.get("trigger_type") or "") != "schedule":
+        return None
+    cron = (ap.get("cron") or "").strip()
+    if cron:
+        trig, err = _cron_trigger(cron)
+        if trig is not None:
+            return None
+        return f"cron {cron!r} is not valid ({err}) — this automation can never fire"
+    if int(ap.get("interval_seconds") or 0) > 0:
+        return None
+    return "a schedule with neither a cron nor an interval — this automation can never fire"
 
 
 def is_schedule(ap: dict) -> bool:

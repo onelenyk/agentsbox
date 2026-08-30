@@ -5,7 +5,6 @@ inject a compact board snapshot + the chat history, and the model returns JSON â
 either a plain reply, or a proposed action the user confirms before it runs.
 Read is free; every mutating action is confirmed and then executed here.
 """
-import json
 import logging
 import re
 
@@ -183,16 +182,12 @@ def execute_action(action: dict) -> str:
 
 
 def _find_json(out: str):
-    s = re.sub(r"```(?:json)?", "", out).strip()
-    try:
-        return json.loads(s)
-    except Exception as e:
-        logger.debug("_find_json: JSON parse failed: %s", e)
-        pass
-    for m in reversed(re.findall(r"\{.*\}", out, re.DOTALL)):
-        try:
-            return json.loads(m)
-        except Exception as e:
-            logger.debug("_find_json: regex extraction failed: %s", e)
-            continue
-    return None
+    """The shared parser â€” see ``ai_assist.find_json``.
+
+    This was a third copy of a regex that two other modules also carried, and
+    the three had already drifted apart: two spelled it greedy, one lazy, and
+    each was broken on the output the others handled. One parser, so a reply
+    the copilot can read is one the planner can read.
+    """
+    from core.ai_assist import find_json
+    return find_json(out)

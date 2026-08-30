@@ -481,11 +481,16 @@ async def autopilots_page(request: Request):
     return _tmpl().TemplateResponse(request, "autopilots.html", {"active_page": "autopilots"})
 
 def _autopilots_list_response(request, flash=None, error=None):
-    from core.autopilot import list_autopilots
+    from core.autopilot import list_autopilots, schedule_problem
+    rows = list_autopilots()
+    for a in rows:
+        # An automation whose clock can never fire it used to render the same
+        # "—" as a webhook one and a paused one. See autopilot.schedule_problem.
+        a["problem"] = schedule_problem(a)
     return _tmpl().TemplateResponse(
         request,
         "autopilots_list.html",
-        {"autopilots": list_autopilots(), "flash": flash, "error": error},
+        {"autopilots": rows, "flash": flash, "error": error},
     )
 
 @router.get("/api/autopilots/list", response_class=HTMLResponse)
@@ -519,9 +524,15 @@ async def autopilots_create(request: Request, name: str = Form(...), description
         trigger_type: str = Form("schedule"), cron: str = Form(""), interval_seconds: str = Form("0"),
         webhook_platform: str = Form(""), webhook_event: str = Form(""), goal_template: str = Form(""),
         repo: str = Form(""), agent: str = Form(""), skip_if_running: str = Form("")):
-    from core.autopilot import create_autopilot
-    create_autopilot(**_ap_form_fields(name, description, trigger_type, cron, interval_seconds,
+    from core.autopilot import create_autopilot, schedule_problem
+    ap = create_autopilot(**_ap_form_fields(name, description, trigger_type, cron, interval_seconds,
         webhook_platform, webhook_event, goal_template, repo, agent, skip_if_running))
+    # Saved either way — losing a typed form to reject one field would be worse
+    # — but a schedule that can never fire is said out loud, at the moment the
+    # operator is still looking, not only on the card afterwards.
+    problem = schedule_problem(ap or {})
+    if problem:
+        return _autopilots_list_response(request, error=f"Created “{name}”, but {problem}")
     return _autopilots_list_response(request, flash=f"Created “{name}”")
 
 @router.post("/api/autopilots/{ap_id}", response_class=HTMLResponse)
@@ -529,9 +540,12 @@ async def autopilots_update(request: Request, ap_id: str, name: str = Form(...),
         trigger_type: str = Form("schedule"), cron: str = Form(""), interval_seconds: str = Form("0"),
         webhook_platform: str = Form(""), webhook_event: str = Form(""), goal_template: str = Form(""),
         repo: str = Form(""), agent: str = Form(""), skip_if_running: str = Form("")):
-    from core.autopilot import update_autopilot
-    update_autopilot(ap_id, **_ap_form_fields(name, description, trigger_type, cron, interval_seconds,
+    from core.autopilot import update_autopilot, schedule_problem
+    ap = update_autopilot(ap_id, **_ap_form_fields(name, description, trigger_type, cron, interval_seconds,
         webhook_platform, webhook_event, goal_template, repo, agent, skip_if_running))
+    problem = schedule_problem(ap or {})
+    if problem:
+        return _autopilots_list_response(request, error=f"Saved “{name}”, but {problem}")
     return _autopilots_list_response(request, flash=f"Saved “{name}”")
 
 @router.post("/api/autopilots/{ap_id}/run", response_class=HTMLResponse)

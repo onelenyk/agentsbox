@@ -576,3 +576,256 @@ def test_merge_resolving_refuses_dirty_checked_out_target(db_path, tmp_path):
     assert "uncommitted" in res["error"]
     # The user's edit survives untouched.
     assert (src / "x.py").read_text() == "uncommitted local edit\n"
+
+
+# ── the background planning turn ────────────────────────────────────────
+
+def _wait_until(pred, timeout=5.0):
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if pred():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+class TestOnlyOnePlanningTurnRunsAtATime:
+    """start_plan_turn is what the Send button calls. A double-click, or an
+    impatient second question, must not put two turns on one plan: they would
+    both write the brief and the later writer would silently win."""
+
+    def test_a_second_submit_while_generating_is_ignored(self, db_path, monkeypatch):
+        import threading
+        started, release, calls = threading.Event(), threading.Event(), []
+
+        def _slow(plan_id, message, timeout=90):
+            calls.append(message)
+            started.set()
+            release.wait(5)
+
+        monkeypatch.setattr(planner, "plan_turn", _slow)
+        p = planner.create_plan("New plan")
+
+        planner.start_plan_turn(p["id"], "add offline mode")
+        assert started.wait(5)
+        assert planner.is_generating(p["id"])
+
+        planner.start_plan_turn(p["id"], "actually, do it differently")
+        release.set()
+        assert _wait_until(lambda: not planner.is_generating(p["id"]))
+
+        assert calls == ["add offline mode"]
+        assert [m["text"] for m in planner.list_messages(p["id"])] == ["add offline mode"]
+
+    def test_the_user_turn_is_recorded_before_the_reply_generates(self, db_path, monkeypatch):
+        """The conversation must show what was just typed while the model is
+        still thinking — not appear only once the reply lands."""
+        import threading
+        started, release = threading.Event(), threading.Event()
+
+        def _slow(plan_id, message, timeout=90):
+            started.set()
+            release.wait(5)
+
+        monkeypatch.setattr(planner, "plan_turn", _slow)
+        p = planner.create_plan("New plan")
+        planner.start_plan_turn(p["id"], "add offline mode")
+        assert started.wait(5)
+
+        assert [m["role"] for m in planner.list_messages(p["id"])] == ["user"]
+        release.set()
+        assert _wait_until(lambda: not planner.is_generating(p["id"]))
+
+    def test_the_opening_message_names_an_unnamed_plan(self, db_path, monkeypatch):
+        monkeypatch.setattr(planner, "plan_turn", lambda *a, **k: None)
+        p = planner.create_plan("New plan")
+        planner.start_plan_turn(p["id"], "Add an offline mode to the mobile client")
+        assert _wait_until(lambda: not planner.is_generating(p["id"]))
+        assert planner.get_plan(p["id"])["title"] == "Add an offline mode to the mobile client"
+
+    def test_a_named_plan_keeps_its_name(self, db_path, monkeypatch):
+        monkeypatch.setattr(planner, "plan_turn", lambda *a, **k: None)
+        p = planner.create_plan("Ship the offline mode")
+        planner.start_plan_turn(p["id"], "start with the sync layer")
+        assert _wait_until(lambda: not planner.is_generating(p["id"]))
+        assert planner.get_plan(p["id"])["title"] == "Ship the offline mode"
+
+    def test_a_turn_that_throws_is_kept_for_the_ui_and_the_flag_is_cleared(
+            self, db_path, monkeypatch):
+        """A background thread's exception reaches nobody on its own. If the
+        generating flag also stayed set, the plan would be wedged: no reply,
+        no error, and every later Send ignored."""
+        def _boom(plan_id, message, timeout=90):
+            raise RuntimeError("the model timed out")
+
+        monkeypatch.setattr(planner, "plan_turn", _boom)
+        p = planner.create_plan("New plan")
+        planner.start_plan_turn(p["id"], "go")
+
+        assert _wait_until(lambda: not planner.is_generating(p["id"]))
+        assert "the model timed out" in planner.pop_error(p["id"])
+        assert planner.pop_error(p["id"]) is None      # popped once, not sticky
+        planner.start_plan_turn(p["id"], "try again")  # and the plan is usable again
+        assert _wait_until(lambda: not planner.is_generating(p["id"]))
+
+
+class TestAnEmptyReplyDoesNotClearTheCanvas:
+
+    def test_an_empty_shell_keeps_the_previous_artifacts(self, db_path, monkeypatch):
+        """A model that answers with a well-formed but empty brief must not
+        wipe work the user can see — the canvas is the only copy."""
+        p = planner.create_plan("p", repo="")
+        monkeypatch.setattr("core.ai_assist.run_prompt", lambda pr, **k: json.dumps({
+            "approach": "start with the sync layer",
+            "steps": [{"goal": "add a queue"}],
+            "risks": ["conflict resolution"],
+        }))
+        first = planner.plan_turn(p["id"], "plan it")
+        assert first["approach"] and first["steps"]
+
+        monkeypatch.setattr("core.ai_assist.run_prompt", lambda pr, **k: json.dumps(
+            {"reply": "not sure what to change"}))
+        second = planner.plan_turn(p["id"], "hmm")
+
+        assert second["approach"] == "start with the sync layer"
+        assert [s["goal"] for s in second["steps"]] == ["add a queue"]
+        assert second["risks"] == ["conflict resolution"]
+
+    def test_a_turn_on_a_plan_that_is_gone_raises(self, db_path):
+        with pytest.raises(ValueError):
+            planner.plan_turn("pl-nope", "go")
+
+
+class TestReadingJsonOutOfAModelsProse:
+    """_find_json is what stands between a chatty model and a wiped canvas."""
+
+    def test_plain_json(self, db_path):
+        assert planner._find_json('{"a": 1}') == {"a": 1}
+
+    def test_a_fenced_block(self, db_path):
+        assert planner._find_json('```json\n{"a": 1}\n```') == {"a": 1}
+
+    def test_json_buried_in_prose(self, db_path):
+        out = 'Sure! Here is the plan:\n{"approach": "x"}\nLet me know what you think.'
+        assert planner._find_json(out) == {"approach": "x"}
+
+    def test_the_last_object_wins(self, db_path):
+        """A model that shows a bad first draft and then corrects itself must
+        be read as its correction."""
+        assert planner._find_json('{"a": 1} then actually {"a": 2}')["a"] == 2
+
+    def test_prose_with_no_json_is_none(self, db_path):
+        assert planner._find_json("sorry, I can't help with that") is None
+
+    def test_something_that_only_looks_like_json_is_none(self, db_path):
+        assert planner._find_json("use the {placeholder} syntax") is None
+
+
+class TestTheStepsDiagram:
+
+    def test_no_steps_draws_nothing(self, db_path):
+        assert planner.steps_dag_mermaid([]) == ""
+
+    def test_steps_become_numbered_nodes(self, db_path):
+        out = planner.steps_dag_mermaid([{"goal": "add a queue"}, {"goal": "flush it"}])
+        assert out.startswith("graph TD")
+        assert 'S0["1. add a queue"]' in out
+        assert 'S1["2. flush it"]' in out
+
+    def test_dependencies_become_edges(self, db_path):
+        out = planner.steps_dag_mermaid([{"goal": "a"}, {"goal": "b", "after": [0]}])
+        assert "S0 --> S1" in out
+
+    def test_a_dependency_on_nothing_real_is_dropped(self, db_path):
+        """A model inventing an index must not produce a diagram that fails to
+        render — mermaid would draw a phantom node for S7."""
+        out = planner.steps_dag_mermaid([{"goal": "a", "after": [7, "two", 0]}])
+        assert "-->" not in out       # 7 is out of range, "two" is not an index,
+        assert "S0 --> S0" not in out  # and 0 is the step itself
+
+    def test_a_quote_in_a_goal_cannot_break_the_node_label(self, db_path):
+        out = planner.steps_dag_mermaid([{"goal": 'add "offline" mode\nand sync'}])
+        assert '"' not in out.split("[", 1)[1].rsplit("]", 1)[0][1:-1].replace("'", "")
+        assert "\n" not in out.split("\n")[1]
+
+
+class TestAutoMergeLeavesAnythingItIsNotSureAboutAlone:
+    """Auto-merge has no override: only a human, in the MR modal, may merge
+    past the gate. Everything it declines must be left exactly as it found it
+    — an unmerged branch a person can still deal with, never a row marked
+    merged for a merge that did not happen."""
+
+    def _mr(self, **over):
+        mr = {"id": "mr-1", "status": "open", "review_status": "approved",
+              "check_status": "passed", "check_head": "", "check_command": "pytest -q",
+              "bare_path": "/tmp/bare", "source_path": "/tmp/src",
+              "source_branch": "sisyphus/task-1", "target_branch": "main"}
+        mr.update(over)
+        return mr
+
+    def _spies(self, monkeypatch, mr, mergeable=True, merge_result=None):
+        from core import mergerequests, store
+        calls = {"merged": [], "notes": []}
+        monkeypatch.setattr(mergerequests, "latest_for_task", lambda tid: mr)
+        monkeypatch.setattr(mergerequests, "check_mergeability",
+                            lambda *a: {"ok": True, "mergeable": mergeable})
+        monkeypatch.setattr(mergerequests, "merge_branch",
+                            lambda *a: merge_result or {"ok": True, "sha": "b" * 40, "target": "main"})
+        monkeypatch.setattr(mergerequests, "mark_merged",
+                            lambda mr_id, sha: calls["merged"].append((mr_id, sha)))
+        monkeypatch.setattr(store, "post_message",
+                            lambda tid, role, **kw: calls["notes"].append(kw.get("text", "")))
+        return calls
+
+    def test_a_task_with_no_mr_is_a_no_op(self, db_path, monkeypatch):
+        calls = self._spies(monkeypatch, None)
+        planner._auto_merge_task("task-1")
+        assert calls["merged"] == [] and calls["notes"] == []
+
+    def test_an_mr_that_is_no_longer_open_is_a_no_op(self, db_path, monkeypatch):
+        calls = self._spies(monkeypatch, self._mr(status="merged"))
+        planner._auto_merge_task("task-1")
+        assert calls["merged"] == [] and calls["notes"] == []
+
+    def test_a_gate_that_blocks_says_so_on_the_thread_and_merges_nothing(
+            self, db_path, monkeypatch):
+        calls = self._spies(monkeypatch, self._mr(review_status="pending"))
+        planner._auto_merge_task("task-1")
+        assert calls["merged"] == []
+        assert len(calls["notes"]) == 1 and "auto-merge skipped" in calls["notes"][0]
+        assert "merge manually" in calls["notes"][0]
+
+    def test_a_failing_check_blocks_it_even_with_an_approval(self, db_path, monkeypatch):
+        calls = self._spies(monkeypatch, self._mr(check_status="failed"))
+        planner._auto_merge_task("task-1")
+        assert calls["merged"] == []
+        assert "FAILED" in calls["notes"][0]
+
+    def test_a_branch_that_does_not_merge_cleanly_is_left_for_a_human(
+            self, db_path, monkeypatch):
+        calls = self._spies(monkeypatch, self._mr(), mergeable=False)
+        planner._auto_merge_task("task-1")
+        assert calls["merged"] == [], "marked an MR merged that git refused to merge"
+
+    def test_a_merge_that_fails_does_not_mark_the_row_merged(self, db_path, monkeypatch):
+        calls = self._spies(monkeypatch, self._mr(),
+                            merge_result={"ok": False, "error": "conflict in core/x.py"})
+        planner._auto_merge_task("task-1")
+        assert calls["merged"] == []
+
+    def test_a_clean_merge_is_recorded_and_announced(self, db_path, monkeypatch):
+        calls = self._spies(monkeypatch, self._mr())
+        planner._auto_merge_task("task-1")
+        assert calls["merged"] == [("mr-1", "b" * 40)]
+        assert "Auto-merged" in calls["notes"][0]
+
+    def test_a_module_that_throws_cannot_take_the_plan_down(self, db_path, monkeypatch):
+        """It runs inside the plan's own advance loop; an exception here would
+        stop the rest of the plan from moving."""
+        from core import mergerequests
+
+        def _boom(tid):
+            raise RuntimeError("git is gone")
+        monkeypatch.setattr(mergerequests, "latest_for_task", _boom)
+        planner._auto_merge_task("task-1")   # must not raise

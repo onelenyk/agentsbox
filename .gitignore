@@ -10,3 +10,8 @@ logs/
 /board-screenshot.png
 /mr-scan-report.md
 /sisyphus-architecture.html
+
+# Coverage runs are local measurements, not part of the tree
+.coverage
+.coverage.*
+htmlcov/
