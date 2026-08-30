@@ -357,3 +357,217 @@ async def test_launcher_records_the_post_exec_argv_and_releases_it(db_path, monk
 
 def _records_in(ws):
     return sorted(p.name for p in (pathlib.Path(ws) / "worker-pids").glob("*.json"))
+
+
+# ── the refusals: what the reaper does when it is NOT sure ───────────────
+
+class TestTheReaperNeverCountsAnUnkilledProcessAsKilled:
+    """`unverified` and `failed` are the module's honest "we could not
+    determine" buckets, and the docstring promises they are never folded into
+    `killed`. Nothing exercised either bucket's failure path — so the promise
+    was the one part of the reaper with no test behind it."""
+
+    def test_a_dry_run_reports_the_orphan_and_kills_nothing(self, reaper_env):
+        worktree = reaper_env.root / "repos" / "dry"
+        proc, argv = reaper_env.spawn(worktree)
+        orphans.record(proc.pid, argv, worktree=str(worktree))
+        orphans._OWNED.clear()
+        assert {r["pid"]: r["verdict"] for r in orphans.scan()}[proc.pid] == "orphan", \
+            "the dry run must be refusing to kill a real orphan, not a spared record"
+
+        summary = orphans.reap(kill=False)
+
+        assert summary["killed"] == []
+        assert summary["unverified"] == [proc.pid]
+        assert proc.poll() is None, "a dry run killed the process anyway"
+        assert _records(reaper_env) == [f"{proc.pid}.json"], \
+            "a dry run dropped the record it did not act on"
+
+    def test_a_process_that_survives_the_kill_lands_in_failed(self, reaper_env, monkeypatch):
+        worktree = reaper_env.root / "repos" / "stubborn"
+        proc, argv = reaper_env.spawn(worktree)
+        orphans.record(proc.pid, argv, worktree=str(worktree))
+        orphans._OWNED.clear()
+        monkeypatch.setattr(orphans, "_terminate", lambda pid, **kw: "survived")
+
+        summary = orphans.reap()
+
+        assert summary["failed"] == [proc.pid]
+        assert summary["killed"] == []
+        assert _records(reaper_env) == [f"{proc.pid}.json"], \
+            "dropped the record of a process still running — the next boot could not see it"
+
+    def test_a_kill_we_are_not_allowed_to_make_lands_in_failed(self, reaper_env, monkeypatch):
+        worktree = reaper_env.root / "repos" / "notours"
+        proc, argv = reaper_env.spawn(worktree)
+        orphans.record(proc.pid, argv, worktree=str(worktree))
+        orphans._OWNED.clear()
+        monkeypatch.setattr(orphans, "_terminate", lambda pid, **kw: "denied")
+
+        summary = orphans.reap()
+
+        assert summary["failed"] == [proc.pid] and summary["killed"] == []
+
+    def test_a_platform_we_cannot_read_argv_on_kills_nothing(self, reaper_env, monkeypatch):
+        """Point 4 of the module docstring is the whole defence against pid
+        reuse. Where argv cannot be read at all, every record is unverifiable
+        — and unverifiable must mean left alone, not killed on the strength of
+        the other four conditions."""
+        worktree = reaper_env.root / "repos" / "plan9"
+        proc, argv = reaper_env.spawn(worktree)
+        orphans.record(proc.pid, argv, worktree=str(worktree))
+        orphans._OWNED.clear()
+        monkeypatch.setattr(orphans.platform, "system", lambda: "Plan9")
+
+        verdicts = {r["pid"]: r["verdict"] for r in orphans.scan()}
+        assert verdicts[proc.pid] == "unverified"
+
+        summary = orphans.reap()
+        assert summary["unverified"] == [proc.pid] and summary["killed"] == []
+        assert proc.poll() is None
+
+
+class TestTerminateReportsWhatActuallyHappened:
+    """_terminate's return value is what decides `killed` vs `failed`, so each
+    outcome is pinned rather than inferred from the happy path."""
+
+    def test_a_process_already_gone_reads_as_gone(self, monkeypatch):
+        def _lookup_error(pid, sig):
+            raise ProcessLookupError()
+        monkeypatch.setattr(orphans.os, "kill", _lookup_error)
+        assert orphans._terminate(4242, grace=0) == "gone"
+
+    def test_a_process_we_may_not_signal_reads_as_denied(self, monkeypatch):
+        def _denied(pid, sig):
+            raise PermissionError()
+        monkeypatch.setattr(orphans.os, "kill", _denied)
+        assert orphans._terminate(4242, grace=0) == "denied"
+
+    def test_a_process_that_outlives_sigkill_reads_as_survived(self, monkeypatch):
+        monkeypatch.setattr(orphans.os, "kill", lambda pid, sig: None)
+        monkeypatch.setattr(orphans, "_alive", lambda pid: True)
+        monkeypatch.setattr(orphans, "KILL_GRACE_SECONDS", 0)
+        assert orphans._terminate(4242, grace=0) == "survived"
+
+
+# ── reading another process's argv ───────────────────────────────────────
+
+class TestReadingArgvIsNeverALicenceToKill:
+
+    def test_an_unsupported_platform_says_so_by_name(self, monkeypatch):
+        monkeypatch.setattr(orphans.platform, "system", lambda: "Plan9")
+        argv, reason = orphans.read_argv(1234)
+        assert argv is None and "Plan9" in reason
+
+    def test_a_transient_failure_is_retried(self, monkeypatch):
+        """KERN_PROCARGS2 returns EIO on roughly one read in three of a freshly
+        spawned child (measured — see the comment above _ARGV_ATTEMPTS). A
+        single attempt would file live orphans under "unverified" for a reason
+        that isn't real."""
+        calls = []
+
+        def _flaky(pid):
+            calls.append(pid)
+            if len(calls) < 3:
+                return None, "sysctl KERN_PROCARGS2 failed (errno 5)"
+            return ["python3", "-c", "..."], ""
+
+        monkeypatch.setattr(orphans.platform, "system", lambda: "Linux")
+        monkeypatch.setattr(orphans, "_argv_linux", _flaky)
+        monkeypatch.setattr(orphans, "_exists", lambda pid: True)
+        monkeypatch.setattr(orphans, "_ARGV_RETRY_PAUSE", 0)
+
+        argv, reason = orphans.read_argv(999)
+        assert argv == ["python3", "-c", "..."] and reason == ""
+        assert len(calls) == 3
+
+    def test_exhausting_the_retries_names_the_last_reason_and_the_count(self, monkeypatch):
+        monkeypatch.setattr(orphans.platform, "system", lambda: "Linux")
+        monkeypatch.setattr(orphans, "_argv_linux", lambda pid: (None, "errno 5"))
+        monkeypatch.setattr(orphans, "_exists", lambda pid: True)
+        monkeypatch.setattr(orphans, "_ARGV_RETRY_PAUSE", 0)
+
+        argv, reason = orphans.read_argv(999)
+        assert argv is None
+        assert "errno 5" in reason and str(orphans._ARGV_ATTEMPTS) in reason
+
+    def test_a_reader_that_raises_is_a_reason_not_a_crash(self, monkeypatch):
+        def _boom(pid):
+            raise OSError("no such thing")
+        monkeypatch.setattr(orphans.platform, "system", lambda: "Linux")
+        monkeypatch.setattr(orphans, "_argv_linux", _boom)
+        monkeypatch.setattr(orphans, "_exists", lambda pid: True)
+        monkeypatch.setattr(orphans, "_ARGV_RETRY_PAUSE", 0)
+
+        argv, reason = orphans.read_argv(999)
+        assert argv is None and "OSError" in reason
+
+    def test_a_process_that_exits_mid_read_is_gone_not_unverified(self, monkeypatch):
+        """The distinction matters: "gone" drops the record, "unverified"
+        keeps warning about a process that no longer exists."""
+        monkeypatch.setattr(orphans.platform, "system", lambda: "Linux")
+        monkeypatch.setattr(orphans, "_argv_linux", lambda pid: (None, "errno 5"))
+        monkeypatch.setattr(orphans, "_exists", lambda pid: False)
+
+        argv, reason = orphans.read_argv(999)
+        assert argv is None and "exited" in reason
+
+
+class TestTheLinuxArgvReader:
+    """CI is macos-latest only, so /proc parsing has never run anywhere — the
+    same blind spot the sandbox backend had. A fake /proc exercises it on any
+    host."""
+
+    @pytest.fixture
+    def fake_proc(self, tmp_path, monkeypatch):
+        root = tmp_path / "fakeroot"
+
+        def _redirect(p):
+            return root / str(p).lstrip("/")
+        monkeypatch.setattr(orphans, "Path", _redirect)
+
+        def write(pid, raw: bytes):
+            d = root / "proc" / str(pid)
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "cmdline").write_bytes(raw)
+        return write
+
+    def test_a_nul_separated_cmdline_becomes_argv(self, fake_proc):
+        fake_proc(11, b"python3\x00-c\x00print(1)\x00")
+        assert orphans._argv_linux(11) == (["python3", "-c", "print(1)"], "")
+
+    def test_a_cmdline_without_a_trailing_nul_is_read_the_same(self, fake_proc):
+        fake_proc(12, b"python3\x00-c")
+        assert orphans._argv_linux(12) == (["python3", "-c"], "")
+
+    def test_an_empty_cmdline_is_a_reason_not_an_empty_argv(self, fake_proc):
+        """A kernel thread reads as empty. Returning [] would fingerprint to
+        the hash of nothing, which every other argument-less process matches."""
+        fake_proc(13, b"")
+        argv, reason = orphans._argv_linux(13)
+        assert argv is None and "empty" in reason
+
+    def test_a_missing_process_names_the_path(self, fake_proc):
+        argv, reason = orphans._argv_linux(9999)
+        assert argv is None and "/proc/9999/cmdline" in reason
+
+
+class TestAnUnreadableRecordIsDroppedNotCarried:
+    """An unreadable record can never identify a process, so keeping it would
+    only reproduce the same warning on every boot."""
+
+    def test_garbage_and_pidless_records_are_deleted_and_the_good_one_kept(
+            self, reaper_env, caplog):
+        import logging
+        d = reaper_env.root / "worker-pids"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "1.json").write_text("{not json")
+        (d / "2.json").write_text(json.dumps({"binary": "opencode"}))   # no pid
+        (d / "3.json").write_text(json.dumps({"pid": 3, "argv_sha256": "x"}))
+
+        with caplog.at_level(logging.WARNING, logger="core.orphans"):
+            recs = orphans._load_records()
+
+        assert [r["pid"] for r in recs] == [3]
+        assert _records(reaper_env) == ["3.json"]
+        assert caplog.text.count("dropping unreadable worker record") == 2

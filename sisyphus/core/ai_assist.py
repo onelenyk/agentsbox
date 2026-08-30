@@ -89,20 +89,68 @@ def parse_task(text, template="", repos=None, agents=None, timeout=60) -> dict:
     return _parse_out(out, repo_names, agent_names)
 
 
-def _find_json(out: str):
+def _brace_spans(text: str):
+    """Every balanced ``{...}`` span in *text*, as (start, end).
+
+    Braces inside JSON strings are skipped, so a value like ``"use {x} here"``
+    cannot close its own object early.
+    """
+    spans, stack, in_str, esc = [], [], False, False
+    for i, ch in enumerate(text):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch == "{":
+            stack.append(i)
+        elif ch == "}" and stack:
+            spans.append((stack.pop(), i + 1))
+    return spans
+
+
+def find_json(out: str):
+    r"""The JSON object in a model's reply, or None.
+
+    Models wrap their answer in prose, in fences, or both, so this cannot be a
+    bare ``json.loads``. It also cannot be a regex, which is what it was — in
+    three copied-and-since-diverged versions:
+
+      ``\{.*\}``   spans from the first brace of the reply to the last, so one
+                   aside ("here is the shape {approach, steps} you asked for")
+                   swallowed the answer and parsed as nothing;
+      ``\{.*?\}``  stops at the first ``}``, which truncates every nested
+                   object — and a plan brief's own steps are objects, so that
+                   was every brief.
+
+    Both failed silently and returned None, which the caller reports to the
+    user as "the model didn't return a usable plan": a retry loop over a reply
+    that was fine.
+
+    Braces are counted instead, and the candidates tried longest-first, then
+    latest-first — an aside is shorter than the answer, and a model that shows
+    a draft and then corrects itself puts the correction last.
+    """
     s = re.sub(r"```(?:json)?", "", out).strip()
     try:
         return json.loads(s)
     except Exception as e:
-        logger.debug("_find_json: JSON parse failed: %s", e)
-        pass
-    for m in reversed(re.findall(r"\{.*?\}", out, re.DOTALL)):
+        logger.debug("find_json: the whole reply is not JSON: %s", e)
+    for start, end in sorted(_brace_spans(s),
+                             key=lambda sp: (sp[1] - sp[0], sp[0]), reverse=True):
         try:
-            return json.loads(m)
+            return json.loads(s[start:end])
         except Exception as e:
-            logger.debug("_find_json: regex extraction failed: %s", e)
-            continue
+            logger.debug("find_json: candidate %d..%d did not parse: %s", start, end, e)
     return None
+
+
+# The name this module's own call sites (and its tests) already use.
+_find_json = find_json
 
 
 def classify_command(text: str, repos: list) -> dict:

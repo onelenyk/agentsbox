@@ -22,7 +22,11 @@
         {% if a.description %}<div class="ecard__persona">{{ a.description }}</div>{% endif %}
         <div class="kv"><span class="k">Assignee</span><span class="v">{{ a.agent or 'orchestrator' }}</span></div>
         <div class="kv"><span class="k">Last run</span><span class="v mono">{{ a.last_run[:16] if a.last_run else '—' }}</span></div>
+        {% if a.problem %}
+        <div class="kv"><span class="k">Next run</span><span class="v"><span class="badge badge--warn">never</span> {{ a.problem }}</span></div>
+        {% else %}
         <div class="kv"><span class="k">Next run</span><span class="v mono">{{ a.next_run[:16] if (a.enabled and a.next_run) else '—' }}</span></div>
+        {% endif %}
         <div class="ecard__foot">
             <span class="ecard__sub mono">{{ a.run_count }} run{{ 's' if a.run_count != 1 else '' }}</span>
             <div class="acts">

@@ -9,7 +9,10 @@ Last reviewed: 2026-08-30.
 Closed 2026-08-30, found by a coverage pass over the whole suite
 (`tests/coverage_report.md`) rather than by a run: the merge gate accepting a
 stale check, the API token leaving the UI open, and an operator switching the
-sandbox off in silence — all three below.
+sandbox off in silence. Then, writing the tests the same pass said were
+missing, two more: an automation that could never fire and never said so, and
+the parser standing between every model reply and the UI — copied into three
+modules, drifted apart, and broken in both directions.
 
 Closed since the last review, kept only as a pointer to where the guard now
 lives: Stop racing a not-yet-started worker, and the subprocess kill having no
@@ -383,6 +386,57 @@ very often 127.0.0.1, which would have handed the exemption to the internet. A
 browser cannot send a bearer token on a navigation, so remote UI access is an SSH
 tunnel by design. Guarded by
 `tests/test_auth.py::TestTheGuardCoversTheWholeSurface`.
+
+### An automation that could never fire looked exactly like one waiting
+**Status:** CLOSED 2026-08-30 — `autopilot.schedule_problem` names it, on the
+card and at the moment it is saved.
+
+A schedule autopilot whose cron apscheduler cannot parse is stored with
+`next_run` NULL. The card rendered NULL as `—`, which is also what a webhook
+autopilot shows (it has no clock, correctly) and what a paused one shows. Three
+states behind one dash, two of them healthy. The only thing ever said about the
+third was a `logger.warning` at create time, and `tick_once` cannot repeat it:
+it looks only at rows whose `next_run` is set, so the broken row is passed over
+in silence every 30 seconds, forever. Measured, not read: `0 3 * * MONDAY` —
+apscheduler wants `MON` — created a row that sat `enabled=1`, survived
+`reconcile_next_runs`, and fired zero times.
+
+`schedule_problem` judges only the clock, so a webhook autopilot and a paused
+one are not defects. It shares `_cron_trigger` with `compute_next_run`, which
+is what stops the UI from calling a cron valid that the tick cannot fire — a
+test asserts the two agree on every cron it is given. The create and update
+routes report it while the operator is still looking at the form, and save
+anyway: rejecting the whole form over one field would lose the rest of it.
+Guarded by `tests/test_autopilot.py::TestAnAutomationThatCanNeverFireSaysSo`
+and `::TestTheOperatorIsToldWhileStillLooking`.
+
+### Three copies of one JSON parser, drifted apart, both broken
+**Status:** CLOSED 2026-08-30 — one `ai_assist.find_json`, counting braces.
+
+Every model reply reaches the UI through a `_find_json`: the planner's brief,
+the copilot's decisions, the New Task "AI structure" button. There were three
+copies of it, and they had drifted: `core/planner.py` and `core/copilot.py`
+spelled the fallback `\{.*\}`, `core/ai_assist.py` spelled it `\{.*?\}`. Both
+spellings are wrong, in opposite directions, and each was broken on output the
+other handled.
+
+Greedy matches from the first brace of the reply to the last, so a single aside
+— "here is the shape {approach, steps} you asked for" — swallowed the answer
+and parsed as nothing. Lazy stops at the first `}`, which truncates every
+nested object; a plan brief's steps are objects, so that was every brief. And
+because `\{.*\}` is greedy, `re.findall` returns at most one span — the
+`reversed(...)` wrapped around it, whose evident intent was "prefer the model's
+last object", never had more than one thing to reverse.
+
+Both failures returned None, and None is what the caller reports as "the model
+didn't return a usable plan this time — try rephrasing": a retry, charged to
+the user, over a reply that was fine. `find_json` counts braces instead,
+ignoring those inside strings, and tries candidates longest-first then
+latest-first — an aside is shorter than the answer, and a model that shows a
+draft and then corrects itself puts the correction last. planner and copilot
+delegate rather than carry a copy. Guarded by
+`tests/test_ai_assist.py::TestReadingJsonOutOfAModelsProse`, whose last test
+asserts all three modules answer identically.
 
 ### A reply to a blocked task is wiped while you type it
 **Status:** CLOSED 2026-08-20 — the reply input now carries `hx-preserve` with a

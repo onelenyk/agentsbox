@@ -238,7 +238,7 @@ in Tier 1 territory.
 | 1 | G1 — gate accepts a stale check | high | **fixed** 2026-08-30 — `merge_block_reason(mr, head=None)` resolves the head itself; 7 tests |
 | 2 | `tools/agent_mcp_stdio.py` at 0%, never executed | high | open — needs a `process`-tier test that spawns the bridge and lists the roster |
 | 3 | G2 — no-sandbox degradation untested and unexercised in CI | medium-high | **fixed** 2026-08-30 — `unconfined_reason()` + opt-in `sandbox.require`; 11 tests |
-| 4 | `autopilot` / `planner` / `orphans` under-covered where failures concentrate | medium | open — steady work |
+| 4 | `autopilot` / `planner` / `orphans` under-covered where failures concentrate | medium | **worked** 2026-08-30 — see "Update" below; 85/77/78% → 91/88/90%, and two live bugs fell out of it |
 | 5 | `POST /api/mr/{id}/land` thin | medium | open — one component test |
 | 6 | G3 — README contradicts the gate | low | **fixed** 2026-08-30 |
 | 7 | AUTH — token guard covered `/api/v1` only, UI ungated | high | **fixed** 2026-08-30 — guard covers the whole surface; 6 tests |
@@ -247,6 +247,50 @@ in Tier 1 territory.
 Items 7 and 8 were found during the same pass but are not coverage gaps, so they
 sit outside the numbered list above. All five fixes landed together; the suite
 went 1150 → 1174 tests, still green.
+
+## Update — 2026-08-30, gap 4
+
+The three modules where real failures concentrate were taken next. 66 tests
+added; `core+web+tools` 82% → 84%.
+
+| Module | Before | After |
+|---|---|---|
+| `core/autopilot.py` | 85% | **91%** |
+| `core/planner.py` | 77% | **88%** |
+| `core/orphans.py` | 78% | **90%** |
+| `core/ai_assist.py` | 89% | 92% |
+| `core/copilot.py` | 85% | 92% |
+
+The last two moved without being aimed at: unifying the JSON parser moved 16
+statements into `ai_assist` and deleted 12 from `copilot`, so read those two
+rows as "the shared parser is tested", not as new tests for either module.
+
+The percentages are the least interesting part again. Writing the tests turned
+up two live bugs, both documented in `docs/known-gaps.md`:
+
+- **An automation that could never fire looked exactly like one waiting.** A
+  cron apscheduler cannot parse stores `next_run` NULL, the card renders NULL
+  as the same `—` a webhook and a paused autopilot show, and `tick_once` only
+  looks at rows whose `next_run` is set — so nothing warned again after the
+  create-time log line. `autopilot.schedule_problem` now names it.
+- **Three copies of one JSON parser, drifted apart, both broken.** planner and
+  copilot spelled the fallback `\{.*\}` (greedy — one aside in braces swallows
+  the whole reply), ai_assist spelled it `\{.*?\}` (lazy — truncates every
+  nested object, and a brief's steps are objects). Both returned None, which
+  every caller reports to the user as "the model didn't give me anything
+  usable". One `ai_assist.find_json` now counts braces.
+
+What the tests actually pin, beyond the count: the reaper's `unverified` and
+`failed` buckets — the module's stated promise that it never counts an unkilled
+process as killed — had no test on their failure paths at all, nor did its
+dry run. `_argv_linux` had never executed anywhere, CI being macOS-only, and
+now runs against a fake `/proc`. `start_plan_turn`'s double-submit guard and
+its background-thread error capture were untested, and a wedged plan (flag set,
+no reply, no error, every later Send ignored) was one exception away.
+
+Still open from the list above: `tools/agent_mcp_stdio.py` at 0% (gap 2) and
+`POST /api/mr/{id}/land` (gap 5). `planner.project_context` and the
+`daemon_ctl` process-lifecycle paths remain the largest deliberate misses.
 
 ## Recommendation on a floor
 

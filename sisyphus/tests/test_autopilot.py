@@ -217,3 +217,202 @@ def test_fire_sets_title_for_schedule_via_webhook_path(db_path, monkeypatch):
     assert len(tasks) == 1
     assert tasks[0]["title"]
     assert tasks[0]["title"].startswith("MR Monitor")
+
+
+# ── an automation that can never fire ───────────────────────────────────
+
+class TestAnAutomationThatCanNeverFireSaysSo:
+    """A schedule whose cron the scheduler cannot parse is stored with
+    next_run NULL, and NULL rendered as the same "—" a webhook autopilot and a
+    paused one show. Three states behind one dash, two of them healthy. The
+    create-time warning is the only thing ever said about the third, and it
+    scrolls out of the log — tick_once cannot repeat it, because it only looks
+    at rows whose next_run is set."""
+
+    def test_a_cron_the_scheduler_cannot_parse_is_named(self, db_path):
+        a = ap.create_autopilot(name="typo", trigger_type="schedule", cron="0 3 * * MONDAY")
+        problem = ap.schedule_problem(a)
+        assert problem and "can never fire" in problem
+        assert "MONDAY" in problem          # says which cron, not just that one is bad
+        assert "weekday" in problem.lower()  # and what the parser objected to
+
+    def test_a_schedule_with_neither_cron_nor_interval_is_named(self, db_path):
+        a = ap.create_autopilot(name="empty", trigger_type="schedule")
+        assert "can never fire" in ap.schedule_problem(a)
+
+    def test_a_webhook_autopilot_is_not_a_problem(self, db_path):
+        """It fires on a callback, so having no next_run is its healthy state."""
+        a = ap.create_autopilot(name="hook", trigger_type="webhook", webhook_platform="jira")
+        assert a["next_run"] is None
+        assert ap.schedule_problem(a) is None
+
+    def test_a_paused_schedule_is_not_a_problem(self, db_path):
+        """`enabled` is the operator's own choice — a pause is not a defect."""
+        a = ap.create_autopilot(name="nightly", trigger_type="schedule",
+                                cron="0 3 * * *", enabled=0)
+        assert ap.schedule_problem(a) is None
+
+    def test_a_valid_schedule_is_not_a_problem(self, db_path):
+        assert ap.schedule_problem(ap.create_autopilot(
+            name="cron", trigger_type="schedule", cron="0 3 * * *")) is None
+        assert ap.schedule_problem(ap.create_autopilot(
+            name="interval", trigger_type="schedule", interval_seconds=3600)) is None
+
+    def test_the_broken_row_is_otherwise_silent_forever(self, db_path, monkeypatch):
+        """The behaviour that made this worth surfacing: the row sits enabled,
+        the tick passes over it every time, and nothing warns again."""
+        _emit_recorder(monkeypatch)
+        a = ap.create_autopilot(name="typo", trigger_type="schedule", cron="0 3 * * MONDAY")
+        assert a["enabled"] == 1 and a["next_run"] is None
+        ap.reconcile_next_runs()
+        assert ap.get_autopilot(a["id"])["next_run"] is None
+        assert ap.tick_once() == 0
+        assert store.list_tasks() == []
+
+    def test_the_parser_that_judges_is_the_parser_that_fires(self, db_path):
+        """schedule_problem and compute_next_run must not be able to disagree:
+        anything called fireable produces a next run, and anything called
+        broken produces none."""
+        for cron in ("0 3 * * *", "*/5 * * * *", "0 3 * * MONDAY", "not a cron", "0 3 * *"):
+            a = {"cron": cron, "interval_seconds": 0, "trigger_type": "schedule"}
+            assert (ap.schedule_problem(a) is None) == (ap.compute_next_run(a) is not None), cron
+
+
+class TestTheOperatorIsToldWhileStillLooking:
+    """The card carries the reason, but a form submit is the moment the typo
+    is fixable — so create and update say it too rather than saving quietly."""
+
+    def _client(self):
+        from fastapi.testclient import TestClient
+        from web.app import app
+        return TestClient(app)
+
+    def _form(self, **over):
+        f = {"name": "nightly", "trigger_type": "schedule", "cron": "0 3 * * *",
+             "interval_seconds": "0", "goal_template": "scan"}
+        f.update(over)
+        return f
+
+    def test_creating_a_broken_schedule_is_saved_and_reported(self, db_path):
+        r = self._client().post("/api/autopilots", data=self._form(cron="0 3 * * MONDAY"))
+        assert r.status_code == 200
+        assert "can never fire" in r.text
+        assert len(ap.list_autopilots()) == 1   # saved, not thrown away
+
+    def test_creating_a_valid_schedule_is_not_reported(self, db_path):
+        r = self._client().post("/api/autopilots", data=self._form())
+        assert r.status_code == 200
+        assert "can never fire" not in r.text
+
+    def test_editing_a_good_schedule_into_a_broken_one_is_reported(self, db_path):
+        a = ap.create_autopilot(name="nightly", trigger_type="schedule", cron="0 3 * * *")
+        r = self._client().post(f"/api/autopilots/{a['id']}",
+                                data=self._form(cron="0 3 * * MONDAY"))
+        assert "can never fire" in r.text
+
+    def test_the_card_carries_the_reason_afterwards(self, db_path):
+        ap.create_autopilot(name="typo", trigger_type="schedule", cron="0 3 * * MONDAY")
+        r = self._client().get("/api/autopilots/list")
+        assert "can never fire" in r.text
+        assert "never" in r.text
+
+
+# ── the unattended tick loop ────────────────────────────────────────────
+
+class TestOneBrokenAutopilotCannotStallTheNightlyLoop:
+    """tick_once runs unattended every 30s. One automation that throws must not
+    take the others down, and must not be retried on every tick until morning."""
+
+    def test_a_fire_that_raises_is_logged_and_the_clock_still_advances(
+            self, db_path, monkeypatch, caplog):
+        import logging
+        a = ap.create_autopilot(name="boom", trigger_type="schedule", cron="0 3 * * *")
+        ap._set_next_run(a["id"], "2000-01-01T00:00:00+00:00")
+
+        def _raise(_ap, context=None):
+            raise RuntimeError("the runner binary is gone")
+        monkeypatch.setattr(ap, "fire", _raise)
+
+        with caplog.at_level(logging.ERROR, logger="core.autopilot"):
+            assert ap.tick_once() == 0
+        assert "fire failed" in caplog.text
+        assert "the runner binary is gone" in caplog.text
+        # advanced past now, so the next tick 30s later passes over it
+        assert ap.get_autopilot(a["id"])["next_run"] > datetime.now(timezone.utc).isoformat()
+
+    def test_the_other_due_automations_still_fire(self, db_path, monkeypatch):
+        _emit_recorder(monkeypatch)
+        bad = ap.create_autopilot(name="bad", trigger_type="schedule",
+                                  cron="0 3 * * *", goal_template="x")
+        good = ap.create_autopilot(name="good", trigger_type="schedule",
+                                   cron="0 4 * * *", goal_template="work")
+        for a in (bad, good):
+            ap._set_next_run(a["id"], "2000-01-01T00:00:00+00:00")
+        real_fire = ap.fire
+
+        def _selective(a, context=None):
+            if a["id"] == bad["id"]:
+                raise RuntimeError("boom")
+            return real_fire(a, context)
+        monkeypatch.setattr(ap, "fire", _selective)
+
+        assert ap.tick_once() == 1
+        tasks = store.list_tasks()
+        assert len(tasks) == 1 and tasks[0]["title"].startswith("good")
+
+    def test_a_webhook_row_is_passed_over_by_the_clock(self, db_path, monkeypatch):
+        """A next_run left on a row that has since become a webhook trigger is
+        not a licence to fire it on a schedule."""
+        _emit_recorder(monkeypatch)
+        a = ap.create_autopilot(name="hook", trigger_type="webhook",
+                                webhook_platform="jira", goal_template="x")
+        ap._set_next_run(a["id"], "2000-01-01T00:00:00+00:00")
+        assert ap.tick_once() == 0
+        assert store.list_tasks() == []
+
+
+class TestWhenTheNextAutomationIsDue:
+    """next_due_at feeds the heartbeat note — the operator's answer to "is
+    anything going to happen tonight?"."""
+
+    def test_reports_the_soonest_enabled_one(self, db_path):
+        far = ap.create_autopilot(name="far", trigger_type="schedule", cron="0 3 * * *")
+        near = ap.create_autopilot(name="near", trigger_type="schedule", interval_seconds=60)
+        ap._set_next_run(far["id"], "2030-01-01T00:00:00+00:00")
+        ap._set_next_run(near["id"], "2027-01-01T00:00:00+00:00")
+        assert ap.next_due_at() == "2027-01-01T00:00:00+00:00"
+
+    def test_ignores_a_paused_one(self, db_path):
+        paused = ap.create_autopilot(name="paused", trigger_type="schedule", cron="0 3 * * *")
+        ap._set_next_run(paused["id"], "2027-01-01T00:00:00+00:00")
+        ap.set_enabled(paused["id"], False)
+        ap._set_next_run(paused["id"], "2027-01-01T00:00:00+00:00")  # set_enabled recomputes
+        assert ap.next_due_at() is None
+
+    def test_is_none_when_only_webhooks_exist(self, db_path):
+        ap.create_autopilot(name="hook", trigger_type="webhook", webhook_platform="jira")
+        assert ap.next_due_at() is None
+
+    def test_is_none_with_no_autopilots_at_all(self, db_path):
+        assert ap.next_due_at() is None
+
+
+class TestTheTitleAnAutomationGivesItsTask:
+
+    def test_an_unnamed_autopilot_gets_no_title(self, db_path):
+        assert ap._make_title({"name": "  ", "trigger_type": "schedule"}) is None
+
+    def test_a_webhook_with_no_context_falls_back_to_the_name(self, db_path):
+        assert ap._make_title({"name": "Jira Bot", "trigger_type": "webhook",
+                               "webhook_platform": "jira"}) == "Jira Bot"
+
+    def test_a_webhook_whose_payload_names_no_event_falls_back_too(self, db_path):
+        assert ap._make_title({"name": "Jira Bot", "trigger_type": "webhook",
+                               "webhook_platform": "bitbucket"}, context={"x": 1}) == "Jira Bot"
+
+    def test_an_unrecognised_trigger_type_gets_no_title(self, db_path):
+        assert ap._make_title({"name": "Manual", "trigger_type": "manual"}) is None
+
+    def test_a_long_name_is_truncated_to_sixty(self, db_path):
+        title = ap._make_title({"name": "N" * 80, "trigger_type": "schedule"})
+        assert len(title) == 60 and title.endswith("…")
