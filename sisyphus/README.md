@@ -225,7 +225,7 @@ docs/          architecture + feature notes
 ## Testing
 
 ```bash
-pytest -q                 # 1276 tests
+pytest -q                 # 1297 tests
 pytest tests/e2e -q       # Playwright browser e2e — needs:
                           #   pip install -r requirements-dev.txt
                           #   python -m playwright install chromium
