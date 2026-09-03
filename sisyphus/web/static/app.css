@@ -98,6 +98,9 @@ body::before {
   border-radius: 7px; color: var(--text-2); font-weight: 500; line-height: 1;
 }
 .nav a .ic { width: 15px; text-align: center; opacity: .8; }
+.nav-sec { margin: 12px 8px 4px; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.task-card--auto { opacity: .75; }
+.task-card--auto .task-card__title { font-size: 12px; }
 .nav a:hover { background: var(--panel-2); color: var(--text); }
 .nav a.active { background: var(--accent-bg); color: var(--accent-hi); }
 .nav a .badge { margin-left: auto; }

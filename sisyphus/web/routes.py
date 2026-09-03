@@ -993,7 +993,41 @@ async def tasks_list_view(request: Request):
             if col in ("in-progress", "needs-you", "to-merge"):
                 _enrich_now_card(t, mr, status)
             columns[col].append(t)
-    return _tmpl().TemplateResponse(request, "tasks_list.html", {"columns": columns})
+
+    # Autopilot runs drown the archive: two daily crons produce ~60 identical
+    # cards a month, and the tasks a human actually shipped have to be picked
+    # out from between them. In the archive columns (never the live ones — a
+    # cron run that NEEDS you must stay a card) each autopilot's runs collapse
+    # into one group row: count, the latest run, when. Signal stays, pile goes.
+    from core.autopilot import list_autopilots
+    ap_names = [a["name"] for a in list_autopilots() if a.get("name")]
+
+    def _autopilot_of(t):
+        title = t.get("title") or ""
+        for name in ap_names:
+            # _make_title shapes: "name · 2026-08-09" (schedule), "name: event"
+            # (webhook), or the bare name.
+            if title == name or title.startswith(f"{name} · ") or title.startswith(f"{name}: "):
+                return name
+        return None
+
+    auto_groups = {}
+    for col in ("shipped", "done", "failed"):
+        groups = {}
+        keep = []
+        for t in columns[col]:
+            name = _autopilot_of(t)
+            if not name:
+                keep.append(t)
+                continue
+            g = groups.setdefault(name, {"name": name, "count": 0, "latest": t})
+            g["count"] += 1
+            if (t.get("updated_at") or "") > (g["latest"].get("updated_at") or ""):
+                g["latest"] = t
+        columns[col] = keep
+        auto_groups[col] = sorted(groups.values(), key=lambda g: g["name"])
+    return _tmpl().TemplateResponse(request, "tasks_list.html",
+                                    {"columns": columns, "auto_groups": auto_groups})
 
 @router.get("/api/tasks/new-form", response_class=HTMLResponse)
 async def tasks_new_form(request: Request):
