@@ -906,33 +906,32 @@ class TestWorkersLive:
         assert "orchestrator" in r.text
 
 
-class TestThreeDoorNav:
-    def test_sidebar_has_exactly_three_doors(self, db_path):
+class TestFlatNav:
+    """The three-door design hid seven pages behind the word "System" — a user
+    had to already know Backups lived there to find them. Every section is one
+    sidebar click from anywhere now, and the tabstrip is gone with the doors."""
+
+    def test_every_section_is_one_click_from_anywhere(self, db_path):
         html = _make_client().get("/dashboard").text
         nav = html.split('<nav class="nav">')[1].split("</nav>")[0]
-        assert nav.count("<a ") == 3
-        for label in ("Home", "Tasks", "System"):
+        assert nav.count("<a ") == 10
+        for label in ("Home", "Tasks", "Planner", "Agents", "Runners", "Repos",
+                      "Autopilot", "Statistics", "Daemon", "Backups"):
             assert label in nav
 
-    def test_system_redirects_to_first_tab(self, db_path):
+    def test_system_still_redirects_for_old_links(self, db_path):
         r = _make_client().get("/system")
         assert "url=/agents" in r.text
 
-    def test_system_pages_show_tabstrip_and_active_door(self, db_path):
+    def test_the_current_page_is_marked_active(self, db_path):
         html = _make_client().get("/repos").text
-        assert 'class="tabstrip"' in html
-        for label in ("Agents", "Runners", "Repos", "Autopilot", "Statistics", "Daemon", "Backups"):
-            assert label in html
         nav = html.split('<nav class="nav">')[1].split("</nav>")[0]
-        assert nav.count("active") == 1 and "System" in nav
+        assert nav.count("active") == 1
+        assert 'active' in [l for l in nav.splitlines() if "/repos" in l][0]
 
-    def test_tasks_pages_show_board_planner_tabs(self, db_path):
-        html = _make_client().get("/tasks").text
-        assert 'class="tabstrip"' in html
-        assert ">Board</a>" in html and ">Planner</a>" in html
-
-    def test_dashboard_has_no_tabstrip(self, db_path):
-        assert 'class="tabstrip"' not in _make_client().get("/dashboard").text
+    def test_the_tabstrip_is_gone(self, db_path):
+        for page in ("/dashboard", "/tasks", "/repos"):
+            assert 'class="tabstrip"' not in _make_client().get(page).text
 
 
 class TestFinishedGraceBadge:
@@ -1067,3 +1066,39 @@ class TestWatchRail:
         html = _make_client().get("/tasks").text
         assert 'id="watch"' in html
         assert "/api/board/watch" in html
+
+
+def test_autopilot_runs_collapse_into_one_group_card(db_path):
+    """Two daily crons produce ~60 identical archive cards a month; the board
+    folds each autopilot's runs into one row so shipped human work stays
+    visible. Live columns never fold — a cron run that needs you is a card."""
+    from core import store
+    from core.autopilot import create_autopilot
+    client = _make_client()
+    create_autopilot(name="Nightly repo scan", trigger_type="schedule",
+                     cron="0 3 * * *", goal_template="scan")
+    runs = [store.create_task("scan all repos", status="done",
+                              title=f"Nightly repo scan · 2026-09-{day}")
+            for day in ("01", "02", "03")]
+    store.create_task("a real delivery", status="done", title="Fix the gate")
+
+    html = client.get("/api/tasks/list").text
+    assert html.count("🤖 Nightly repo scan") == 1     # one group row, not three cards
+    assert "3 runs" in html
+    latest = max(runs, key=lambda t: t["updated_at"])
+    assert latest["id"] in html                        # the group opens the latest run
+    assert sum(t["id"] in html for t in runs) == 1     # the other two are folded away
+    assert "Fix the gate" in html                      # human work stays a card
+
+
+def test_a_cron_run_that_needs_you_stays_a_card(db_path):
+    from core import store
+    from core.autopilot import create_autopilot
+    client = _make_client()
+    create_autopilot(name="morning-mr-review", trigger_type="schedule",
+                     cron="7 6 * * *", goal_template="review")
+    store.create_task("review MRs", status="waiting",
+                      title="morning-mr-review · 2026-09-03")
+    html = client.get("/api/tasks/list").text
+    assert "morning-mr-review · 2026-09-03" in html    # full card in Needs you
+    assert "1 run" not in html
