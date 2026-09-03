@@ -30,6 +30,7 @@ Action = Literal["spawn_worker", "spawn_task", "ask_human", "note", "done", "fai
 
 MAX_PASSES = 25              # per-task budget — a runaway task fails loudly
 MAX_CONSECUTIVE_REPEATS = 3  # thrash circuit breaker
+DEFAULT_DAILY_BUDGET_USD = 10.0   # applies when config carries no daily_budget_usd at all
 
 
 class Subtask(BaseModel):
@@ -292,7 +293,7 @@ def _pass_count(task_id: str) -> int:
 
 def _budget_exceeded(task_id: str) -> Optional[str]:
     """A human-readable reason if this task (or today) has hit its $ cap, else
-    None. Caps come from config; 0/unset disables that cap."""
+    None. Caps come from config; an explicit 0 disables a cap, and an unset daily cap defaults to DEFAULT_DAILY_BUDGET_USD."""
     from .config import get_config
     from . import usage
 
@@ -301,7 +302,11 @@ def _budget_exceeded(task_id: str) -> Optional[str]:
         c = usage.task_cost(task_id)
         if c >= tb:
             return f"task budget reached: ${c:.4f} spent of a ${tb:.2f} cap."
-    db = float(get_config("daily_budget_usd", 0) or 0)
+    # The daily cap defaults ON for an autonomous system that spends money at
+    # night: an absent key means $10/day, and only an explicit 0 in config —
+    # a recorded operator decision — switches the check off.
+    raw = get_config("daily_budget_usd", DEFAULT_DAILY_BUDGET_USD)
+    db = float(0 if raw is None else raw)
     if db > 0:
         c = usage.today_cost()
         if c >= db:
