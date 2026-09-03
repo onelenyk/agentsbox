@@ -5,8 +5,8 @@ Give it a goal — it plans, dispatches specialist agents into isolated git
 worktrees, reviews the result, and opens a merge request.
 
 [![CI](https://github.com/onelenyk/agentsbox/actions/workflows/ci.yml/badge.svg)](https://github.com/onelenyk/agentsbox/actions/workflows/ci.yml)
-![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![Tests](https://img.shields.io/badge/tests-1150-brightgreen)
+![Python](https://img.shields.io/badge/python-3.14-blue)
+![Tests](https://img.shields.io/badge/tests-1276-brightgreen)
 ![Runs on](https://img.shields.io/badge/runs-on%20your%20machine-lightgrey)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
 
@@ -52,7 +52,7 @@ thread records that it was one.
 
 ## Quick start
 
-Requires Python 3.10+, git, and one runner CLI on your `PATH`. An API key is
+Requires Python 3.14 (what CI tests), git, and one runner CLI on your `PATH`. An API key is
 optional — opencode uses its own logged-in providers, Claude Code its OAuth login.
 
 ```bash
@@ -84,7 +84,7 @@ sisyphus/
   core/        domain + engine — orchestrator, worker, merge requests, sandbox
   web/         FastAPI app: htmx UI, JSON API, agent decision tools
   docs/        architecture, the north star, and an honest ledger of gaps
-  tests/       1150 unit tests + a Playwright browser e2e
+  tests/       1276 tests in four tiers + a Playwright browser e2e
   sisyphus.py  CLI entrypoint      mcp_server.py  MCP stdio server
 ```
 

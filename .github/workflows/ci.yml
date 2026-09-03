@@ -19,5 +19,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install -r requirements.txt -r requirements-dev.txt
-      - name: Run tests
-        run: python -m pytest -q --ignore=tests/e2e
+      - name: Lint
+        run: python -m ruff check core web tools tests
+      - name: Run tests under coverage
+        run: python -m coverage run --source=core,web -m pytest -q --ignore=tests/e2e
+      - name: Coverage floors (per-directory; see tests/coverage_report.md)
+        run: |
+          python -m coverage report
+          python -m coverage report --include='core/*' --fail-under=88
+          python -m coverage report --include='web/*' --fail-under=74

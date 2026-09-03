@@ -6,7 +6,6 @@ worker_started message, and the crash-fallback detection (session still
 active after the process exits = it never called finish()).
 """
 import json
-import os
 import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -380,7 +379,7 @@ class TestCleanupSalvage:
     def test_clean_worktree_produces_no_attachment(self, db_path, tmp_path, monkeypatch):
         monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
         task = store.create_task("test clean")
-        wt = self._make_worktree(tmp_path, task["id"], "engineer", dirty=False)
+        self._make_worktree(tmp_path, task["id"], "engineer", dirty=False)
 
         cleanup_task(task["id"])
 

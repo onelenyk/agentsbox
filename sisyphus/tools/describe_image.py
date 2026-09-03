@@ -11,19 +11,19 @@ def describe_image(image_path: str, api_key: str = None) -> str:
     if not api_key:
         print("ERROR: Missing OPENROUTER_API_KEY")
         sys.exit(1)
-    
+
     if not os.path.exists(image_path):
         print(f"ERROR: File not found: {image_path}")
         sys.exit(1)
-    
+
     with open(image_path, "rb") as f:
         image_b64 = base64.b64encode(f.read()).decode("utf-8")
-    
+
     ext = os.path.splitext(image_path)[1].lower()
-    mime_map = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", 
+    mime_map = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                 ".gif": "image/gif", ".webp": "image/webp"}
     mime_type = mime_map.get(ext, "image/png")
-    
+
     payload = {
         "model": "google/gemini-flash-1.5",
         "messages": [{
@@ -34,7 +34,7 @@ def describe_image(image_path: str, api_key: str = None) -> str:
             ]
         }]
     }
-    
+
     req = urllib.request.Request(
         "https://openrouter.ai/api/v1/chat/completions",
         data=json.dumps(payload).encode(),
@@ -43,7 +43,7 @@ def describe_image(image_path: str, api_key: str = None) -> str:
             "Content-Type": "application/json",
         }
     )
-    
+
     try:
         with urllib.request.urlopen(req) as resp:
             result = json.loads(resp.read())
@@ -56,6 +56,6 @@ if __name__ == "__main__":
         print("Usage: python tools/describe_image.py IMAGE_PATH")
         print("Example: python tools/describe_image.py screenshot.png")
         sys.exit(0)
-    
+
     description = describe_image(sys.argv[1])
     print(description)

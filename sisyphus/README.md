@@ -83,7 +83,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the domain model in depth
 
 ## Quick start
 
-**Requirements:** Python 3.10+, git, and at least one runner CLI on your PATH —
+**Requirements:** Python 3.14 (what CI tests), git, and at least one runner CLI on your PATH —
 [opencode](https://opencode.ai) or [Claude Code](https://claude.com/claude-code)
 (**Runners → Detect** finds installed ones). An API key is optional: opencode can
 use its own logged-in providers (the model prefix picks the provider, e.g.
@@ -225,7 +225,7 @@ docs/          architecture + feature notes
 ## Testing
 
 ```bash
-pytest -q                 # 1150 unit tests
+pytest -q                 # 1276 tests
 pytest tests/e2e -q       # Playwright browser e2e — needs:
                           #   pip install -r requirements-dev.txt
                           #   python -m playwright install chromium

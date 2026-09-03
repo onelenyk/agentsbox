@@ -9,7 +9,6 @@ one-shot local AI call grounded in the repo's own context.
 import json
 import logging
 import os
-import re
 import threading
 from datetime import datetime, timezone
 from typing import List, Optional

@@ -12,7 +12,6 @@ The path-confinement tests are not modelling a hostile agent — these paths com
 from the human's config.yaml — they pin that a typo cannot write outside the
 worktree.
 """
-import os
 import stat
 import subprocess
 from pathlib import Path

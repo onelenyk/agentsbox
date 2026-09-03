@@ -5,28 +5,27 @@ import os
 import sys
 import urllib.request
 import urllib.error
-from pathlib import Path
 
 def fetch_jira(issue_key: str, base_url: str = None, email: str = None, token: str = None) -> dict:
     base_url = base_url or os.environ.get("JIRA_BASE_URL", "")
     email = email or os.environ.get("JIRA_EMAIL", "")
     token = token or os.environ.get("JIRA_API_TOKEN", "")
-    
+
     if not all([base_url, email, token]):
         result = {"skipped": True, "reason": "Jira credentials not configured"}
         print(json.dumps(result))
         return result
-    
+
     issue_url = f"{base_url}/rest/api/2/issue/{issue_key}"
     issue = _jira_get(issue_url, email, token)
-    
+
     linked = []
     for link in issue.get("fields", {}).get("issuelinks", []):
         if "outwardIssue" in link:
             linked.append({"key": link["outwardIssue"]["key"], "direction": "outward"})
         elif "inwardIssue" in link:
             linked.append({"key": link["inwardIssue"]["key"], "direction": "inward"})
-    
+
     result = {
         "key": issue_key,
         "summary": issue.get("fields", {}).get("summary", ""),

@@ -5,7 +5,6 @@ JSON-RPC with the Bearer token. Verifies role-scoped tools, thread writes, and
 preconditions.
 """
 import json
-import os
 import subprocess
 from unittest.mock import patch
 
@@ -723,7 +722,7 @@ def test_request_changes_on_review_task_sets_review_status_and_crossposts(db_pat
 
 
 def test_open_mr_fires_review_hook(db_path):
-    from core import mergerequests, reviews, sessions
+    from core import mergerequests, sessions
 
     sessions.clear()
     task = store.create_task("build Z", repo="sisyphus")

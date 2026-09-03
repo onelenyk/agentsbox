@@ -12,7 +12,6 @@ worker coordination surface, and the record of produced artifacts.
 
 Status is a tiny enum the orchestrator sets directly (single writer → no FSM).
 """
-import json
 import re
 from datetime import datetime, timezone
 from typing import List, Optional

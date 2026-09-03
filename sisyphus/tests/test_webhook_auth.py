@@ -5,10 +5,9 @@ import os
 from contextlib import contextmanager
 from unittest.mock import patch
 
-import pytest
 from fastapi.testclient import TestClient
 
-from core import config, webhooks
+from core import config
 from web.app import app
 
 

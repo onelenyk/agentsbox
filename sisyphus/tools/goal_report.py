@@ -13,7 +13,6 @@ state of its own, so it cannot drift away from the truth it reports on.
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone

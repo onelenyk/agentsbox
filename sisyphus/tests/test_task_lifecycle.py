@@ -14,7 +14,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from core import cancellation, orchestrator, sessions, store
+from core import cancellation, orchestrator, store
 from web.app import app
 
 
@@ -122,7 +122,7 @@ class TestStopBeforeTheWorkerStarts:
     def test_a_stop_in_the_window_is_seen_by_the_worker(self, db_path):
         cancellation.clear()
         # decision site claims it
-        event = cancellation.register("task-x", "engineer")
+        cancellation.register("task-x", "engineer")
         # human stops before the worker coroutine has run
         assert cancellation.request("task-x") == 1
         # worker starts and asks for its event

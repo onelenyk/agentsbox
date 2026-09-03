@@ -3,7 +3,6 @@ import os
 import pathlib
 import stat
 
-import pytest
 
 from core.worktree import get_repo_name_from_url, set_access
 

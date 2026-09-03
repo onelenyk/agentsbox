@@ -1,5 +1,4 @@
 """Tests for core/reviews.py — the auto-review hook module."""
-import pytest
 
 from core import mergerequests, reviews, store
 

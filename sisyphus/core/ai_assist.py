@@ -196,7 +196,6 @@ def _classify_fallback(text: str) -> dict:
     is_automation = any(kw in t_lower for kw in _AUTOMATION_KWS)
     if is_automation:
         kind = "automation"
-        cron = ""
     elif len(t) > 200 or _has_enumerated_steps(t):
         kind = "mission"
     else:

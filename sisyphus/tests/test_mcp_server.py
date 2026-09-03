@@ -10,8 +10,6 @@ Tests cover:
 """
 
 import json
-import sys
-import os
 from unittest.mock import MagicMock, patch
 
 # mcp_server is now a thin HTTP client: it imports no core modules and has no

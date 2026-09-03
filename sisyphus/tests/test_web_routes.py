@@ -608,7 +608,7 @@ def test_task_detail_shows_result_card_with_diff_link(db_path):
 
 
 def test_diff_modal_colourises_patch(db_path):
-    from core import store, attachments
+    from core import attachments
     task = _make_task(goal="ship")
     attachments.save_text(task["id"], "change.patch",
                           "diff --git a/x b/x\n@@ -0,0 +1,2 @@\n+added line\n-removed line\n context")

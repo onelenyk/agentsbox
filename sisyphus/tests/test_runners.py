@@ -89,7 +89,7 @@ class TestRunnerCRUD:
     def test_set_default_runner(self, db_path):
         init_runners_table()
         r1 = add_runner("runner-a", "binary-a")
-        r2 = add_runner("runner-b", "binary-b")
+        add_runner("runner-b", "binary-b")
         set_default_runner(r1["id"])
         d = get_default_runner()
         assert d["id"] == r1["id"]
