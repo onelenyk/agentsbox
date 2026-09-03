@@ -393,7 +393,9 @@ async def run_forever() -> None:
         logger.exception("autopilot: reconcile_on_boot failed")
     while True:
         try:
-            fired = tick_once()
+            # tick_once fires tasks synchronously (store writes, emit) — off
+            # the loop, so a slow fire cannot stall every other coroutine.
+            fired = await asyncio.to_thread(tick_once)
             heartbeat.beat("autopilot",
                            note=(f"fired {fired}" if fired else "nothing due"),
                            next_due=next_due_at() or "")
