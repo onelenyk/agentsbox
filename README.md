@@ -6,7 +6,7 @@ worktrees, reviews the result, and opens a merge request.
 
 [![CI](https://github.com/onelenyk/agentsbox/actions/workflows/ci.yml/badge.svg)](https://github.com/onelenyk/agentsbox/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.14-blue)
-![Tests](https://img.shields.io/badge/tests-1276-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1297-brightgreen)
 ![Runs on](https://img.shields.io/badge/runs-on%20your%20machine-lightgrey)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
 
@@ -84,7 +84,7 @@ sisyphus/
   core/        domain + engine — orchestrator, worker, merge requests, sandbox
   web/         FastAPI app: htmx UI, JSON API, agent decision tools
   docs/        architecture, the north star, and an honest ledger of gaps
-  tests/       1276 tests in four tiers + a Playwright browser e2e
+  tests/       1297 tests in four tiers + a Playwright browser e2e
   sisyphus.py  CLI entrypoint      mcp_server.py  MCP stdio server
 ```
 
@@ -100,9 +100,9 @@ development. `tools/goal_report.py` measures the distance from git history and
 the daemon's own database, never from a keyboard:
 
 ```
-SELF-BUILD    22.0%   40 of 182 trunk commits, through 26 Sisyphus merges
+SELF-BUILD    25.0%   40 of 160 trunk commits, through 26 Sisyphus merges
 autonomy      67.6%   23 of 34 delivering tasks needed no human turn
-reliability   92.4%   8 of 105 terminal tasks failed
+reliability   92.2%   9 of 115 terminal tasks failed
 ```
 
 Read next: [full manual](sisyphus/README.md) ·
