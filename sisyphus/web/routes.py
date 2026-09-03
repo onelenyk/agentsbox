@@ -100,12 +100,16 @@ async def startup():
     if reconciled:
         logger.info("orchestrator: resumed %d task(s) orphaned by restart", reconciled)
 
-    from core import preflight
+    from core import notify, preflight
     pf = preflight.check()
     if pf["ok"]:
         logger.info("preflight: ready (runner=%s)", pf["runner"])
     else:
         logger.warning("preflight: NOT ready to run work — %s", pf["reason"])
+        # Say it outward too: a daemon that boots unable to run work, at
+        # 03:00 under launchd, is exactly the state nobody is watching for.
+        # wait=True — a daemon thread this early may not outlive startup.
+        notify.send("preflight_not_ready", reason=pf["reason"], wait=True)
 
     asyncio.create_task(orchestrator.dispatch_forever())
     # reconcile_on_boot only covers the restart. Keep guarding at runtime, so a
