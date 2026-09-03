@@ -13,6 +13,14 @@ api:
                                  # reach the UI over an SSH tunnel, since a
                                  # browser cannot send a bearer header
 
+notify:
+  webhook_url: ${SISYPHUS_NOTIFY_URL}  # empty = off. One JSON POST per notable
+                                       # event (task failed/parked, preflight not
+                                       # ready): {event, task_id, title, reason,
+                                       # url, ts}. Point it at anything that
+                                       # accepts a POST — ntfy.sh, a chat
+                                       # webhook relay, curl in a pipe.
+
 sandbox:
   require: false                 # true = refuse to launch a worker that would
                                  # run unconfined (no backend outside macOS, or

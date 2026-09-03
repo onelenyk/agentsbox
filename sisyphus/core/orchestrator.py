@@ -19,7 +19,7 @@ from typing import Awaitable, Callable, Literal, Optional
 
 from pydantic import BaseModel, ValidationError
 
-from . import heartbeat, store
+from . import heartbeat, notify, store
 from .worker import spawn_worker
 
 logger = logging.getLogger(__name__)
@@ -428,11 +428,17 @@ def _all_children_done(task_id: str) -> bool:
     return bool(kids) and all(c["status"] == "done" for c in kids)
 
 
-async def _terminate(task_id: str, status: str) -> None:
+async def _terminate(task_id: str, status: str, reason: str = "") -> None:
     """Set a terminal status AND reclaim the task's disk (worktrees, bare
     clones, run logs). Best-effort cleanup — never let it block termination."""
     task = store.get_task(task_id)
     store.set_status(task_id, status)
+    if status == "failed":
+        # Every failed transition passes through here — the one choke point.
+        # 8 of this daemon's 9 historical failures were silent; not anymore.
+        notify.send("task_failed", task_id=task_id,
+                    title=store.task_display_title(task) if task else task_id,
+                    reason=reason)
     try:
         from .worker import cleanup_task
         cleanup_task(task_id)
@@ -470,6 +476,8 @@ def _park_on_error(task_id: str) -> None:
     store.post_message(task_id, "orchestrator", kind="question",
                        text="Something went wrong on my side. Reply here to resume, or check the daemon logs.")
     store.set_status(task_id, "waiting")
+    notify.send("task_parked", task_id=task_id, title=store.task_display_title(task),
+                reason="an internal error interrupted a pass — parked for review")
 
 
 DecideFn = Callable[[dict, str], Awaitable[Decision]]
@@ -501,6 +509,8 @@ async def handle_event(
             store.post_message(task_id, "orchestrator", kind="question",
                                text=f"{over} Reply to continue, or leave it parked.")
             store.set_status(task_id, "waiting")
+            notify.send("task_parked", task_id=task_id,
+                        title=store.task_display_title(task), reason=over)
             return Decision(action="ask_human", question=over, why="budget guard"), None
 
     # Single-agent mode: a task with a pinned agent skips the orchestrator
@@ -512,7 +522,7 @@ async def handle_event(
     if _pass_count(task_id) >= MAX_PASSES:
         store.post_message(task_id, "orchestrator", kind="note",
                            text="[fail] pass budget exceeded — stopping to avoid runaway cost")
-        await _terminate(task_id, "failed")
+        await _terminate(task_id, "failed", reason="pass budget exceeded — stopped to avoid runaway cost")
         return Decision(action="fail", reason="pass budget exceeded", why="budget"), None
 
     if _consecutive_worker_failures(task_id) >= MAX_CONSECUTIVE_WORKER_FAILURES:
@@ -525,6 +535,9 @@ async def handle_event(
                            text="[ask_human] workers keep failing to report a result")
         store.post_message(task_id, "orchestrator", kind="question", text=question)
         store.set_status(task_id, "waiting")
+        notify.send("task_parked", task_id=task_id,
+                    title=store.task_display_title(task),
+                    reason="workers keep failing to report a result")
         return Decision(action="ask_human", question=question, why="repeated worker failures"), None
 
     thread_text = store.render_thread(task_id, for_prompt=True)
@@ -549,7 +562,8 @@ async def handle_event(
             task_id, "orchestrator", kind="note",
             text=f"[fail] circuit breaker — {decision.action!r} repeated too many times",
         )
-        await _terminate(task_id, "failed")
+        await _terminate(task_id, "failed",
+                         reason=f"circuit breaker — {decision.action!r} repeated too many times")
         return Decision(action="fail", reason="circuit breaker tripped", why="thrash"), None
 
     bg_task = await _execute(task_id, decision)
@@ -634,7 +648,7 @@ async def _handle_single_agent(task: dict) -> tuple:
         )
     except Exception:  # noqa: BLE001 — a bookkeeping error must not stop the fail
         logger.exception("could not record review death for task %s", task_id)
-    await _terminate(task_id, "failed")
+    await _terminate(task_id, "failed", reason="pinned agent produced no result")
     return Decision(action="fail", reason="pinned agent produced no result",
                     why="single-agent failure"), None
 
@@ -701,7 +715,7 @@ async def _execute(task_id: str, decision: Decision):
         await _terminate(task_id, "done")
         return None
     if decision.action == "fail":
-        await _terminate(task_id, "failed")
+        await _terminate(task_id, "failed", reason=decision.reason or decision.why or "")
         return None
     return None  # note / noop: nothing further this pass
 
