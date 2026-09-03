@@ -7,7 +7,6 @@ from fastapi import APIRouter, Request, Form
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from core.db import init_db
 from core.config import get_config
 from core import mergerequests, sessions
 from web.markdown import render_md
@@ -77,21 +76,12 @@ async def startup():
         return
     _started = True
 
-    from core.runners import init_runners_table
-    from core.agents import init_agents_table
-    from core.usage import init_usage_table
-    from core.mergerequests import init_mr_table
-    from core.autopilot import init_autopilot_table
-    from core.copilot_store import init_copilot_tables
-    from core.planner import init_planner_tables
-    init_db()
-    init_runners_table()  # daemon is self-sufficient: seed the runners table
-    init_agents_table()   # and the agents (personas + tool allowlists)
-    init_usage_table()    # and the per-run token/cost ledger
-    init_mr_table()       # and the local merge-request ledger
-    init_autopilot_table()  # and the autopilot automations
-    init_copilot_tables()   # and the copilot chat sessions
-    init_planner_tables()   # and the mission-planner plans/items
+    # One call owns the schema: every init in order (daemon is self-sufficient —
+    # runners, agents, usage, MRs, autopilots, copilot, planner all seed
+    # themselves), then a PRAGMA user_version stamp so a future non-additive
+    # migration has something to compare against.
+    from core.migrations import migrate_all
+    migrate_all()
 
     import web.agent_mcp as agent_mcp
     from core import orchestrator
@@ -111,6 +101,28 @@ async def startup():
         # wait=True — a daemon thread this early may not outlive startup.
         notify.send("preflight_not_ready", reason=pf["reason"], wait=True)
 
+    # Name the active spend caps once, loudly — a cap someone believes is on
+    # while config says otherwise is how a quiet $100 night happens.
+    from core.config import get_config
+    from core.orchestrator import DEFAULT_DAILY_BUDGET_USD
+    _task_cap = float(get_config("task_budget_usd", 0) or 0)
+    _raw_daily = get_config("daily_budget_usd", DEFAULT_DAILY_BUDGET_USD)
+    _daily_cap = float(0 if _raw_daily is None else _raw_daily)
+    logger.info("budgets: per-task %s · daily %s",
+                f"${_task_cap:.2f}" if _task_cap > 0 else "OFF",
+                f"${_daily_cap:.2f}" if _daily_cap > 0 else "OFF (explicit 0 in config)")
+
+    # Name the active spend caps once, loudly — a cap someone believes is on
+    # while config says otherwise is how a quiet $100 night happens.
+    from core.config import get_config
+    from core.orchestrator import DEFAULT_DAILY_BUDGET_USD
+    _task_cap = float(get_config("task_budget_usd", 0) or 0)
+    _raw_daily = get_config("daily_budget_usd", DEFAULT_DAILY_BUDGET_USD)
+    _daily_cap = float(0 if _raw_daily is None else _raw_daily)
+    logger.info("budgets: per-task %s · daily %s",
+                f"${_task_cap:.2f}" if _task_cap > 0 else "OFF",
+                f"${_daily_cap:.2f}" if _daily_cap > 0 else "OFF (explicit 0 in config)")
+
     asyncio.create_task(orchestrator.dispatch_forever())
     # reconcile_on_boot only covers the restart. Keep guarding at runtime, so a
     # task created without an event recovers in minutes instead of waiting for
@@ -125,6 +137,11 @@ async def startup():
     # listens on loopback — see core.forge_poll.
     from core import forge_poll
     asyncio.create_task(forge_poll.poll_forever())
+
+    # A consistent snapshot at boot and daily after — restore is only as good
+    # as the last time anything actually called snapshot().
+    from core import backup
+    asyncio.create_task(backup.backup_forever())
 
 @router.get("/", response_class=HTMLResponse)
 async def root():
