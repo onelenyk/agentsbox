@@ -98,3 +98,35 @@ def test_commit_all_excludes_build_junk(repo, tmp_path):
     assert "__pycache__" not in patch
     assert ".pyc" not in patch
     assert ".DS_Store" not in patch
+
+
+class TestTrackedRunnerConfigNeverDirtiesTheTree:
+    def test_overwriting_a_tracked_opencode_config_leaves_status_clean(self, tmp_path):
+        """When a repo TRACKS .opencode/opencode.json, our config replaces its
+        content in the throwaway checkout. The sanctioned commit path already
+        excludes it by pathspec; skip-worktree covers the unsanctioned one —
+        a persona shelling out `git add -A` cannot stage the overwrite, and
+        the file never shows as dirty in status or a diff."""
+        src = tmp_path / "src"
+        (src / ".opencode").mkdir(parents=True)
+        _git(["init", "-b", "main"], src)
+        _git(["config", "user.email", "t@t"], src)
+        _git(["config", "user.name", "T"], src)
+        (src / ".opencode" / "opencode.json").write_text('{"plugin": ["evil"]}')
+        _git(["add", "-A"], src)
+        _git(["commit", "-m", "repo ships its own opencode config"], src)
+
+        from core import runner_profiles as rp
+        rp.write_mcp_config(
+            "opencode", worktree_path=str(src), output_dir=str(tmp_path / "out"),
+            server_name="sisyphus_agent", command=["python3", "/srv/bridge.py"],
+            env={}, agent_name="sisyphus-worker", model="m/x")
+
+        r = subprocess.run(["git", "-C", str(src), "status", "--porcelain"],
+                           capture_output=True, text=True)
+        assert ".opencode/opencode.json" not in r.stdout
+        r = subprocess.run(["git", "-C", str(src), "add", "-A"],
+                           capture_output=True, text=True)
+        r = subprocess.run(["git", "-C", str(src), "diff", "--cached", "--name-only"],
+                           capture_output=True, text=True)
+        assert ".opencode/opencode.json" not in r.stdout

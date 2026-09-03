@@ -39,7 +39,7 @@ class TestNoRepo:
         worktree = call.args[2]  # worktree_path
         assert worktree == str(tmp_path / "scratch" / task["id"])
         # a private scratch cwd with our agent-MCP config, not a shared /tmp
-        assert (tmp_path / "scratch" / task["id"] / "opencode.json").exists()
+        assert (tmp_path / "scratch" / task["id"] / ".opencode" / "opencode.json").exists()
 
         thread = store.get_thread(task["id"])
         kinds = [m["kind"] for m in thread]
@@ -107,7 +107,7 @@ class TestRepoBackedWorktree:
         # commits advance the branch; read-only roles would be detached.
         assert mock_ct.call_args.kwargs.get("detach") is False
 
-        config = json.loads((fake_worktree / "opencode.json").read_text())
+        config = json.loads((fake_worktree / ".opencode" / "opencode.json").read_text())
         # Named "sisyphus_agent", not "sisyphus" — confirmed live that this
         # machine already has a global/per-project MCP entry literally named
         # "sisyphus" (the repo's own control-plane mcp_server.py, set up for
@@ -511,3 +511,48 @@ class TestDeliveredWorkGuard:
         task = self._task_with_run(mr_in_run=False, mr_before_run=True)
         msg = worker_end_message("engineer", self._R(), task_id=task["id"])
         assert "Do NOT spawn another engineer" not in msg
+
+
+class TestRepoOwnedConfigIsOverriddenLoudly:
+    @pytest.mark.asyncio
+    async def test_the_thread_says_what_the_checkout_declared(self, db_path, tmp_path, monkeypatch):
+        """A repo carrying its own opencode config gets overridden, not
+        refused — and the task thread says so by name, because a silently
+        neutralized config is indistinguishable from an honoured one."""
+        task = store.create_task("fix the bug", repo="myrepo")
+        mock_launch = AsyncMock(return_value=AgentResult(status="completed", summary="ok"))
+        fake_worktree = tmp_path / "worktree"
+        (fake_worktree / ".opencode").mkdir(parents=True)
+        (fake_worktree / ".opencode" / "opencode.json").write_text(json.dumps({
+            "plugin": ["oh-my-opencode@latest"], "mcp": {"sneaky": {}}}))
+
+        with patch("core.worker.get_repo", return_value={"source": "https://example.com/r.git", "branch": "main"}), \
+             patch("core.worker.init_bare_clone"), \
+             patch("core.git_ops.ensure_task_branch", return_value="sisyphus/" + task["id"]), \
+             patch("core.worker.create_worktree", return_value=str(fake_worktree)), \
+             patch("core.worker.set_access"), \
+             patch("core.worker.launch_agent", mock_launch):
+            await spawn_worker(task["id"], "engineer", "fix it", repo_name="myrepo")
+
+        notes = [m["text"] for m in store.get_thread(task["id"]) if m["text"].startswith("[sandbox]")]
+        assert len(notes) == 1
+        assert ".opencode/opencode.json" in notes[0]
+        assert "oh-my-opencode@latest" in notes[0]
+        assert "sneaky" in notes[0]
+
+    @pytest.mark.asyncio
+    async def test_a_clean_checkout_gets_no_note(self, db_path, tmp_path):
+        task = store.create_task("fix the bug", repo="myrepo")
+        mock_launch = AsyncMock(return_value=AgentResult(status="completed", summary="ok"))
+        fake_worktree = tmp_path / "worktree"
+        fake_worktree.mkdir()
+
+        with patch("core.worker.get_repo", return_value={"source": "https://example.com/r.git", "branch": "main"}), \
+             patch("core.worker.init_bare_clone"), \
+             patch("core.git_ops.ensure_task_branch", return_value="sisyphus/" + task["id"]), \
+             patch("core.worker.create_worktree", return_value=str(fake_worktree)), \
+             patch("core.worker.set_access"), \
+             patch("core.worker.launch_agent", mock_launch):
+            await spawn_worker(task["id"], "engineer", "fix it", repo_name="myrepo")
+
+        assert not [m for m in store.get_thread(task["id"]) if m["text"].startswith("[sandbox]")]

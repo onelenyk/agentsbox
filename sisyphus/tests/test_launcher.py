@@ -89,6 +89,7 @@ class TestMockAgentTimeout:
         # "Operation not permitted"), which masks the timeout under test. These
         # tests exercise the timeout loop, not the sandbox, so disable it here.
         monkeypatch.setenv("SISYPHUS_SANDBOX", "0")
+        monkeypatch.setenv("SISYPHUS_SANDBOX_REQUIRE", "0")  # waived: this test is about timeouts, not confinement
 
         worktree = pathlib.Path(os.environ["WORKSPACE_ROOT"]) / "worktree"
         worktree.mkdir(parents=True, exist_ok=True)
@@ -124,6 +125,7 @@ class TestIdleTimeout:
         # so disable the sandbox and let the blocking mock agent exercise the
         # idle-timeout path directly.
         monkeypatch.setenv("SISYPHUS_SANDBOX", "0")
+        monkeypatch.setenv("SISYPHUS_SANDBOX_REQUIRE", "0")  # waived: this test is about timeouts, not confinement
 
         worktree = pathlib.Path(os.environ["WORKSPACE_ROOT"]) / "worktree"
         worktree.mkdir(parents=True, exist_ok=True)
@@ -350,9 +352,12 @@ class TestSandboxCanBeRequired:
         assert "SISYPHUS_SANDBOX=0" in (result.error or "")
 
     @pytest.mark.asyncio
-    async def test_unconfined_still_runs_when_not_required(self, db_path, monkeypatch):
+    async def test_unconfined_still_runs_when_told_twice(self, db_path, monkeypatch):
+        """Running unconfined on a backend host now takes BOTH switches: the
+        sandbox off AND the requirement waived. One alone refuses (the test
+        above); two is a stated operator decision and the run proceeds."""
         monkeypatch.setenv("SISYPHUS_SANDBOX", "0")
-        monkeypatch.delenv("SISYPHUS_SANDBOX_REQUIRE", raising=False)
+        monkeypatch.setenv("SISYPHUS_SANDBOX_REQUIRE", "0")
 
         worktree = pathlib.Path(os.environ["WORKSPACE_ROOT"]) / "worktree"
         worktree.mkdir(parents=True, exist_ok=True)

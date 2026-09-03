@@ -148,5 +148,5 @@ class TestProbeUsesTheProductionPath:
             "opencode", worktree_path=str(tmp_path), output_dir=str(tmp_path),
             server_name="sisyphus_smoke", command=["/bin/true"], env={},
             agent_name="sisyphus-smoke", model="some/model")
-        cfg = json.loads((tmp_path / "opencode.json").read_text())
+        cfg = json.loads((tmp_path / ".opencode" / "opencode.json").read_text())
         assert cfg["agent"]["sisyphus-smoke"]["model"] == "some/model"

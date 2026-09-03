@@ -64,6 +64,7 @@ def build(root: str, real_home: str = "") -> str:
         logger.exception("could not create the worker HOME at %s", home)
         return real_home
 
+    _sweep_strays(home)
     for rel, _why in LINKED:
         src = Path(real_home) / rel
         if not src.exists():
@@ -81,3 +82,39 @@ def build(root: str, real_home: str = "") -> str:
         except OSError:
             logger.exception("could not link %s into the worker HOME", rel)
     return str(home)
+
+
+def _sweep_strays(home: Path) -> None:
+    """Remove everything in the worker HOME that the allowlist did not put
+    there. The home persists between runs, and a run can write into it — a
+    repo's own opencode config making opencode install a plugin left
+    .config/, .cache/opencode/packages/, .omo/, .npm/ and Library/ behind
+    (docs/known-gaps.md), which every LATER worker on every repo would then
+    inherit. Sweeping on each build makes "a worker carries what we chose"
+    true at spawn time rather than only on the first spawn. The cost is
+    opencode re-bootstrapping its package cache (~12s of a run that lasts
+    minutes); the alternative is one repo's plugin quietly becoming every
+    repo's plugin. Never raises — a stray we could not remove is logged and
+    the probe in runner_profiles remains the belt to these braces."""
+    import shutil
+    allowed = {Path(rel).parts[0] for rel, _ in LINKED}
+    removed = []
+    try:
+        entries = list(home.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        if entry.name in allowed:
+            continue
+        try:
+            if entry.is_symlink() or entry.is_file():
+                entry.unlink()
+            else:
+                shutil.rmtree(entry)
+            removed.append(entry.name)
+        except OSError:
+            logger.exception("runner home: could not sweep %s", entry.name)
+    if removed:
+        logger.warning("runner home: swept %s — a previous run left them, and a "
+                       "persisted extra is how one repo's config becomes every "
+                       "repo's config", ", ".join(sorted(removed)))

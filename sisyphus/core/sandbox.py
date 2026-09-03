@@ -80,24 +80,34 @@ def enabled() -> bool:
 def required() -> bool:
     """Whether a run must refuse to start rather than proceed unconfined.
 
-    Off by default: no backend exists outside macOS yet, so requiring one would
-    make the daemon unusable on Linux rather than safer. It is opt-in for hosts
-    where an unconfined worker is not an acceptable outcome —
+    The default follows the platform: where a backend EXISTS (macOS), losing
+    confinement must be a stated decision, so an unset key means required —
+    running unconfined then takes two deliberate steps (SISYPHUS_SANDBOX=0
+    AND sandbox.require: false), the same shape as every other guardrail
+    override here. Where no backend exists yet (Linux), requiring one would
+    make the daemon unusable rather than safer, so an unset key means not
+    required and the launcher keeps announcing every unconfined run instead.
 
         sandbox:
-          require: true          # or SISYPHUS_SANDBOX_REQUIRE=1
+          require: false         # or SISYPHUS_SANDBOX_REQUIRE=0
 
-    — turning a silent downgrade of the isolation guarantee into a refusal.
+    An unreadable config falls back to that same platform default — on a
+    backend host that cannot be called fail-closed, because the sandbox is
+    available and runs proceed confined; only an operator who also switched
+    the sandbox off is refused, and the env override still works there.
     """
     env = os.environ.get("SISYPHUS_SANDBOX_REQUIRE", "").strip()
     if env:
         return env in ("1", "true", "on", "yes")
     try:
         from core.config import get_config
-        return bool(get_config("sandbox.require", False))
-    except Exception:  # noqa: BLE001 — an unreadable config must not fail closed
-        logger.exception("could not read sandbox.require — treating as not required")
-        return False
+        val = get_config("sandbox.require", None)
+        if val is None:
+            return available()
+        return bool(val)
+    except Exception:  # noqa: BLE001 — an unreadable config keeps the platform default
+        logger.exception("could not read sandbox.require — using the platform default")
+        return available()
 
 
 def unconfined_reason() -> Optional[str]:

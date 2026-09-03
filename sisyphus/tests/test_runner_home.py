@@ -7,6 +7,7 @@ XDG_CACHE_HOME, OPENCODE_CONFIG, OPENCODE_CONFIG_DIR, --pure, an empty project
 same probe returns `plugin: []` and only our own MCP server.
 """
 import os
+import pathlib
 
 from core import runner_home
 
@@ -99,3 +100,33 @@ class TestRebuilding:
         blocker.write_text("")
         real = str(_fake_home(tmp_path))
         assert runner_home.build(str(blocker), real_home=real) == real
+
+
+class TestSweepingStrays:
+    """The home persists between runs, and a run can write into it: a repo's
+    own opencode config once made opencode install a plugin, leaving .config/,
+    .cache/opencode/packages/, .omo/ and .npm/ behind for every LATER worker
+    on every repo to inherit (docs/known-gaps.md). build() sweeps what the
+    allowlist did not put there, so each spawn starts from the allowlist."""
+
+    def test_a_previous_runs_leavings_are_swept(self, tmp_path):
+        real = _fake_home(tmp_path)
+        home = runner_home.build(str(tmp_path / "ws"), real_home=str(real))
+        # what the hostile-config probe measured being left behind:
+        for stray in (".config/opencode/node_modules", ".cache/opencode/packages",
+                      ".omo", ".npm", "Library"):
+            (pathlib.Path(home) / stray).mkdir(parents=True)
+        (pathlib.Path(home) / ".wget-hsts").write_text("x")
+
+        runner_home.build(str(tmp_path / "ws"), real_home=str(real))
+
+        left = set(os.listdir(home))
+        assert not left & {".config", ".cache", ".omo", ".npm", "Library", ".wget-hsts"}
+
+    def test_the_allowlist_survives_the_sweep(self, tmp_path):
+        real = _fake_home(tmp_path)
+        home = runner_home.build(str(tmp_path / "ws"), real_home=str(real))
+        before = sorted(os.listdir(home))
+        (pathlib.Path(home) / ".cache").mkdir()
+        runner_home.build(str(tmp_path / "ws"), real_home=str(real))
+        assert sorted(os.listdir(home)) == before
