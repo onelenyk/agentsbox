@@ -26,9 +26,12 @@ backup:
                                  # (newest 14 kept); 0 = scheduled snapshots off
 
 sandbox:
-  require: false                 # true = refuse to launch a worker that would
-                                 # run unconfined (no backend outside macOS, or
-                                 # SISYPHUS_SANDBOX=0) instead of warning
+  # require: false               # unset = required wherever a backend exists
+                                 # (macOS), so running unconfined takes two
+                                 # deliberate steps: SISYPHUS_SANDBOX=0 AND this
+                                 # set to false. On a platform with no backend
+                                 # (Linux) unset means not required — the
+                                 # launcher announces every unconfined run.
 
 default_model: deepseek          # model for the seeded default runner
 max_concurrent_workers: 2        # global worker cap

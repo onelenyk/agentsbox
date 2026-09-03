@@ -461,7 +461,7 @@ class TestWorkerIntegration:
         mock_launch.assert_called_once()
         texts = [m["text"] for m in store.get_thread(task["id"])]
         assert not any("setup hook" in t for t in texts)   # silence, not a reassuring line
-        assert sorted(p.name for p in worktree.iterdir() if p.name != "opencode.json") \
+        assert sorted(p.name for p in worktree.iterdir() if p.name != ".opencode") \
             == ["build.gradle"]
 
     @pytest.mark.asyncio

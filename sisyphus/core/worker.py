@@ -489,9 +489,27 @@ async def spawn_worker(
     from .runners import resolve_runner
     runner_row = resolve_runner(runner_name or "")
     rtype = runner_profiles.normalize_type(runner_row)
+    # Read what the checkout's own opencode config declares BEFORE the write
+    # below replaces the winning slot — then say it on the thread. A repo is
+    # added by a human who vouches for it, so its config is overridden rather
+    # than refused; overridden LOUDLY, because a silently neutralized config
+    # is indistinguishable from one that was honoured (docs/known-gaps.md).
+    declared = (runner_profiles.repo_declared_opencode(worktree_path)
+                if rtype == "opencode" else {"mcp": [], "plugin": [], "files": []})
     mcp_config = _write_runner_config(rtype, worktree_path, output_dir, token,
                                       model=_effective_model(model_override, runner_name),
                                       binary=runner_row.get("binary", ""))
+    if declared["files"]:
+        bits = []
+        if declared["plugin"]:
+            bits.append(f"plugin list suppressed ({', '.join(declared['plugin'])})")
+        if declared["mcp"]:
+            bits.append(f"{len(declared['mcp'])} MCP server(s) disabled by name "
+                        f"({', '.join(declared['mcp'])})")
+        store.post_message(task_id, "system", kind="note",
+                           text=(f"[sandbox] this checkout carries its own opencode config "
+                                 f"({', '.join(declared['files'])}) — overridden: "
+                                 + ("; ".join(bits) if bits else "nothing it declared survives")))
     prefix = runner_profiles.tool_prefix(rtype, _MCP_SERVER_NAME)
 
     prompt = _build_prompt(role_def, task["goal"], instruction,

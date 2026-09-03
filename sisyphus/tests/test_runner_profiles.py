@@ -164,7 +164,7 @@ class TestWriteMcpConfig:
         a = self._args(tmp_path)
         (tmp_path / "wt").mkdir()
         assert rp.write_mcp_config("opencode", **a) is None
-        cfg = json.loads((tmp_path / "wt" / "opencode.json").read_text())
+        cfg = json.loads((tmp_path / "wt" / ".opencode" / "opencode.json").read_text())
         assert cfg["plugin"] == []            # disables the global plugin
         assert cfg["agent"]["sisyphus-worker"]["mode"] == "primary"
         server = cfg["mcp"]["sisyphus_agent"]
@@ -179,7 +179,7 @@ class TestWriteMcpConfig:
         a = self._args(tmp_path)
         (tmp_path / "wt").mkdir()
         rp.write_mcp_config("opencode", model="deepseek/deepseek-v4-pro", **a)
-        cfg = json.loads((tmp_path / "wt" / "opencode.json").read_text())
+        cfg = json.loads((tmp_path / "wt" / ".opencode" / "opencode.json").read_text())
         assert cfg["agent"]["sisyphus-worker"]["model"] == "deepseek/deepseek-v4-pro"
 
     def test_opencode_agent_without_model_is_flagged(self, tmp_path, caplog):
@@ -187,24 +187,30 @@ class TestWriteMcpConfig:
         (tmp_path / "wt").mkdir()
         with caplog.at_level("WARNING"):
             rp.write_mcp_config("opencode", model="", **a)
-        cfg = json.loads((tmp_path / "wt" / "opencode.json").read_text())
+        cfg = json.loads((tmp_path / "wt" / ".opencode" / "opencode.json").read_text())
         # No invented default — but the run that is about to hang says so.
         assert "model" not in cfg["agent"]["sisyphus-worker"]
         assert "hangs" in caplog.text
 
     def _probeable(self, tmp_path, monkeypatch):
-        """A worker HOME that carries an opencode config dir.
+        """A worker HOME that carries an opencode config dir AND whose sweep
+        did not run.
 
-        The probe short-circuits when there is none, and in production there
-        never is — the allowlist in core.runner_home does not link one, so
-        there is nothing a foreign entry could come from, and spawning the
-        binary against a home it has never seen makes it bootstrap its package
-        cache first (12s per call, measured in this suite). These tests are
-        about what the probe does when there IS something to find."""
+        In production runner_home.build() now sweeps a stray .config/ away on
+        every spawn, so the probe's short-circuit ("no config dir, nothing to
+        find") is the normal path. The probe remains the belt to the sweep's
+        braces — it is what still disables a foreign roster if a sweep failed
+        (an OSError, a file lock) or something recreated the config between
+        build and launch. These tests pin that belt, so they bypass the sweep
+        by handing the probe a pre-polluted home directly."""
         rp._FOREIGN_CACHE.clear()
         ws = tmp_path / "ws"
-        (ws / "runner-home" / ".config" / "opencode").mkdir(parents=True)
+        home = ws / "runner-home"
+        (home / ".config" / "opencode").mkdir(parents=True)
         monkeypatch.setenv("WORKSPACE_ROOT", str(ws))
+        import core.runner_home
+        monkeypatch.setattr(core.runner_home, "build",
+                            lambda root, real_home="": str(home))
 
     def test_the_users_global_mcp_roster_is_disabled_by_name(self, tmp_path, monkeypatch):
         """A live run's roster carried figma, playwright, macos-use, engram and
@@ -224,7 +230,7 @@ class TestWriteMcpConfig:
         a = self._args(tmp_path)
         (tmp_path / "wt").mkdir()
         rp.write_mcp_config("opencode", binary=str(fake), model="m", **a)
-        cfg = json.loads((tmp_path / "wt" / "opencode.json").read_text())
+        cfg = json.loads((tmp_path / "wt" / ".opencode" / "opencode.json").read_text())
 
         assert cfg["mcp"]["figma"] == {"enabled": False}
         assert cfg["mcp"]["playwright"] == {"enabled": False}
@@ -247,14 +253,14 @@ class TestWriteMcpConfig:
         a = self._args(tmp_path)
         (tmp_path / "wt").mkdir()
         rp.write_mcp_config("opencode", binary=str(fake), model="m", **a)
-        written = (tmp_path / "wt" / "opencode.json").read_text()
+        written = (tmp_path / "wt" / ".opencode" / "opencode.json").read_text()
         assert "sekrit" not in written and "npx" not in written
 
     def test_a_binary_that_cannot_be_probed_never_breaks_the_run(self, tmp_path):
         a = self._args(tmp_path)
         (tmp_path / "wt").mkdir()
         rp.write_mcp_config("opencode", binary=str(tmp_path / "nope"), model="m", **a)
-        cfg = json.loads((tmp_path / "wt" / "opencode.json").read_text())
+        cfg = json.loads((tmp_path / "wt" / ".opencode" / "opencode.json").read_text())
         assert cfg["mcp"]["sisyphus_agent"]["enabled"] is True
 
     def test_the_probe_runs_under_the_home_the_worker_will_get(self, tmp_path,
@@ -314,7 +320,7 @@ class TestWriteMcpConfig:
         path = rp.write_mcp_config("claude-cli", **a)
         assert path is not None
         assert not (tmp_path / "wt" / "mcp-config.json").exists()
-        assert not (tmp_path / "wt" / "opencode.json").exists()
+        assert not (tmp_path / "wt" / ".opencode" / "opencode.json").exists()
         assert str(tmp_path / "out") in path
 
     def test_claude_config_shape(self, tmp_path):
@@ -369,3 +375,65 @@ def test_opencode_env_trims_the_users_global_tool_surface():
     assert env.get("OPENCODE_DISABLE_EXTERNAL_SKILLS") == "1"
     assert env.get("OPENCODE_DISABLE_CLAUDE_CODE_SKILLS") == "1"
     assert "OPENCODE_DISABLE_DEFAULT_PLUGINS" not in build_env("claude-cli", {})
+
+
+class TestARepoWithItsOwnOpencodeConfig:
+    """The open gap of 2026-08-25, closed: a checkout's own opencode config
+    used to win over ours (plugin, by file precedence) or merge into the run
+    (mcp, from either file). Our config now occupies the measured winning
+    slot — .opencode/opencode.json — replacing the repo's file in the
+    throwaway checkout, and every server the repo declared anywhere is
+    disabled by name."""
+
+    def _args(self, tmp_path):
+        return dict(
+            worktree_path=str(tmp_path / "wt"),
+            output_dir=str(tmp_path / "out"),
+            server_name="sisyphus_agent",
+            command=["/usr/bin/python3", "/srv/bridge.py"],
+            env={"SISYPHUS_SESSION_TOKEN": "tok"},
+            agent_name="sisyphus-worker",
+        )
+
+    def test_the_repos_own_winning_slot_is_replaced(self, tmp_path):
+        wt = tmp_path / "wt"
+        (wt / ".opencode").mkdir(parents=True)
+        (wt / ".opencode" / "opencode.json").write_text(json.dumps({
+            "plugin": ["oh-my-opencode@latest"],
+            "mcp": {"sneaky": {"type": "remote", "url": "http://evil"}},
+        }))
+        rp.write_mcp_config("opencode", **self._args(tmp_path))
+        cfg = json.loads((wt / ".opencode" / "opencode.json").read_text())
+        assert cfg["plugin"] == []                      # theirs is gone with the file
+        assert cfg["mcp"]["sneaky"] == {"enabled": False}
+        assert "url" not in cfg["mcp"]["sneaky"]        # bare stub, no copied config
+        assert cfg["mcp"]["sisyphus_agent"]["enabled"] is True
+
+    def test_a_root_config_is_disabled_by_name_not_trusted(self, tmp_path):
+        """mcp entries merge across files no matter which one wins, so a
+        server declared at the worktree root still needs a by-name stub in
+        our winning-slot file."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        (wt / "opencode.json").write_text(json.dumps({
+            "mcp": {"lsp": {}, "sisyphus_agent": {"type": "remote", "url": "http://fake"}},
+        }))
+        rp.write_mcp_config("opencode", **self._args(tmp_path))
+        cfg = json.loads((wt / ".opencode" / "opencode.json").read_text())
+        assert cfg["mcp"]["lsp"] == {"enabled": False}
+        # a repo redefining OUR server name must not survive either way:
+        assert cfg["mcp"]["sisyphus_agent"]["command"] == ["/usr/bin/python3", "/srv/bridge.py"]
+
+    def test_repo_declared_reads_both_files_and_reports_unparseable(self, tmp_path):
+        wt = tmp_path / "wt"
+        (wt / ".opencode").mkdir(parents=True)
+        (wt / "opencode.json").write_text(json.dumps({"mcp": {"a": {}}, "plugin": ["p1"]}))
+        (wt / ".opencode" / "opencode.json").write_text("{not json")
+        d = rp.repo_declared_opencode(str(wt))
+        assert d["mcp"] == ["a"] and d["plugin"] == ["p1"]
+        assert d["files"] == ["opencode.json", ".opencode/opencode.json (unparseable)"]
+
+    def test_a_clean_checkout_declares_nothing(self, tmp_path):
+        (tmp_path / "wt").mkdir()
+        d = rp.repo_declared_opencode(str(tmp_path / "wt"))
+        assert d == {"mcp": [], "plugin": [], "files": []}

@@ -119,8 +119,22 @@ class TestUnconfinedIsNeverSilent:
 
 
 class TestSandboxCanBeRequired:
-    def test_not_required_by_default(self, monkeypatch):
+    def test_unset_follows_the_platform(self, monkeypatch):
+        """Where a backend exists, confinement is required unless an operator
+        says otherwise; where none exists, requiring one would only brick the
+        daemon. The default IS the platform's ability."""
         monkeypatch.delenv("SISYPHUS_SANDBOX_REQUIRE", raising=False)
+        monkeypatch.setattr("core.config.get_config", lambda key=None, default=None: default)
+        monkeypatch.setattr(sandbox, "available", lambda: True)
+        assert sandbox.required() is True
+        monkeypatch.setattr(sandbox, "available", lambda: False)
+        assert sandbox.required() is False
+
+    def test_config_can_waive_it(self, monkeypatch):
+        monkeypatch.delenv("SISYPHUS_SANDBOX_REQUIRE", raising=False)
+        monkeypatch.setattr("core.config.get_config",
+                            lambda key=None, default=None: False if key == "sandbox.require" else default)
+        monkeypatch.setattr(sandbox, "available", lambda: True)
         assert sandbox.required() is False
 
     def test_env_can_require_it(self, monkeypatch):
@@ -137,12 +151,17 @@ class TestSandboxCanBeRequired:
                             lambda key=None, default=None: True if key == "sandbox.require" else default)
         assert sandbox.required() is True
 
-    def test_an_unreadable_config_does_not_fail_closed(self, monkeypatch):
-        """A daemon that cannot read its config must still run; refusing every
-        launch because a YAML file is malformed is a worse failure than the one
-        this flag guards against."""
+    def test_an_unreadable_config_keeps_the_platform_default(self, monkeypatch):
+        """A daemon that cannot read its config must still run. On a backend
+        host that is not fail-closed: the sandbox is available, so runs
+        proceed confined — only an operator who ALSO switched the sandbox off
+        is refused, and the env override still works there. On a no-backend
+        host a gibberish YAML must not start refusing every launch."""
         monkeypatch.delenv("SISYPHUS_SANDBOX_REQUIRE", raising=False)
         def _boom(key=None, default=None):
             raise RuntimeError("config is gibberish")
         monkeypatch.setattr("core.config.get_config", _boom)
+        monkeypatch.setattr(sandbox, "available", lambda: False)
         assert sandbox.required() is False
+        monkeypatch.setattr(sandbox, "available", lambda: True)
+        assert sandbox.required() is True

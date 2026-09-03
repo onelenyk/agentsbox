@@ -4,7 +4,7 @@ Things verified to be missing or wrong, with enough detail to act on. Each was
 found by using the system, not by reading it. Remove an entry when it is fixed —
 this file is only useful if it is true.
 
-Last reviewed: 2026-08-30.
+Last reviewed: 2026-09-03.
 
 Closed 2026-08-30, found by a coverage pass over the whole suite
 (`tests/coverage_report.md`) rather than by a run: the merge gate accepting a
@@ -247,8 +247,38 @@ own stream format, which differs per CLI. "Alive or not" was the question being
 asked.
 
 ### A repo's own opencode config undoes the worker's isolation
-**Status:** open, measured 2026-08-25. Bigger than its first write-up
-("a repo can add an MCP server"), which is why the title changed.
+**Status:** CLOSED 2026-09-03 — four guards, each aimed at one measured leg of
+the gap. (1) Our generated config now occupies the winning slot,
+`.opencode/opencode.json` inside the throwaway checkout — when the repo ships
+that file, ours REPLACES it, so its `plugin` list never reaches opencode at
+all (`runner_profiles.write_mcp_config`). (2) Every MCP server the checkout
+declares in either config file is disabled by name in ours, because `mcp`
+entries merge across files no matter which one wins
+(`runner_profiles.repo_declared_opencode`). (3) The override is loud: the
+worker posts what the checkout declared to the task thread before launch —
+a silently neutralized config is indistinguishable from an honoured one
+(`core/worker.py`). (4) `runner_home.build()` sweeps everything the allowlist
+did not put in the worker HOME on every spawn, so what 08-25's probe left
+behind (.config/, .cache/opencode/packages/, .omo/, .npm/, Library/) can no
+longer outlive its run and leak into other repos' workers — at the cost of
+opencode re-bootstrapping its package cache (~12s of a run that lasts
+minutes). A tracked `.opencode/opencode.json` is flagged skip-worktree after
+the overwrite, so even a raw `git add -A` the persona shells out cannot stage
+it (the sanctioned commit path already excluded it by pathspec). Policy
+chosen: override loudly rather than refuse at spawn — a repo is added by a
+human who vouches for it, and the daemon already runs its `check:` command on
+the same trust. Still unmeasured: `.opencode/` subfiles beyond opencode.json
+(agent/*.md and the like); the 08-25 measurements cover the config file.
+Guarded by `tests/test_runner_profiles.py` (TestARepoWithItsOwnOpencodeConfig),
+`tests/test_runner_home.py` (TestSweepingStrays), `tests/test_worker.py`
+(TestRepoOwnedConfigIsOverriddenLoudly), `tests/test_git_ops.py`
+(TestTrackedRunnerConfigNeverDirtiesTheTree). The paragraphs below are the
+original measurements the fix rests on.
+
+Related default flipped the same day: `sandbox.require` now defaults to the
+platform's ability (`core/sandbox.py::required`) — on a host with a backend,
+running unconfined takes two deliberate steps (SISYPHUS_SANDBOX=0 AND an
+explicit require: false) instead of zero.
 
 opencode merges a project's `.opencode/opencode.json` into the run, and that
 file **wins over the one we write** at the worktree root. Put a hostile one in
@@ -282,6 +312,16 @@ the policy. A repo is added by a human who vouches for it, and the daemon
 already runs that repo's `check:` command unsandboxed — the same trust. The
 question is whether a checkout carrying config we did not write should be
 silently overridden, refused at spawn, or surfaced when the repo is added.
+
+### A worker's spend is invisible until its run ends
+**Status:** open, recorded 2026-09-03 while making the daily cap default on.
+`usage.record_run` writes the cost ledger once, AFTER `launch_agent` returns
+(`core/worker.py`), and `orchestrator._budget_exceeded` reads only that ledger
+— so a single in-flight run can pass any cap before its first dollar is
+visible. Today the exposure is bounded by the per-task cap, the pass budget
+and the total/idle timeouts, which is why this is recorded rather than fixed:
+closing it means streaming cost out of the runner mid-run, and neither CLI
+exposes that today. Revisit if a runner grows a usage stream.
 
 ## Review loop
 

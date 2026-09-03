@@ -267,6 +267,57 @@ def foreign_mcp_servers(binary: str) -> List[str]:
         shutil.rmtree(probe_dir, ignore_errors=True)
 
 
+def repo_declared_opencode(worktree_path: str) -> dict:
+    """What the checkout's own opencode config files declare — read them
+    BEFORE write_mcp_config overwrites the winning slot.
+
+    A repo may carry opencode.json at its root and/or .opencode/opencode.json,
+    and opencode merges both into a run (docs/known-gaps.md, measured
+    2026-08-25): `mcp` entries merge from either file no matter where ours
+    sits, so a server named there still appears unless disabled by name —
+    which is what the caller does with these names. `plugin` follows file
+    precedence and our file occupies the winning slot, so the list here is
+    reported rather than fought. Unparseable files are reported too: a config
+    we could not read is a fact about the checkout, not a reason to guess.
+    """
+    out = {"mcp": [], "plugin": [], "files": []}
+    for rel in ("opencode.json", ".opencode/opencode.json"):
+        p = Path(worktree_path, rel)
+        try:
+            if not p.is_file():
+                continue
+            data = json.loads(p.read_text())
+        except Exception:  # noqa: BLE001 — unreadable is still worth reporting
+            out["files"].append(f"{rel} (unparseable)")
+            continue
+        out["files"].append(rel)
+        for name in (data.get("mcp") or {}):
+            if name not in out["mcp"]:
+                out["mcp"].append(str(name))
+        for plug in (data.get("plugin") or []):
+            if plug not in out["plugin"]:
+                out["plugin"].append(str(plug))
+    return out
+
+
+def _mark_skip_worktree(worktree_path: str, rel: str) -> None:
+    """If *rel* is TRACKED in this checkout, flag it skip-worktree so our
+    overwrite never shows up as a dirty file — not in status, not in a diff,
+    not stageable even by a raw `git add` the persona shells out to. The
+    sanctioned commit path already excludes it by pathspec (core.git_ops);
+    this covers the unsanctioned one. Best-effort: outside a git checkout
+    (a scratch dir, a unit test's tmp_path) there is nothing to mark."""
+    import subprocess
+    try:
+        r = subprocess.run(["git", "-C", worktree_path, "ls-files", "--error-unmatch", rel],
+                           capture_output=True, text=True, timeout=10)
+        if r.returncode == 0:
+            subprocess.run(["git", "-C", worktree_path, "update-index", "--skip-worktree", rel],
+                           capture_output=True, text=True, timeout=10)
+    except Exception:  # noqa: BLE001 — a guard that cannot run must not stop the run
+        logger.debug("could not mark %s skip-worktree in %s", rel, worktree_path)
+
+
 def write_mcp_config(
     rtype: str,
     *,
@@ -359,10 +410,20 @@ def write_mcp_config(
     # to flip a flag would write the user's own server URLs and environment
     # (credentials included) into a file inside the worktree, where the agent
     # reads it. The stub says "off" and nothing else.
+    declared = repo_declared_opencode(worktree_path)
     mcp: dict = {
         name: {"enabled": False}
         for name in foreign_mcp_servers(binary) if name != server_name
     }
+    # ...and every server the CHECKOUT's own config declares. `mcp` entries
+    # merge across config files regardless of which one wins (measured,
+    # docs/known-gaps.md), so occupying the winning slot below is not enough
+    # on its own — a hostile .opencode/opencode.json in the checkout would
+    # still put its server on the roster. Disable-by-name is the mechanism
+    # that works from either file.
+    for name in declared["mcp"]:
+        if name != server_name:
+            mcp[name] = {"enabled": False}
     mcp[server_name] = {
         "type": "local",
         "command": list(command),
@@ -375,7 +436,19 @@ def write_mcp_config(
         "agent": {agent_name: agent_def},
         "mcp": mcp,
     }
-    Path(worktree_path, "opencode.json").write_text(json.dumps(config, indent=2))
+    # The winning slot. Measured precedence (docs/known-gaps.md, 2026-08-25):
+    # with our config in .opencode/ and a repo's at the worktree root, ours
+    # wins on `plugin`; the reverse loses. And when the repo ships its own
+    # .opencode/opencode.json, this write REPLACES it in the throwaway
+    # checkout — its plugin list never reaches opencode at all. What the
+    # replaced file declared is reported by repo_declared_opencode above, and
+    # the worker posts it to the task thread: overridden loudly, not silently.
+    # (.opencode subfiles beyond opencode.json — agent/*.md and the like —
+    # remain unmeasured; the config file is what the 08-25 measurements cover.)
+    slot = Path(worktree_path, ".opencode", "opencode.json")
+    slot.parent.mkdir(parents=True, exist_ok=True)
+    slot.write_text(json.dumps(config, indent=2))
+    _mark_skip_worktree(worktree_path, ".opencode/opencode.json")
     return None
 
 
