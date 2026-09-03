@@ -1,0 +1,26 @@
+# Lint floor — pinned to what the codebase already does, not to an ideal.
+# The stylistic ignores below are deliberate house style; the correctness
+# families (F, most of E, W) stay fully on. E501 is off on purpose: docstrings
+# here explain decisions at paragraph length, and reflowing them for a linter
+# would destroy real information.
+line-length = 120
+target-version = "py310"
+
+[lint]
+select = ["E", "F", "W"]
+ignore = [
+    "E401",  # `import os, re` on one line — house style in small modules
+    "E501",  # long lines are prose in this repo (docstrings, decision comments)
+    "E701",  # `if x: y` one-liners — used for tight guard clauses
+    "E702",  # `a; b` — compact test setup/asserts, 46 sites, all deliberate
+    "E731",  # lambdas assigned to names — config/test shims
+    "E741",  # a comprehension's `l` in tests
+]
+
+[lint.per-file-ignores]
+# Imports after code, each for a stated reason (env/bootstrap ordering):
+"web/app.py" = ["E402"]
+"core/worker.py" = ["E402"]
+"core/stats.py" = ["E402"]
+"core/usage.py" = ["E402"]
+"core/copilot.py" = ["E402"]

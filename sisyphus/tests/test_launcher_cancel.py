@@ -11,7 +11,6 @@ cannot show that the process is gone. They stay under a couple of seconds.
 """
 import asyncio
 import os
-import signal
 
 import pytest
 

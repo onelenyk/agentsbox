@@ -767,7 +767,6 @@ class TestDecideViaAgent:
 class TestSingleAgentMode:
     @pytest.mark.asyncio
     async def test_pinned_agent_runs_without_orchestrator(self, db_path):
-        from unittest.mock import AsyncMock
         task = store.create_task("do it solo", repo="sisyphus", agent="engineer")
 
         async def _decide_must_not_run(task_, thread_text):

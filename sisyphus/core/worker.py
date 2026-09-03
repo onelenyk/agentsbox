@@ -15,7 +15,6 @@ differs between CLIs — config file shape and location, and how the model must
 spell our tool names in a call — comes from core.runner_profiles. This module
 resolves the runner's type once per run and threads it through both.
 """
-import json
 import logging
 import os
 import sys

@@ -6,7 +6,6 @@ either a plain reply, or a proposed action the user confirms before it runs.
 Read is free; every mutating action is confirmed and then executed here.
 """
 import logging
-import re
 
 logger = logging.getLogger(__name__)
 

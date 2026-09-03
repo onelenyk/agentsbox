@@ -19,7 +19,7 @@ import subprocess
 
 import pytest
 
-from core import git_ops, mergerequests, sessions, store, verify, worktree
+from core import git_ops, mergerequests, store, verify, worktree
 from web import agent_mcp
 
 
