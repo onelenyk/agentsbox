@@ -21,6 +21,10 @@ notify:
                                        # accepts a POST — ntfy.sh, a chat
                                        # webhook relay, curl in a pipe.
 
+backup:
+  interval_seconds: 86400        # daily DB snapshot into {workspace}/backups
+                                 # (newest 14 kept); 0 = scheduled snapshots off
+
 sandbox:
   require: false                 # true = refuse to launch a worker that would
                                  # run unconfined (no backend outside macOS, or
@@ -30,7 +34,7 @@ default_model: deepseek          # model for the seeded default runner
 max_concurrent_workers: 2        # global worker cap
 max_review_loops: 3              # engineer ↔ reviewer rounds before giving up
 task_budget_usd: 5.0             # per-task spend cap
-daily_budget_usd: 0              # 0 = off
+daily_budget_usd: 10.0           # unset = $10/day; an explicit 0 turns it off
 autopilot_tick_seconds: 30       # how often schedules are checked
 log_level: info
 

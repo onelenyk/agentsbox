@@ -147,6 +147,11 @@ def restore(name: str) -> dict:
                 p.unlink()
     finally:
         staged.unlink(missing_ok=True)
+    # Upgrade the restored snapshot on the spot. Without this, an old-schema
+    # snapshot runs live against new code until the next daemon restart —
+    # the routes read it the moment the file lands.
+    from core.migrations import migrate_all
+    migrate_all()
     logger.warning("backup: restored DB from %s (safety copy: %s)", name, safety["name"])
     return {"restored": name, "safety": safety["name"]}
 
@@ -160,3 +165,39 @@ def delete_backup(name: str) -> bool:
         logger.info("backup: deleted %s", name)
         return True
     return False
+
+
+def backup_tick() -> dict | None:
+    """Sync snapshot, error reporting. On exception, logs and notifies outward."""
+    try:
+        return snapshot(label="auto")
+    except Exception as exc:
+        logger.exception("backup: scheduled snapshot failed")
+        from core import notify
+        notify.send("backup_failed", reason=str(exc), wait=True)
+        return None
+
+
+async def backup_forever() -> None:
+    """Daemon background loop: a consistent snapshot at boot, then one every
+    backup.interval_seconds. Manual snapshots (the UI button) still work and
+    share the same retention."""
+    import asyncio
+    from core import heartbeat
+    from core.config import get_config
+
+    interval = int(get_config("backup.interval_seconds", 86400) or 0)
+    heartbeat.register("backup", every=interval, note="scheduled snapshots")
+    if interval <= 0:
+        heartbeat.mark_off("backup", "backup.interval_seconds is 0 — scheduled snapshots off")
+        logger.info("backup: scheduled snapshots disabled (backup.interval_seconds)")
+        return
+    logger.info("backup: snapshotting every %ds (keeping %d)", interval, RETENTION)
+    while True:
+        try:
+            info = await asyncio.to_thread(backup_tick)
+            if info:
+                heartbeat.beat("backup", note=f"last: {info['name']} ({info['size_h']})")
+        except Exception:  # noqa: BLE001
+            logger.exception("backup: pass failed")
+        await asyncio.sleep(interval)
