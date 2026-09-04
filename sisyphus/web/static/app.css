@@ -271,15 +271,35 @@ a.watch-po:hover { background: var(--panel-2); }
 /* ── Board ───────────────────────────────────────────────────────────── */
 /* One row of columns filling the viewport: the page itself never scrolls, each
    column scrolls its own stack. Below the min track width the board scrolls
-   sideways rather than shaving columns down to slivers. */
+   sideways rather than shaving columns down to slivers.
+   Flex, not grid: an empty live column collapses to a fixed 46px strip while
+   the columns that hold cards share the freed width — a grid track cannot be
+   reclaimed per column. */
 .board { display: grid; gap: 14px; }
 .board--flow {
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(260px, 1fr);
+  display: flex;
+  gap: 14px;
   flex: 1 1 auto; min-height: 0;
   overflow-x: auto; overflow-y: hidden;
   padding-bottom: 2px;        /* room for the horizontal scrollbar */
 }
+.board--flow .board-col { flex: 1 1 210px; min-width: 210px; }
+/* An empty live column is a fact worth keeping ("nothing in progress") but not
+   a hole worth a full column — hand that width to the columns with cards.
+   46px matches the collapsed watch rail, so the two strips read as one system. */
+.board--flow .board-col--collapsed {
+  flex: 0 0 46px; min-width: 46px; width: 46px;
+}
+.board-col--collapsed .board-col__head {
+  flex-direction: column; justify-content: center;
+  gap: 7px; padding: 10px 2px;
+}
+.board-col--collapsed .board-col__head .label {
+  writing-mode: vertical-rl; transform: rotate(180deg);
+  white-space: nowrap;
+}
+.board-col--collapsed .board-col__head .col-ic { margin-right: 0; }
+.board-col--collapsed .board-col__body { display: none; }
 .board-quiet {
   border: 1px dashed var(--border); border-radius: var(--r-lg);
   padding: 16px 20px; margin-bottom: 20px;
@@ -767,11 +787,18 @@ select { cursor: pointer; appearance: none;
    scroll, so a phone gets full-width cards instead of six 240px slivers. */
 @media (max-width: 720px) {
   .main--board { height: auto; overflow: visible; display: block; }
-  .board--flow {
-    grid-auto-flow: row; grid-auto-columns: auto;
-    overflow: visible;
+  .board--flow { flex-direction: column; overflow: visible; }
+  .board--flow .board-col { flex: none; width: auto; min-width: 0; max-height: 60vh; }
+  /* on a phone a 46px strip is worse than an empty column — give the
+     collapsed column its full head-on-top shape back */
+  .board--flow .board-col--collapsed { flex: none; width: auto; min-width: 0; }
+  .board--flow .board-col--collapsed .board-col__head {
+    flex-direction: row; justify-content: space-between; padding: 12px 14px;
   }
-  .board--flow .board-col { max-height: 60vh; }
+  .board--flow .board-col--collapsed .board-col__head .label {
+    writing-mode: horizontal-tb; transform: none;
+  }
+  .board--flow .board-col--collapsed .board-col__body { display: flex; }
 }
 
 .ecard.is-off { opacity: .5; }

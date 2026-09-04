@@ -347,6 +347,38 @@ def test_board_hides_children_and_shows_parent_chip(db_path):
     assert "0/1" in r.text               # parent's subtask progress chip
 
 
+def _board_col_classes(html, key):
+    """The extra classes on a rendered column, e.g. "  board-col--collapsed"."""
+    marker = f'class="board-col board-col--{key}'
+    start = html.index(marker) + len(marker)
+    return html[start:].split('"', 1)[0]
+
+
+def test_empty_live_board_columns_collapse_while_populated_ones_expand(db_path):
+    """An empty live column must render with the collapsed class (a slim strip
+    that hands its width to the columns with cards) and grow back to full width
+    the moment it holds a card — so Shipped/Done never get pushed off-screen."""
+    from core import store
+    client = _make_client()
+    # The board needs something to render at all; a lone done task leaves every
+    # live column empty while still drawing the board.
+    done = store.create_task("already shipped", repo="test-repo")
+    store.set_status(done["id"], "done")
+
+    html = client.get("/api/tasks/list").text
+    for key in ("in-progress", "needs-you", "to-merge"):
+        assert "board-col--collapsed" in _board_col_classes(html, key), key
+    # archive columns render only when they hold something, so Done is full-width
+    assert "board-col--collapsed" not in _board_col_classes(html, "done")
+
+    working = store.create_task("working now", repo="test-repo")
+    store.set_status(working["id"], "active")
+    html = client.get("/api/tasks/list").text
+    assert "board-col--collapsed" not in _board_col_classes(html, "in-progress")
+    for key in ("needs-you", "to-merge"):
+        assert "board-col--collapsed" in _board_col_classes(html, key), key
+
+
 # ── Inbox (needs-you feed) ───────────────────────────────────────────────
 
 
