@@ -36,8 +36,9 @@
             </nav>
             <div class="sys">
                 <div class="line"><span id="daemon-led" class="led live"></span> daemon <span id="daemon-val" class="val">live</span></div>
-                <div class="line" style="cursor:pointer" onclick="enableNotifications()" title="Browser notifications for finished / waiting tasks"><span id="notif-led" class="led idle"></span> alerts <span id="notif-val" class="val">off</span></div>
-                <div class="line"><span class="led amber"></span> ui <span class="val">v2.0</span></div>
+                <div class="line" style="cursor:pointer" onclick="enableNotifications()" title="Browser notifications for finished / waiting tasks"><span id="notif-led" class="led idle"></span> browser <span id="notif-val" class="val">off</span></div>
+                <div class="line" title="Daemon webhook — SISYPHUS_NOTIFY_URL configures it"><span id="notify-led" class="led idle"></span> notify <span id="notify-val" class="val">…</span></div>
+                <div class="line" title="Age of the newest backup snapshot — red when there is none or it is older than 48h"><span id="backup-led" class="led idle"></span> backup <span id="backup-val" class="val">…</span></div>
             </div>
         </aside>
         <main class="main {% block main_class %}{% endblock %}">
@@ -90,10 +91,39 @@
             if (l) l.className = "led " + cls;
             if (v) v.textContent = state;
         }
+        // The health payload also carries the other two sidebar truths: whether
+        // the notify webhook is configured (core.notify.enabled — see
+        // SISYPHUS_NOTIFY_URL) and how old the newest snapshot is. Same poll,
+        // so a stale backup turns red on the same beat the daemon light does.
+        function setNotify(state) {
+            var l = document.getElementById("notify-led");
+            var v = document.getElementById("notify-val");
+            if (l) l.className = "led " + (state ? "live" : "idle");
+            if (v) v.textContent = state ? "on" : "off";
+        }
+        function humanAge(secs) {
+            if (secs === null || secs === undefined) return "none";
+            var m = Math.floor(secs / 60);
+            if (m < 1) return "just now";
+            if (m < 60) return m + "m ago";
+            var h = Math.floor(m / 60);
+            if (h < 48) return h + "h ago";
+            return Math.floor(h / 24) + "d ago";
+        }
+        function setBackup(b) {
+            var l = document.getElementById("backup-led");
+            var v = document.getElementById("backup-val");
+            if (l) l.className = "led " + (b && b.stale ? "dead" : "live");
+            if (v) v.textContent = humanAge(b ? b.age_s : null);
+        }
         function heartbeat() {
             fetch("/api/v1/health", { cache: "no-store" })
                 .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
-                .then(function (j) { setDaemon(j.degraded ? "degraded" : "live"); })
+                .then(function (j) {
+                    setDaemon(j.degraded ? "degraded" : "live");
+                    setNotify(j.notify);
+                    setBackup(j.backup);
+                })
                 .catch(function () { setDaemon("down"); });
         }
         heartbeat();
