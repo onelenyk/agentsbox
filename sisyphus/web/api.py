@@ -44,12 +44,34 @@ _GIT_COMMIT = _read_git_commit()
 
 api = APIRouter(prefix="/api/v1")
 
+# No snapshot newer than this makes the sidebar's "backup" line read red.
+BACKUP_STALE_SECONDS = 48 * 3600
+
+
+def _backup_status(backups: list) -> dict:
+    """The sidebar "backup" line's data: the newest snapshot's age plus whether
+    the line should read red.
+
+    age_s is seconds since the newest snapshot (None when there are none);
+    stale is True when there are no snapshots or the newest is older than 48h —
+    the two states an operator must notice at a glance.
+    """
+    if not backups:
+        return {"age_s": None, "stale": True}
+    newest = backups[0]  # list_backups() sorts newest first
+    try:
+        created = datetime.datetime.strptime(newest["created_at"], "%Y-%m-%d %H:%M:%S")
+    except (KeyError, ValueError):
+        return {"age_s": None, "stale": True}
+    age_s = max(0, int((datetime.datetime.now() - created).total_seconds()))
+    return {"age_s": age_s, "stale": age_s > BACKUP_STALE_SECONDS}
+
 
 @api.get("/health")
 async def health():
     """Liveness (ok) plus readiness: db reachable and the default runner's binary
     resolves. degraded=True means the process is up but can't run work."""
-    from core import preflight, sessions
+    from core import preflight, sessions, notify, backup
 
     pf = preflight.check()
     return {
@@ -66,6 +88,9 @@ async def health():
         "reason": pf["reason"] or None,
         "process_start_time": _PROCESS_START_TIME,
         "git_commit": _GIT_COMMIT,
+        # The sidebar status lines ride the same poll the daemon light uses.
+        "notify": notify.enabled(),
+        "backup": _backup_status(backup.list_backups()),
     }
 
 
