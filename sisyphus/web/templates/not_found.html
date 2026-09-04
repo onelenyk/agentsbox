@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Not Found — Sisyphus{% endblock %}
+{% block content %}
+<div class="page-head">
+    <div>
+        <h1>That page does not exist</h1>
+        <div class="sub mono" id="nf-path">{{ path }}</div>
+    </div>
+    <span class="badge badge--warn">404</span>
+</div>
+<div class="panel">
+    <p class="empty" style="margin:0 0 14px">Nothing lives at this address — maybe it was retyped, or moved. Every real section is one click away:</p>
+    <div class="row" style="flex-wrap:wrap">
+        <a class="btn btn--ghost" href="/dashboard">Dashboard</a>
+        <a class="btn btn--ghost" href="/tasks">Tasks</a>
+        <a class="btn btn--ghost" href="/plans">Plans</a>
+        <a class="btn btn--ghost" href="/agents">Agents</a>
+        <a class="btn btn--ghost" href="/runners">Runners</a>
+        <a class="btn btn--ghost" href="/repos">Repos</a>
+        <a class="btn btn--ghost" href="/autopilots">Autopilots</a>
+        <a class="btn btn--ghost" href="/stats">Stats</a>
+        <a class="btn btn--ghost" href="/runtime">Runtime</a>
+        <a class="btn btn--ghost" href="/backups">Backups</a>
+    </div>
+</div>
+{% endblock %}
