@@ -25,10 +25,15 @@
     {% for col_key, col_icon, col_label in live_cols + archive_cols %}
     {% if col_key in ("in-progress", "needs-you", "to-merge") or columns[col_key] or (auto_groups or {}).get(col_key) %}
     {% set is_live = col_key in ("in-progress", "needs-you", "to-merge") %}
-    <div class="board-col board-col--{{ col_key }} {{ 'board-col--archive' if not is_live }}">
+    {% set col_count = columns[col_key]|length + ((auto_groups or {}).get(col_key, []) | sum(attribute='count')) %}
+    {#- An empty live column is still information ("nothing in progress"), but
+        it is not worth a full column's width — collapse it to a slim strip so
+        the columns that hold cards (and Shipped/Done) stay on screen. It grows
+        back to full width the moment it holds a card. -#}
+    <div class="board-col board-col--{{ col_key }} {{ 'board-col--archive' if not is_live }} {{ 'board-col--collapsed' if is_live and col_count == 0 }}">
         <div class="board-col__head">
             <span class="label"><span class="col-ic">{{ col_icon }}</span>{{ col_label }}</span>
-            <span class="count tnum">{{ columns[col_key]|length + ((auto_groups or {}).get(col_key, []) | sum(attribute='count')) }}</span>
+            <span class="count tnum">{{ col_count }}</span>
         </div>
         <div class="board-col__body">
             {% for g in (auto_groups or {}).get(col_key, []) %}
