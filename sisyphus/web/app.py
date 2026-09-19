@@ -15,12 +15,14 @@ setup_logging()
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.staticfiles import StaticFiles
-from web.routes import router, startup
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from web.routes import router, startup, _tmpl
 from web.api import api as api_router
 from web.agent_mcp import agent_mcp
-from web.auth import api_token_guard
+from web.auth import api_token_guard, _wants_html
 
 
 
@@ -36,6 +38,21 @@ app.mount("/static", StaticFiles(directory=str(_REPO_ROOT / "web" / "static")), 
 app.include_router(router)
 app.include_router(api_router)
 app.include_router(agent_mcp)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Give a mistyped URL a way back instead of a raw JSON dead end.
+
+    Only a page navigation that stays out of /api and asks for text/html gets
+    the styled not_found page. Every API/JSON caller — including 404s thrown
+    from inside /api/v1 routes with their own detail text — falls through to
+    FastAPI's default handler, so the JSON body is byte-for-byte as before.
+    """
+    if exc.status_code == 404 and not request.url.path.startswith("/api") and _wants_html(request):
+        return _tmpl().TemplateResponse(request, "not_found.html",
+                                        {"active_page": "", "path": request.url.path}, status_code=404)
+    return await http_exception_handler(request, exc)
 
 if __name__ == "__main__":
     import uvicorn
