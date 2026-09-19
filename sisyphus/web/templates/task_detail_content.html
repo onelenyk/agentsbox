@@ -1,4 +1,38 @@
 <div class="task-detail">
+  {% macro diffstat_table(text) -%}
+  {# Diffstat-shaped text ("path | 5 +++++") becomes a compact monospace
+     table; returns an empty string for anything else. Defined early so the
+     Result card above the thread can use it too. #}
+  {%- set lines = (text or '').split('\n') -%}
+  {%- set ds = namespace(ok=true, n=0) -%}
+  {%- for line in lines -%}
+    {%- if line.strip() -%}
+      {%- set parts = line.split('|') -%}
+      {%- if parts|length == 2 -%}
+        {%- set rhs = parts[1].strip().split() -%}
+        {%- if rhs|length >= 2 and rhs[0].isdigit() and rhs[1].replace('+', '').replace('-', '') == '' -%}
+          {%- set ds.n = ds.n + 1 -%}
+        {%- else -%}
+          {%- set ds.ok = false -%}
+        {%- endif -%}
+      {%- else -%}
+        {%- set ds.ok = false -%}
+      {%- endif -%}
+    {%- endif -%}
+  {%- endfor -%}
+  {%- if ds.ok and ds.n > 0 -%}
+  <table class="diffstat-table">
+    {%- for line in lines -%}
+    {%- if line.strip() -%}
+    {%- set parts = line.split('|') -%}
+    {%- set rhs = parts[1].strip().split() -%}
+    <tr><td class="ds-path">{{ parts[0].strip() }}</td><td class="ds-num">{{ rhs[0] }}</td><td class="ds-bar">{{ rhs[1] }}</td></tr>
+    {%- endif -%}
+    {%- endfor -%}
+  </table>
+  {%- endif -%}
+  {%- endmacro %}
+
   <div class="panel task-main">
     {% if parent %}
     <div class="breadcrumb">↑ Part of <a href="/tasks/{{ parent.id }}">{{ task_display_title(parent) }}</a></div>
@@ -55,7 +89,7 @@
     {% if result and (result.summary or result.change or result.commits) %}
     <div class="result">
         <div class="result__label">Result</div>
-        {% if result.summary %}<div class="result__summary msg__body--md">{{ result.summary | md }}</div>{% endif %}
+        {% if result.summary %}{% set ds = diffstat_table(result.summary) %}{% if ds %}<div style="margin-bottom:10px">{{ ds }}</div>{% else %}<div class="result__summary msg__body--md">{{ result.summary | md }}</div>{% endif %}{% endif %}
         {% if result.change %}
         <div style="margin-bottom:10px">
             {% if result.change.url %}
@@ -125,30 +159,53 @@
     </details>
     {% endmacro %}
 
-    {% macro dialogue_msg(m, icons, task) %}
-    {% if m.kind == 'commit' %}
-    <div class="msg msg--commit">✓ {{ m.text }}</div>
+    {% macro msg_body(m, raw=false) %}
+    {# Dialogue bodies are markdown for LLM authors, plain for humans and
+       webhook payloads. Diffstat-shaped text (see diffstat_table) renders as
+       a compact monospace table instead of prose. raw=true shows the source
+       verbatim (the collapsed result row) rather than markdown. #}
+    {% set ds = diffstat_table(m.text) %}
+    {% if ds %}
+    {{ ds }}
+    {% elif raw %}
+    <pre class="msg__body msg__body--raw">{{ m.text }}</pre>
+    {% elif m.author == 'human' or m.kind == 'external' %}
+    <div class="msg__body">{{ m.text }}</div>
     {% else %}
+    <div class="msg__body msg__body--md">{{ m.text | md }}</div>
+    {% endif %}
+    {% endmacro %}
+
+    {% macro dialogue_msg(m, icons, task) %}
     {% set tone = 'external' if m.kind == 'external' else ('human' if m.author == 'human' else ('orchestrator' if m.author == 'orchestrator' else 'worker')) %}
     {% set icon = '🔔' if m.kind == 'external' else icons.get(m.author, '⚙️') %}
+    {% if m.kind == 'commit' %}
+    <div class="msg msg--commit">✓ {{ m.text }}</div>
+    {% elif m.kind == 'result' %}
+    {# The Result card above is the single full rendering; the thread row
+       collapses to a one-line "shown above" hint, expandable to the raw text. #}
+    <details class="msg msg--{{ tone }} msg--result" hx-preserve="true" id="result-{{ m.seq }}">
+        <summary>
+            <span class="av av--{{ tone }}" title="{{ m.author }}">{{ icon }}</span>
+            <span class="msg__who">{{ m.author }}<span class="msg__kind">/{{ m.kind }}</span></span>
+            {% if m.text.startswith('APPROVED') %}
+            <span class="badge badge--ok">APPROVED</span>
+            {% elif m.text.startswith('CHANGES REQUESTED') %}
+            <span class="badge badge--warn">CHANGES REQUESTED</span>
+            {% endif %}
+            <span class="result-row__hint">— shown above ↑</span>
+            <span class="msg__time">{{ m.created_at[:19] }}</span>
+        </summary>
+        {{ msg_body(m, raw=true) }}
+    </details>
+    {% else %}
     <div class="msg msg--{{ tone }}">
         <div class="msg__head">
             <span class="av av--{{ tone }}" title="{{ m.author }}">{{ icon }}</span>
             <span class="msg__who">{{ m.author }}<span class="msg__kind">/{{ m.kind }}</span></span>
-            {% if m.kind == 'result' and m.text.startswith('APPROVED') %}
-            <span class="badge badge--ok">APPROVED</span>
-            {% elif m.kind == 'result' and m.text.startswith('CHANGES REQUESTED') %}
-            <span class="badge badge--warn">CHANGES REQUESTED</span>
-            {% endif %}
             <span class="msg__time">{{ m.created_at[:19] }}</span>
         </div>
-        {# Markdown only for LLM-authored dialogue — human-typed text and
-           webhook payloads stay plain. #}
-        {% if m.author == 'human' or m.kind == 'external' %}
-        <div class="msg__body">{{ m.text }}</div>
-        {% else %}
-        <div class="msg__body msg__body--md">{{ m.text | md }}</div>
-        {% endif %}
+        {{ msg_body(m) }}
         {% if m.attachment %}
         <div class="msg__att">📎 <a href="#" hx-get="/api/tasks/{{ task.id }}/diff/{{ m.attachment }}" hx-target="#modal-container" hx-swap="innerHTML" onclick="return false">{{ m.attachment }}</a></div>
         {% endif %}

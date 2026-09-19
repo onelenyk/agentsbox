@@ -279,6 +279,50 @@ def test_task_detail_two_lane_thread(db_path):
     assert "running the test suite now" in html
 
 
+def test_result_body_rendered_once_on_detail(db_path):
+    """The result body renders exactly once on the detail page: the top RESULT
+    block is the single full rendering, and the engineer/result thread message
+    collapses to a one-line "shown above" row instead of duplicating it."""
+    from core import store
+
+    task = _make_task(goal="single result")
+    store.post_message(task["id"], "engineer", kind="result",
+                       text="**RESULT MARKER** body")
+    store.post_message(task["id"], "system", kind="worker_finished",
+                       text="engineer finished")
+    client = _make_client()
+    html = client.get(f"/api/tasks/{task['id']}/detail").text
+    # the top RESULT block renders the markdown exactly once
+    assert html.count("<p><strong>RESULT MARKER</strong> body</p>") == 1
+    # the thread collapses the result to a one-line "shown above" row…
+    assert "shown above" in html
+    assert 'id="result-' in html
+    assert 'msg__kind">/result' in html
+    # …and keeps only the RAW source behind the fold, not another rendering
+    assert html.count("**RESULT MARKER** body") == 1
+
+
+def test_diffstat_body_renders_as_compact_table(db_path):
+    """Diffstat-shaped message bodies ("path | 5 +++++") render as a compact
+    monospace table instead of raw prose."""
+    from core import store
+
+    task = _make_task(goal="diffstat result")
+    store.post_message(
+        task["id"], "engineer", kind="result",
+        text="web/templates/task_detail_content.html | 5 +++++\n"
+             "web/static/app.css | 3 +++",
+    )
+    client = _make_client()
+    html = client.get(f"/api/tasks/{task['id']}/detail").text
+    assert "diffstat-table" in html
+    assert "ds-path" in html and "ds-bar" in html
+    assert "task_detail_content.html" in html
+    assert "+++++" in html
+    # the machinery/dialogue source text is NOT dumped as a raw pre line
+    assert "5 +++++" not in html
+
+
 def test_new_task_form_allows_no_repo(db_path):
     """The New Task form offers a repo-less option (backend #3 support)."""
     client = _make_client()
