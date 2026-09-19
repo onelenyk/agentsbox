@@ -179,6 +179,40 @@ def test_root(db_path):
     assert "/dashboard" in response.text
 
 
+# ── Tests: styled 404 for the HTML surface ───────────────────────────────
+
+
+def test_unknown_page_renders_html_404_with_section_links(db_path):
+    """A mistyped URL (e.g. /autopilot instead of /autopilots) gets a styled
+    page with a way back — not a raw JSON dead end. Only a browser (Accept:
+    text/html) outside /api gets it."""
+    client = _make_client()
+    response = client.get("/autopilot", headers={"Accept": "text/html"})
+    assert response.status_code == 404
+    assert "text/html" in response.headers["content-type"]
+    assert "does not exist" in response.text
+    for section in ("/dashboard", "/tasks", "/plans", "/agents", "/runners",
+                    "/repos", "/autopilots", "/stats", "/runtime", "/backups"):
+        assert section in response.text
+
+
+def test_unknown_api_path_still_returns_json_404(db_path):
+    """API/JSON callers keep the default 404 exactly as before — the styled
+    page must never leak into /api paths."""
+    client = _make_client()
+    response = client.get("/api/v1/nonexistent", headers={"Accept": "text/html"})
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Not Found"}
+
+
+def test_unknown_page_without_html_accept_stays_json(db_path):
+    """A non-browser client (default Accept) is untouched: raw JSON 404, no page."""
+    client = _make_client()
+    response = client.get("/nonexistent")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Not Found"}
+
+
 # ── Tests: Tasks (Task+Thread system) ────────────────────────────────────
 
 
