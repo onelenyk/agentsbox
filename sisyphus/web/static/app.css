@@ -461,6 +461,38 @@ a.watch-po:hover { background: var(--panel-2); }
 .msg__body { font-size: 13px; color: var(--text-2); white-space: pre-wrap; word-break: break-word; }
 .msg__att { margin-top: 6px; font-size: 12px; }
 
+/* a result-kind thread message collapses to a one-line "shown above" row —
+   the full rendering lives once, in the Result card above the thread */
+.msg--result { padding: 0; }
+.msg--result > summary {
+  cursor: pointer; list-style: none; user-select: none;
+  display: flex; align-items: center; gap: 9px;
+  padding: 11px 13px;
+}
+.msg--result > summary::-webkit-details-marker { display: none; }
+.msg--result > summary:hover { color: var(--text); }
+.msg--result > summary .msg__time { margin-left: auto; }
+.msg--result > summary .result-row__hint {
+  font-family: var(--mono); font-size: 11px; color: var(--accent-hi);
+}
+.msg--result[open] > summary { border-bottom: 1px solid var(--border); }
+.msg--result .msg__body--raw,
+.msg--result .diffstat-table { margin: 11px 13px; }
+.msg__body--raw {
+  font-family: var(--mono); font-size: 12px; line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere; margin: 0;
+}
+
+/* diffstat-shaped message bodies ("path | 5 +++++") as a compact table */
+.diffstat-table {
+  font-family: var(--mono); font-size: 12px; line-height: 1.5;
+  border-collapse: collapse; width: 100%;
+}
+.diffstat-table td { padding: 0 12px 0 0; vertical-align: top; }
+.diffstat-table .ds-path { color: var(--text-2); width: 100%; white-space: pre-wrap; }
+.diffstat-table .ds-num { color: var(--muted); text-align: right; white-space: pre; }
+.diffstat-table .ds-bar { color: var(--good); white-space: pre; padding-right: 0; }
+
 /* two-lane thread: collapsed machinery runs + thin commit lines */
 .msg-run {
   border: 1px solid var(--border); border-radius: var(--r);
