@@ -1180,3 +1180,78 @@ def test_a_cron_run_that_needs_you_stays_a_card(db_path):
     html = client.get("/api/tasks/list").text
     assert "morning-mr-review · 2026-09-03" in html    # full card in Needs you
     assert "1 run" not in html
+
+
+# ── Sidebar status lines (health payload) ───────────────────────────────
+
+
+def _sys_block(html: str) -> str:
+    return html.split('<div class="sys">')[1].split("</aside>")[0]
+
+
+def test_sidebar_sys_status_lines(db_path):
+    """The .sys block says what an operator needs at a glance: daemon kept as
+    is, the old "alerts" line renamed to "browser" (still click-to-enable),
+    a notify on/off line (configured via SISYPHUS_NOTIFY_URL), a backup-age
+    line — and none of the meaningless old lines."""
+    block = _sys_block(_make_client().get("/dashboard").text)
+    assert "daemon" in block
+    assert "browser" in block
+    assert 'onclick="enableNotifications()"' in block   # behavior unchanged
+    assert "notify" in block
+    assert "SISYPHUS_NOTIFY_URL" in block               # title explains config
+    assert "backup" in block
+    assert "alerts" not in block                        # renamed away
+    assert "ui v2.0" not in block and "v2.0" not in block  # dropped
+
+
+def test_health_reports_notify_on_and_off(db_path):
+    """The endpoint's notify field tracks core.notify.enabled() exactly."""
+    client = _make_client()
+    with patch("core.notify.enabled", return_value=True):
+        assert client.get("/api/v1/health").json()["notify"] is True
+    with patch("core.notify.enabled", return_value=False):
+        assert client.get("/api/v1/health").json()["notify"] is False
+
+
+def test_health_reports_backup_age_fresh(db_path):
+    """A fresh snapshot comes back with its age and a non-stale flag."""
+    from datetime import datetime
+    client = _make_client()
+    fresh = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    backups = [{"name": "sisyphus-20260101-000000.db", "created_at": fresh}]
+    with patch("core.backup.list_backups", return_value=backups):
+        data = client.get("/api/v1/health").json()
+    assert data["backup"]["age_s"] is not None
+    assert 0 <= data["backup"]["age_s"] < 60
+    assert data["backup"]["stale"] is False
+
+
+def test_health_reports_no_backup_as_stale(db_path):
+    """No snapshots at all reads red on the line."""
+    client = _make_client()
+    with patch("core.backup.list_backups", return_value=[]):
+        data = client.get("/api/v1/health").json()
+    assert data["backup"] == {"age_s": None, "stale": True}
+
+
+def test_backup_status_red_state_unit():
+    """The red-state rule, unit level: stale when there are no snapshots or the
+    newest is older than 48h, green otherwise."""
+    from datetime import datetime, timedelta
+    from web.api import _backup_status
+
+    assert _backup_status([]) == {"age_s": None, "stale": True}
+
+    fresh = (datetime.now() - timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S")
+    st = _backup_status([{"name": "a.db", "created_at": fresh}])
+    assert st["stale"] is False and st["age_s"] is not None
+
+    old = (datetime.now() - timedelta(hours=49)).strftime("%Y-%m-%d %H:%M:%S")
+    st = _backup_status([{"name": "a.db", "created_at": old}])
+    assert st["age_s"] > 48 * 3600
+    assert st["stale"] is True
+
+    # An unparseable stamp is unknown — treat it like "none", i.e. stale.
+    assert _backup_status([{"name": "a.db", "created_at": "garbage"}]) == \
+        {"age_s": None, "stale": True}
