@@ -4,7 +4,10 @@
 # here explain decisions at paragraph length, and reflowing them for a linter
 # would destroy real information.
 line-length = 120
-target-version = "py310"
+# Match what actually runs this code: CI pins 3.14 and the daemon runs on it.
+# A lower floor here silently lints for a Python nobody uses, so a 3.11+ idiom
+# the codebase is free to use could still be reported against it.
+target-version = "py314"
 
 [lint]
 select = ["E", "F", "W"]

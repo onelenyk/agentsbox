@@ -1,5 +1,7 @@
 """Tests for core/runners.py — CRUD + health check."""
 import asyncio
+
+import pytest
 from core.db import get_conn
 from core.runners import (
     init_runners_table,
@@ -149,3 +151,35 @@ class TestRunnerHealth:
         init_runners_table()
         result = asyncio.run(health_check("nonexistent-id"))
         assert result["status"] == "error"
+
+
+class TestTheInstalledCliVersionIsWatched:
+    """Every launch flag this daemon uses belongs to a CLI it does not own. When
+    opencode renames one, runs break inside a worker nobody is watching and the
+    failure reads as the model misbehaving. Health says which version is there."""
+
+    def test_a_drifted_version_is_a_note_not_a_failure(self):
+        from core import runner_profiles as rp
+        assert rp.version_note("opencode", rp.VERIFIED_VERSIONS["opencode"]) is None
+        note = rp.version_note("opencode", "99.0.0")
+        assert note and "99.0.0" in note and rp.VERIFIED_VERSIONS["opencode"] in note
+
+    def test_an_unreadable_version_says_nothing(self):
+        from core import runner_profiles as rp
+        assert rp.parse_version("command not found") == ""
+        assert rp.version_note("opencode", "") is None
+
+    @pytest.mark.asyncio
+    async def test_health_reports_the_drift_and_stays_healthy(self, db_path, monkeypatch):
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        from core import runners
+
+        r = runners.add_runner("probe", binary="opencode", runner_type="opencode")
+        monkeypatch.setattr("core.runner_detect.resolve", lambda b: "/abs/opencode")
+        with patch.object(runners.subprocess, "run",
+                          return_value=SimpleNamespace(stdout="99.0.0\n", stderr="", returncode=0)):
+            result = await runners.health_check(r["id"])
+
+        assert result["status"] == "healthy"       # a new CLI version is not a broken runner
+        assert "99.0.0" in result["error"]

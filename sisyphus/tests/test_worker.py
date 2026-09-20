@@ -556,3 +556,66 @@ class TestRepoOwnedConfigIsOverriddenLoudly:
             await spawn_worker(task["id"], "engineer", "fix it", repo_name="myrepo")
 
         assert not [m for m in store.get_thread(task["id"]) if m["text"].startswith("[sandbox]")]
+
+
+class TestThePreparationDoesNotFreezeTheDaemon:
+    """Cloning a repo and running its setup hook is blocking git and shell work
+    — minutes of it on a big repo. spawn_worker is a coroutine on the daemon's
+    only event loop, so doing that inline stopped the web UI, the API and every
+    background loop until it finished."""
+
+    @pytest.mark.asyncio
+    async def test_the_worktree_is_prepared_off_the_event_loop(self, db_path, tmp_path,
+                                                               monkeypatch):
+        import threading
+
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+        task = store.create_task("investigate something")
+        seen = {}
+        real = __import__("core.worker", fromlist=["_prepare_workspace"])._prepare_workspace
+
+        def spy(*a, **k):
+            seen["thread"] = threading.current_thread()
+            return real(*a, **k)
+
+        mock_launch = AsyncMock(return_value=AgentResult(status="completed", summary="ok"))
+        with patch("core.worker._prepare_workspace", spy):
+            with patch("core.worker.launch_agent", mock_launch):
+                await spawn_worker(task["id"], "explorer", "look around")
+
+        assert seen["thread"] is not threading.main_thread()
+
+    @pytest.mark.asyncio
+    async def test_the_loop_keeps_running_while_it_prepares(self, db_path, tmp_path,
+                                                            monkeypatch):
+        """The point of the thread: other coroutines keep getting scheduled."""
+        import asyncio
+        import time
+
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+        task = store.create_task("investigate something")
+        ticks = 0
+
+        async def tick():
+            nonlocal ticks
+            while True:
+                ticks += 1
+                await asyncio.sleep(0.01)
+
+        def slow_prepare(task_id, role, task, requested_repo):
+            time.sleep(0.3)
+            path = tmp_path / "scratch" / task_id
+            path.mkdir(parents=True, exist_ok=True)
+            return str(path), None
+
+        mock_launch = AsyncMock(return_value=AgentResult(status="completed", summary="ok"))
+        ticker = asyncio.create_task(tick())
+        try:
+            with patch("core.worker._prepare_workspace", slow_prepare):
+                with patch("core.worker.launch_agent", mock_launch):
+                    await spawn_worker(task["id"], "explorer", "look around")
+        finally:
+            ticker.cancel()
+
+        # Without to_thread the loop is frozen for the whole 0.3s and ticks stays 0.
+        assert ticks > 5, f"the event loop was starved: {ticks} ticks"
