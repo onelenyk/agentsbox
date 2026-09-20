@@ -22,9 +22,15 @@
                finding Backups meant guessing where they lived. A sidebar has
                the room; use it. #}
             <nav class="nav">
-                <a href="/dashboard" class="{{ 'active' if active_page == 'dashboard' else '' }}" title="Command bar · Inbox · live agents"><span class="ic">◫</span> Home</a>
+                <a href="/dashboard" class="{{ 'active' if active_page == 'dashboard' else '' }}" title="Task box · Inbox · live agents"><span class="ic">◫</span> Home</a>
                 <a href="/tasks" class="{{ 'active' if active_page == 'tasks' else '' }}" title="The board"><span class="ic">◇</span> Tasks</a>
-                <a href="/plans" class="{{ 'active' if active_page == 'plans' else '' }}" title="Mission planner"><span class="ic">🗺</span> Planner</a>
+                {% set projects = repo_names() %}
+                {% if projects %}
+                <div class="nav-sec">projects</div>
+                {% for p in projects %}
+                <a href="/p/{{ p }}" class="{{ 'active' if active_page == 'project:' ~ p else '' }}" title="{{ p }} — its board and task box"><span class="ic">⌥</span> {{ p }}</a>
+                {% endfor %}
+                {% endif %}
                 <div class="nav-sec">system</div>
                 <a href="/agents" class="{{ 'active' if active_page == 'agents' else '' }}"><span class="ic">✦</span> Agents</a>
                 <a href="/runners" class="{{ 'active' if active_page == 'runners' else '' }}"><span class="ic">▹</span> Runners</a>

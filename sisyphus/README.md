@@ -106,9 +106,9 @@ open http://localhost:7677
 ```
 
 `WORKSPACE_ROOT` (SQLite db, per-task clones, backups, logs) defaults to
-`./workspace` next to the repo. Then **Repos → Add** your git repo, and
-**Tasks → + New Task** — pick a template or describe it in plain words and hit
-**✨ AI structure**.
+`./workspace` next to the repo. Then **Repos → Add** your git repo — it shows
+up under **projects** in the sidebar. Open it, say in plain words what should
+get done, and press Enter; the orchestrator takes it from there.
 
 ### Always-on (macOS / launchd)
 

@@ -138,8 +138,7 @@ body::before {
 /* ── Watch rail ──────────────────────────────────────────────────────── */
 /* Always holds its own space. Collapsing shrinks it to its leds instead of
    hiding it: the point is ambient awareness, and an absent panel is not
-   ambient. The copilot keeps the right edge — conversation slides over, a
-   watch does not. */
+   ambient. */
 .watch {
   flex: none; width: 280px; min-height: 0;
   display: flex; flex-direction: column;
@@ -157,13 +156,6 @@ body::before {
 .watch-sec__h { display: flex; align-items: baseline; gap: 8px; margin-bottom: 7px; font-size: 10px; font-weight: 650; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
 .watch-sec__h .c { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--text-2); }
 
-.watch-po { display: block; padding: 7px 6px; border-radius: 8px; text-decoration: none; }
-a.watch-po:hover { background: var(--panel-2); }
-.watch-po__row { display: flex; align-items: center; gap: 8px; }
-.watch-po__row .n { font-family: var(--mono); font-size: 12px; font-weight: 650; color: var(--accent-hi); }
-.watch-po__goal { margin-top: 5px; font-size: 12px; color: var(--text); }
-.watch-po__next { margin-top: 5px; font-size: 11px; line-height: 1.45; color: var(--muted); }
-.watch-po__ask { margin-top: 8px; width: 100%; }
 
 /* The dashboard's live row is a wide three-column grid; in a 280px rail it
    stacks instead of being squeezed. */
@@ -180,14 +172,13 @@ a.watch-po:hover { background: var(--panel-2); }
 .watch-w .d { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--text-2); white-space: nowrap; }
 
 .watch--min { width: 46px; }
-.watch--min .watch__title, .watch--min .watch-sec__h, .watch--min .watch-po__goal,
-.watch--min .watch-po__next, .watch--min .watch-po .badge, .watch--min .watch-po__ask, .watch--min .watch-w .n,
+.watch--min .watch__title, .watch--min .watch-sec__h, .watch--min .watch-w .n,
 .watch--min .watch-w .s, .watch--min .watch-w .d, .watch--min .live-row .role,
 .watch--min .live-row .goal, .watch--min .live-row .meta, .watch--min .empty { display: none; }
 .watch--min .watch__head { justify-content: center; padding: 10px 0; }
 .watch--min .watch__toggle { margin-left: 0; transform: rotate(180deg); }
 .watch--min .watch-sec { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 0; }
-.watch--min .watch-po, .watch--min .watch-w, .watch--min .live-row { padding: 2px 0; align-items: center; }
+.watch--min .watch-w, .watch--min .live-row { padding: 2px 0; align-items: center; }
 .watch--min .watch-rows { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 
 /* Under ~1000px the board columns need every pixel, and a 46px strip with no
@@ -856,36 +847,28 @@ select { cursor: pointer; appearance: none;
 .ressub { font-size: 11px; color: var(--muted); }
 .resitem .btn { flex: none; }
 
-/* ── New Task: template chips ────────────────────────────────────────── */
-.tmpl-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+/* ── Task box: the one place work starts ─────────────────────────────── */
+.taskbox { margin-bottom: 14px; }
+.taskbox__row { display: flex; gap: 8px; align-items: flex-start; }
+.taskbox__row textarea { flex: 1 1 auto; min-width: 0; min-height: 40px; resize: none; overflow-y: auto; }
+.taskbox__row select { flex: 0 0 auto; max-width: 160px; }
+.taskbox__row .btn { flex: none; }
+.taskbox__more { margin-top: 6px; font-size: 12px; color: var(--muted); }
+.taskbox__more summary { cursor: pointer; width: max-content; }
+.taskbox__more label { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+@media (max-width: 640px) { .taskbox__row { flex-wrap: wrap; } .taskbox__row textarea { flex-basis: 100%; } }
+.project-autopilots { font-size: 12px; margin: -4px 0 12px; }
+
+/* ── Chips ─── */
 .chip-btn { font: inherit; font-size: 12px; font-weight: 550; padding: 5px 11px; border-radius: var(--r-pill); border: 1px solid var(--border-2); background: var(--panel-2); color: var(--text-2); cursor: pointer; transition: color .12s, background .12s, border-color .12s; }
 .chip-btn:hover { color: var(--text); background: var(--hover); }
 .chip-btn.is-on { color: var(--accent-hi); background: var(--accent-bg); border-color: var(--accent-bd); }
 
-/* ── Board Copilot dock ──────────────────────────────────────────────── */
-.copilot { position: fixed; top: 0; right: 0; width: 372px; max-width: 100%; height: 100vh; background: var(--panel); border-left: 1px solid var(--border); display: flex; flex-direction: column; z-index: 60; transform: translateX(100%); transition: transform .18s ease; box-shadow: -10px 0 30px rgba(0,0,0,.4); }
-.copilot.open { transform: translateX(0); }
-.cp-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 14px; }
-.cp-log { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+/* ── Chat message + composer (the planner's) ───────────────────────── */
 .cp-msg { font-size: 13px; line-height: 1.5; padding: 9px 12px; border-radius: 10px; max-width: 92%; white-space: pre-wrap; word-break: break-word; }
-.cp-user { align-self: flex-end; background: var(--accent-bg); color: var(--text); border: 1px solid var(--accent-bd); }
-.cp-bot { align-self: flex-start; background: var(--panel-2); color: var(--text-2); border: 1px solid var(--border); }
-.cp-action { align-self: stretch; background: var(--panel-2); border: 1px solid var(--accent-bd); border-radius: 10px; padding: 11px 12px; display: flex; flex-direction: column; gap: 9px; }
-.cp-action-desc { font-size: 12.5px; color: var(--text); }
-.cp-action-btns { display: flex; gap: 8px; }
 .cp-input { display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--border); align-items: flex-end; }
 .cp-input textarea { flex: 1; resize: none; }
 
-/* ── Copilot: sessions + system messages ─────────────────────────────── */
-.cp-sys { align-self: center; background: transparent; color: var(--muted); border: none; font-size: 11.5px; font-style: italic; padding: 1px 0; }
-.cp-sessions-panel { display: none; border-bottom: 1px solid var(--border); max-height: 42vh; overflow-y: auto; background: var(--inset); }
-.cp-sessions-panel.open { display: block; }
-.cp-session-row { display: flex; align-items: center; border-bottom: 1px solid var(--border); }
-.cp-session-open { flex: 1; min-width: 0; text-align: left; background: transparent; border: none; color: var(--text-2); font: inherit; font-size: 12.5px; padding: 9px 12px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
-.cp-session-open:hover { background: var(--hover); color: var(--text); }
-.cp-session-time { color: var(--muted); font-size: 10px; font-family: var(--mono); flex: none; }
-.cp-session-del { background: transparent; border: none; color: var(--muted); cursor: pointer; padding: 8px 11px; font-size: 12px; }
-.cp-session-del:hover { color: var(--bad); }
 
 /* ── Mission Planner ─────────────────────────────────────────────────── */
 .plan-switch { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }

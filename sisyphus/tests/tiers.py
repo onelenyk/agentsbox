@@ -18,8 +18,8 @@ Tiers (see docs/testing.md for the strategy):
 TIERS = {
     "unit": [
         "test_agents", "test_ai_assist", "test_autopilot", "test_backup",
-        "test_budget", "test_concurrency", "test_config", "test_copilot",
-        "test_copilot_store", "test_env", "test_forge_poll",
+        "test_budget", "test_concurrency", "test_config",
+        "test_env", "test_forge_poll",
         "test_heartbeat", "test_launcher_cancel", "test_ledger", "test_logging_setup",
         "test_markdown", "test_mergerequests", "test_migrations", "test_notifications",
         "test_notify",

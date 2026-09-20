@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}{{ repo.name }} — Sisyphus{% endblock %}
+{% block main_class %}main--board{% endblock %}
+{% block content %}
+<div class="board-shell">
+    <div class="board-main">
+        <div class="page-head">
+            <div>
+                <h1>⌥ {{ repo.name }}</h1>
+                <div class="sub mono">{{ repo.source }}{% if repo.branch %} · {{ repo.branch }}{% endif %}</div>
+            </div>
+            <div class="actions">
+                <a class="btn btn--ghost" href="/repos/{{ repo.name }}" title="Resources, setup, edit">⚙ Settings</a>
+            </div>
+        </div>
+        {% set fixed_repo = repo.name %}
+        {% include "_task_box.html" %}
+        {% if autopilots %}
+        <div class="project-autopilots">
+            <span class="muted">Autopilot:</span>
+            {% for a in autopilots %}
+            <a href="/autopilots" class="{{ '' if a.enabled else 'muted' }}">{{ a.name }}{% if a.cron %} <span class="mono muted">{{ a.cron }}</span>{% endif %}{% if not a.enabled %} (paused){% endif %}</a>{% if not loop.last %} · {% endif %}
+            {% endfor %}
+        </div>
+        {% endif %}
+        <div id="tasks-list" hx-get="/api/tasks/list?repo={{ repo.name|urlencode }}"
+             hx-trigger="load, taskCreated from:body, taskUpdated from:body, every 7s" hx-swap="innerHTML">
+            <div class="empty">Loading…</div>
+        </div>
+    </div>
+</div>
+{% endblock %}

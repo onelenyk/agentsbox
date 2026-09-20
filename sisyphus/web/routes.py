@@ -28,11 +28,25 @@ def _asset_v(name: str) -> str:
         return "0"
 
 
+def _repo_names() -> list:
+    from core.repos import load_repos  # not list_repos: that probes each source's reach
+    return [r["name"] for r in load_repos()]
+
+
+def _worker_agent_names() -> list:
+    from core.agents import list_agents
+    return [a["name"] for a in list_agents(kind="worker")]
+
+
 def _tmpl():
     from core.store import task_display_title, message_lane
     tmpl = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
     tmpl.env.globals["task_display_title"] = task_display_title
     tmpl.env.globals["message_lane"] = message_lane
+    # Called from base.html's sidebar and the quick-task box, so every page
+    # gets them without each route remembering to pass them.
+    tmpl.env.globals["repo_names"] = _repo_names
+    tmpl.env.globals["worker_agent_names"] = _worker_agent_names
     tmpl.env.globals["asset_v"] = _asset_v
     tmpl.env.filters["md"] = render_md
     return tmpl
@@ -77,7 +91,7 @@ async def startup():
     _started = True
 
     # One call owns the schema: every init in order (daemon is self-sufficient —
-    # runners, agents, usage, MRs, autopilots, copilot, planner all seed
+    # runners, agents, usage, MRs, autopilots, planner all seed
     # themselves), then a PRAGMA user_version stamp so a future non-additive
     # migration has something to compare against.
     from core.migrations import migrate_all
@@ -802,8 +816,8 @@ async def workers_live(request: Request):
 
 @router.get("/api/board/watch", response_class=HTMLResponse)
 async def board_watch(request: Request):
-    """Who is on duty: the product owner, the agents running right now, and the
-    daemon's background loops. Every row is backed by something recorded — a
+    """Who is on duty: the agents running right now and the daemon's background
+    loops. Every row is backed by something recorded — a
     live session, or a heartbeat a loop actually stamped."""
     from core import heartbeat, orchestrator
     watchers = heartbeat.list_all()
@@ -813,7 +827,6 @@ async def board_watch(request: Request):
     return _tmpl().TemplateResponse(request, "watch_rail.html", {
         "sessions": _enrich_sessions(sessions.list_active()),
         "watchers": watchers,
-        "po": None,          # the product owner does not exist yet — say so
     })
 
 # ── Agents ──────────────────────────────────────────────────────────────
@@ -945,8 +958,23 @@ def board_column(task, mr):
 async def tasks_page(request: Request):
     return _tmpl().TemplateResponse(request, "tasks.html", {"active_page": "tasks"})
 
+@router.get("/p/{name}", response_class=HTMLResponse)
+async def project_page(request: Request, name: str):
+    """One repo's board: the same columns as /tasks, narrowed to this repo, with
+    a task box that needs no repo picker because the page already is one."""
+    from core.repos import get_repo
+    from core.autopilot import list_autopilots
+    repo = get_repo(name)
+    if not repo:
+        return _tmpl().TemplateResponse(request, "not_found.html", {"path": f"/p/{name}"},
+                                        status_code=404)
+    autopilots = [a for a in list_autopilots() if a.get("repo") == name]
+    return _tmpl().TemplateResponse(request, "project.html", {
+        "active_page": f"project:{name}", "repo": repo, "autopilots": autopilots,
+    })
+
 @router.get("/api/tasks/list", response_class=HTMLResponse)
-async def tasks_list_view(request: Request):
+async def tasks_list_view(request: Request, repo: str = ""):
     from core import store
 
     all_mrs = mergerequests.list_mrs()
@@ -964,7 +992,8 @@ async def tasks_list_view(request: Request):
     cols = ("in-progress", "needs-you", "to-merge", "shipped", "done", "failed")
     columns = {c: [] for c in cols}
     for status in store.VALID_STATUSES:
-        tasks = [t for t in store.list_tasks(status=status) if not t.get("parent_id")]
+        tasks = [t for t in store.list_tasks(status=status) if not t.get("parent_id")
+                 and (not repo or t.get("repo") == repo)]
         for t in tasks:
             kids = store.list_children(t["id"])
             if kids:
@@ -1029,15 +1058,6 @@ async def tasks_list_view(request: Request):
     return _tmpl().TemplateResponse(request, "tasks_list.html",
                                     {"columns": columns, "auto_groups": auto_groups})
 
-@router.get("/api/tasks/new-form", response_class=HTMLResponse)
-async def tasks_new_form(request: Request):
-    from core.repos import list_repos
-    from core.agents import list_agents
-    return _tmpl().TemplateResponse(request, "tasks_new.html", {
-        "repos": list_repos(),
-        "agents": list_agents(kind="worker"),
-    })
-
 @router.post("/api/tasks")
 async def tasks_create(goal: str = Form(...), repo: str = Form(""), agent: str = Form(""),
                        title: str = Form("")):
@@ -1060,161 +1080,6 @@ async def tasks_create(goal: str = Form(...), repo: str = Form(""), agent: str =
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "taskCreated"
     return resp
-
-# ── Command Bar ─────────────────────────────────────────────────────────
-
-@router.post("/api/command/classify", response_class=HTMLResponse)
-async def command_classify(request: Request, text: str = Form(...)):
-    from core import ai_assist
-    from core.repos import list_repos
-
-    if not text.strip():
-        return HTMLResponse('<div class="panel" style="margin-top:12px"><div class="empty">Type something first.</div></div>')
-    repos = list_repos()
-    repo_names = [r["name"] for r in repos]
-    try:
-        result = await asyncio.to_thread(ai_assist.classify_command, text.strip(), repo_names)
-    except Exception:
-        result = {"kind": "task", "title": text.strip()[:80], "goal": text.strip(), "repo": "", "cron": ""}
-    return _tmpl().TemplateResponse(request, "command_result.html", {"result": result, "repos": repos})
-
-
-@router.post("/api/command/create-task")
-async def command_create_task(goal: str = Form(...), repo: str = Form(""), title: str = Form("")):
-    from core import store
-    from core.orchestrator import emit
-    from fastapi.responses import Response
-
-    if not goal.strip():
-        return Response(status_code=422)
-    task = store.create_task(goal.strip(), repo, title=title or None)
-    emit(task["id"], "created")
-    resp = Response(status_code=200)
-    resp.headers["HX-Redirect"] = f"/tasks/{task['id']}"
-    return resp
-
-
-@router.post("/api/command/create-plan")
-async def command_create_plan(goal: str = Form(...), repo: str = Form(""), title: str = Form("")):
-    from core import planner
-    from fastapi.responses import Response
-
-    if not goal.strip():
-        return Response(status_code=422)
-    pid = planner.create_plan(title=title or goal.strip()[:48], repo=repo)["id"]
-    planner.start_plan_turn(pid, goal.strip())
-    resp = Response(status_code=200)
-    resp.headers["HX-Redirect"] = "/plans"
-    return resp
-
-
-@router.post("/api/command/create-automation")
-async def command_create_automation(goal: str = Form(...), repo: str = Form(""),
-                                     title: str = Form(""), cron: str = Form("")):
-    from core.autopilot import create_autopilot
-    from fastapi.responses import Response
-
-    if not goal.strip():
-        return Response(status_code=422)
-    create_autopilot(
-        name=title or goal.strip()[:48],
-        description=goal.strip(),
-        trigger_type="schedule",
-        cron=cron or "",
-        goal_template=goal.strip(),
-        repo=repo,
-        enabled=1,
-    )
-    resp = Response(status_code=200)
-    resp.headers["HX-Redirect"] = "/autopilots"
-    return resp
-
-@router.post("/api/tasks/ai-parse")
-async def tasks_ai_parse(text: str = Form(...), template: str = Form("")):
-    """Turn rough words (+ template) into {goal, repo, agent} via a quick local
-    AI run. Returns JSON for the New Task form to fill in."""
-    from fastapi.responses import JSONResponse
-    from core import ai_assist
-    from core.repos import list_repos
-    from core.agents import list_agents
-
-    if not text.strip():
-        return JSONResponse({"error": "empty"}, status_code=422)
-    try:
-        return await asyncio.to_thread(ai_assist.parse_task, text, template, list_repos(), list_agents(kind="worker"))
-    except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"error": str(exc)}, status_code=503)
-
-def _copilot_panel(request, session):
-    from core.copilot_store import get_messages
-    return _tmpl().TemplateResponse(request, "copilot_panel.html",
-        {"session": session, "messages": get_messages(session["id"])})
-
-@router.get("/api/board/copilot", response_class=HTMLResponse)
-async def copilot_load(request: Request):
-    """The dock loads this on open — the latest session's messages (persisted)."""
-    from core.copilot_store import latest_or_create
-    return _copilot_panel(request, latest_or_create())
-
-@router.get("/api/board/copilot/sessions", response_class=HTMLResponse)
-async def copilot_sessions(request: Request):
-    from core.copilot_store import list_sessions
-    return _tmpl().TemplateResponse(request, "copilot_sessions.html",
-        {"sessions": list_sessions()})
-
-@router.post("/api/board/copilot/new", response_class=HTMLResponse)
-async def copilot_new(request: Request):
-    from core.copilot_store import create_session
-    return _copilot_panel(request, create_session())
-
-@router.get("/api/board/copilot/{sid}", response_class=HTMLResponse)
-async def copilot_open_session(request: Request, sid: str):
-    from core.copilot_store import get_session, latest_or_create
-    return _copilot_panel(request, get_session(sid) or latest_or_create())
-
-@router.post("/api/board/copilot/{sid}/delete", response_class=HTMLResponse)
-async def copilot_delete_session(request: Request, sid: str):
-    from core.copilot_store import delete_session, latest_or_create
-    delete_session(sid)
-    return _copilot_panel(request, latest_or_create())
-
-@router.post("/api/board/chat")
-async def board_chat(request: Request):
-    """One copilot turn, persisted to a session. Returns {reply, action?, session_id};
-    a proposed action is validated but executed only on confirm via /api/board/act."""
-    from fastapi.responses import JSONResponse
-    from core import copilot, copilot_store
-    body = await request.json()
-    message = (body.get("message") or "").strip()
-    if not message:
-        return JSONResponse({"error": "empty"}, status_code=422)
-    sid = body.get("session_id")
-    if not sid or not copilot_store.get_session(sid):
-        sid = copilot_store.latest_or_create()["id"]
-    history = [{"role": m["role"], "text": m["text"]} for m in copilot_store.get_messages(sid)]
-    copilot_store.add_message(sid, "user", message)
-    try:
-        result = await asyncio.to_thread(copilot.chat, message, history)
-    except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"error": str(exc), "session_id": sid}, status_code=503)
-    copilot_store.add_message(sid, "assistant", result.get("reply", ""))
-    result["session_id"] = sid
-    return result
-
-@router.post("/api/board/act")
-async def board_act(request: Request):
-    """Execute a user-confirmed copilot action; record the result in the session."""
-    from fastapi.responses import JSONResponse
-    from core import copilot, copilot_store
-    body = await request.json()
-    try:
-        res = copilot.execute_action(body.get("action") or {})
-    except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"error": str(exc)}, status_code=422)
-    sid = body.get("session_id")
-    if sid and copilot_store.get_session(sid):
-        copilot_store.add_message(sid, "system", res)
-    return {"result": res}
 
 # ── Mission Planner ─────────────────────────────────────────────────────
 

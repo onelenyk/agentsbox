@@ -42,7 +42,6 @@ def migrate_all() -> int:
     from core.usage import init_usage_table
     from core.mergerequests import init_mr_table
     from core.autopilot import init_autopilot_table
-    from core.copilot_store import init_copilot_tables
     from core.planner import init_planner_tables
 
     before = db_version()
@@ -52,7 +51,6 @@ def migrate_all() -> int:
     init_usage_table()
     init_mr_table()
     init_autopilot_table()
-    init_copilot_tables()
     init_planner_tables()
     conn = get_conn()
     try:

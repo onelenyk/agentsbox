@@ -1,21 +1,8 @@
-{# The rail's body: product owner, agents running now, background watchers.
+{# The rail's body: agents running now, background watchers.
    Every led is derived from something recorded — a live session or a heartbeat
    a loop stamped — never from the fact that this template rendered. #}
 {% set ledmap = {'live': 'live', 'late': 'amber', 'stale': 'dead', 'never': 'idle', 'off': 'idle'} %}
 {% macro ago(s) %}{% if s is none %}—{% elif s < 60 %}{{ s }}s ago{% elif s < 3600 %}{{ (s // 60)|int }}m ago{% else %}{{ (s // 3600)|int }}h ago{% endif %}{% endmacro %}
-
-<section class="watch-sec">
-    <div class="watch-sec__h"><span class="t">Product owner</span></div>
-    {# The absence stays visible on purpose: autonomy must not become switchable
-       on without a place that already shows it running. What needs a human is
-       NOT repeated here — the board's own "Needs you" and "To merge" columns
-       are three inches to the right and say it better. #}
-    <div class="watch-po watch-po--none">
-        <div class="watch-po__row"><span class="led idle"></span><span class="n">PO</span><span class="badge">not configured</span></div>
-        <div class="watch-po__next">No agent picks the work yet. Until one does, ask — nothing runs until you confirm it.</div>
-        <button type="button" class="btn btn--ghost btn--sm watch-po__ask" onclick="askWhatNext()">What next?</button>
-    </div>
-</section>
 
 <section class="watch-sec">
     <div class="watch-sec__h"><span class="t">At work</span><span class="c">{{ sessions|length }}</span></div>
