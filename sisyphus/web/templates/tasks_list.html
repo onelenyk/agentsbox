@@ -158,7 +158,8 @@
                         <span class="trow__tags">
                             <span class="tslot">{% if row.repo %}<span class="tag tag--repo">{{ row.repo }}</span>{% endif %}</span>
                             <span class="tslot">{% if row.who %}<span class="tag tag--who">{{ icons.get(row.who, '•') }} {{ row.who }}{% if row.live %} <span class="live-dot"></span>{% endif %}</span>{% endif %}</span>
-                            <span class="tslot">{% if row.review_status == 'changes_requested' %}<span class="tag tag--bad">changes requested</span>{% endif %}</span>
+                            <span class="tslot">{% if row.review_status == 'changes_requested' %}<span class="tag tag--bad {{ 'is-settled' if not row.verdict_open }}"
+                                  title="{% if row.verdict_open %}The reviewer asked for changes — the branch cannot land until that is answered{% else %}The reviewer asked for changes; this branch was merged anyway — the thread says by whom and why{% endif %}">changes requested</span>{% endif %}</span>
                             <span class="tslot"><span class="tag tag--state tag--{{ row.kind }}">{{ row.word }}</span></span>
                         </span>
                         <span class="trow__when"><span class="reltime" data-created="{{ row.when }}"></span></span>

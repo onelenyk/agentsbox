@@ -1149,11 +1149,12 @@ def _row(t: dict, kind: str, who: dict, runs: int = 1, auto: bool = False,
         "repo": t.get("repo") or "", "auto": auto, "runs": runs,
         "who": t.get("live_role") or who.get(t["id"]) or t.get("agent") or "",
         "live": bool(t.get("live_role")),
-        # Only while the branch can still land. "changes requested" beside
-        # SHIPPED reads as an open complaint about work that is already in
-        # main — the verdict was answered, or overridden, and either way the
-        # thread is where that story lives.
-        "review_status": t.get("review_status") if t.get("gate") else None,
+        "review_status": t.get("review_status"),
+        # A verdict on a branch that has already landed is not a live
+        # complaint — it is the record of a call that was made anyway. Shown
+        # either way, because "somebody asked for changes here" is worth
+        # seeing; drawn quieter when the merge already answered it.
+        "verdict_open": bool(t.get("gate")),
         "when": t.get("updated_at") or t.get("created_at"),
     }
 

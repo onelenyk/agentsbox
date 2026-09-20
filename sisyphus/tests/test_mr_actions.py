@@ -356,22 +356,26 @@ class TestDiskIsReclaimedWhenTheLastMrCloses:
         assert mergerequests.get_mr(mr["id"])["status"] == "merged"
 
 
-class TestAVerdictStopsBeingNewsOnceTheBranchLands:
-    """"changes requested" next to SHIPPED reads as an open complaint about
-    code that is already in main. The verdict was answered or overridden; the
-    thread is where that story lives."""
+class TestAVerdictIsShownWhetherOrNotTheBranchLanded:
+    """"Somebody asked for changes here" is worth seeing on a shipped task too
+    — that is the record of a call made anyway. What must not happen is the
+    two cases looking identical."""
 
-    def test_an_open_mr_shows_the_verdict(self, db_path, tmp_path):
+    def _row(self, db_path, tmp_path, merged=False):
         mr, real, bare = _mr(db_path, tmp_path, target="develop")
         mergerequests.set_review_status(mr["id"], "changes_requested")
+        if merged:
+            mergerequests.mark_merged(mr["id"], "abc1234")
         store.set_status(mr["task_id"], "done")
         html = TestClient(app).get("/api/tasks/list").text
-        assert "changes requested" in html
+        return html.split("changes requested")[0].rsplit("<span", 1)[1]
 
-    def test_a_merged_one_does_not(self, db_path, tmp_path):
-        mr, real, bare = _mr(db_path, tmp_path, target="develop")
-        mergerequests.set_review_status(mr["id"], "changes_requested")
-        mergerequests.mark_merged(mr["id"], "abc1234")
-        store.set_status(mr["task_id"], "done")
-        html = TestClient(app).get("/api/tasks/list").text
-        assert "changes requested" not in html
+    def test_an_open_verdict_blocks_and_says_so(self, db_path, tmp_path):
+        tag = self._row(db_path, tmp_path)
+        assert "is-settled" not in tag
+        assert "cannot land" in tag
+
+    def test_a_merged_one_is_shown_quieter_and_explains_itself(self, db_path, tmp_path):
+        tag = self._row(db_path, tmp_path, merged=True)
+        assert "is-settled" in tag
+        assert "merged anyway" in tag

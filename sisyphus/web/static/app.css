@@ -481,6 +481,8 @@ body::before {
 .tag--state { letter-spacing: .04em; text-transform: uppercase; font-size: 9.5px; }
 .tag--shipped { color: var(--good); background: var(--good-bg); border-color: var(--good-bd); }
 .tag--failed, .tag--bad { color: var(--bad); background: var(--bad-bg); border-color: var(--bad-bd); }
+/* the verdict still stands vs. the verdict was overtaken by a merge */
+.tag--bad.is-settled { color: var(--muted); background: var(--panel-2); border-color: var(--border); }
 .tag--needs-you { color: var(--warn); background: var(--warn-bg); border-color: var(--warn-bd); }
 .tag--to-merge, .tag--in-progress { color: var(--accent-hi); background: var(--accent-bg); border-color: var(--accent-bd); }
 
