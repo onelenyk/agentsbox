@@ -308,7 +308,7 @@ body::before {
 .ask:hover { background: var(--hover); transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,.32); }
 .ask__top { display: flex; align-items: baseline; gap: 8px; }
 .ask__title {
-  font-size: 13.5px; font-weight: 600; color: var(--text); line-height: 1.4;
+  font-size: 13.5px; font-weight: 650; color: var(--text); line-height: 1.45;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ask__age { margin-left: auto; flex: none; font-size: 11px; color: var(--muted); }
@@ -330,7 +330,7 @@ body::before {
 .run:hover { background: var(--hover); }
 .run__top { display: flex; align-items: baseline; gap: 8px; }
 .run__title {
-  font-size: 13px; font-weight: 550; color: var(--text);
+  font-size: 13.5px; font-weight: 600; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .run__who {
@@ -367,8 +367,8 @@ body::before {
 }
 /* queued: created, nothing started. One line — it has nothing to report yet. */
 .queued {
-  display: flex; align-items: center; gap: 10px; padding: 8px 14px;
-  text-decoration: none; font-size: 12.5px; color: var(--text-2);
+  display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+  text-decoration: none; font-size: 13px; color: var(--text-2);
   background: var(--panel); border: 1px dashed var(--border); border-radius: var(--r);
 }
 .queued:hover { color: var(--text); border-color: var(--border-2); }
@@ -529,17 +529,35 @@ body::before {
 .kv .k { color: var(--muted); min-width: 96px; }
 .kv .v { color: var(--text-2); }
 
-.section-title { font-size: 13px; font-weight: 650; margin: 22px 0 10px; display: flex; align-items: center; gap: 8px; }
+.section-title {
+  display: flex; align-items: center; gap: 8px; margin: 24px 0 10px;
+  font-size: 10.5px; font-weight: 650; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--muted);
+}
+.section-title .chip { text-transform: none; letter-spacing: 0; }
 
 /* result card */
+/* The result is what the task was for, so it is the one block on the page
+   with a lit edge and the largest body text — everything else on the page is
+   evidence for it. */
 .result {
-  background: var(--inset); border: 1px solid var(--border);
-  border-radius: var(--r); padding: 16px; margin-top: 8px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-left: 3px solid var(--good);
+  border-radius: var(--r); padding: 15px 17px; margin-top: 12px;
 }
-.result__label { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
-.result__summary { font-size: 14px; white-space: pre-wrap; margin-bottom: 12px; }
+.result__label {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 10.5px; font-weight: 650; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--good); margin-bottom: 10px;
+}
+.result__summary { font-size: 13.5px; line-height: 1.65; color: var(--text-2); white-space: pre-wrap; margin-bottom: 12px; }
+.result__summary strong, .result .msg__body--md strong { color: var(--text); }
+.result .msg__body--md { font-size: 13.5px; line-height: 1.65; color: var(--text-2); }
+/* a failed task's result is the reason it failed — colour it as such */
+.result--failed { border-left-color: var(--bad); }
+.result--failed .result__label { color: var(--bad); }
 
-.task-goal-full { font-size: 13px; color: var(--text-2); margin-top: 4px; }
+.task-goal-full { font-size: 13.5px; line-height: 1.6; color: var(--text-2); margin-top: 2px; }
 
 /* long task goals fold behind a toggle so the page leads with the result */
 .goal-fold > summary {
@@ -994,12 +1012,24 @@ select { cursor: pointer; appearance: none;
 /* ── Task detail: content + Properties/Usage rail ────────────────────── */
 .task-detail { display: grid; grid-template-columns: 1fr 272px; gap: 18px; align-items: start; }
 .task-main { min-width: 0; }
-.task-rail { display: flex; flex-direction: column; gap: 14px; position: sticky; top: 20px; }
+.task-rail { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 20px; }
 .rail-sec { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 13px 15px; }
-.rail-h { font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
-.rail-sec .prop { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 5px 0; font-size: 12.5px; }
-.rail-sec .prop .k { color: var(--muted); }
-.rail-sec .prop .v { color: var(--text-2); text-align: right; word-break: break-word; }
+/* One label style for every small heading on a detail surface: the rail's
+   sections, the goal above the thread, the properties. */
+.rail-h {
+  font-size: 10.5px; font-weight: 650; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 9px;
+}
+.rail-sec .prop {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 6px 0; font-size: 12.5px; border-top: 1px solid var(--border);
+}
+.rail-sec .prop:first-of-type { border-top: none; padding-top: 0; }
+.rail-sec .prop .k { color: var(--muted); white-space: nowrap; }
+.rail-sec .prop .v { color: var(--text); text-align: right; word-break: break-word; }
+.rail-sec .prop .v.mono { font-variant-numeric: tabular-nums; }
+.rail-sec a.v { color: var(--accent-hi); text-decoration: none; }
+.rail-sec a.v:hover { text-decoration: underline; }
 @media (max-width: 900px) { .task-detail { grid-template-columns: 1fr; } .task-rail { position: static; } }
 
 /* ── Repo detail: agent-context resource list ────────────────────────── */
