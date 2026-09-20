@@ -24,9 +24,18 @@
         </div>
         {% endif %}
         <div id="tasks-list" hx-get="/api/tasks/list?repo={{ repo.name|urlencode }}"
-             hx-trigger="load, taskCreated from:body, taskUpdated from:body, every 7s" hx-swap="innerHTML">
+             hx-trigger="load, taskCreated from:body, taskUpdated from:body, every 7s[boardIdle()]" hx-swap="innerHTML">
             <div class="empty">Loading…</div>
         </div>
     </div>
 </div>
+<script>
+    // The board polls itself every seven seconds. A refresh that lands while
+    // you are typing in the filter bar takes the field, the caret and the
+    // half-typed word with it — so the poll waits until you step out of it.
+    function boardIdle() {
+        var el = document.activeElement;
+        return !(el && el.closest && el.closest('.filters'));
+    }
+</script>
 {% endblock %}

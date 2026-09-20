@@ -424,13 +424,24 @@ body::before {
 .sprint__stats .is-good { color: var(--good); }
 .sprint__stats .is-bad { color: var(--bad); }
 
-.trows { list-style: none; display: flex; flex-direction: column; padding-bottom: 8px; }
+/* One set of bounds for every row on the board, so a key, a tag or a time is
+   in the same place on line 40 as on line 1 — and a subtask indents without
+   moving the columns it shares with its parent. */
+.trows {
+  --c-mark: 8px; --c-key: 64px; --c-repo: 96px; --c-who: 116px;
+  --c-note: 112px; --c-state: 74px; --c-when: 72px;
+  list-style: none; display: flex; flex-direction: column; padding-bottom: 8px;
+}
 .trows__none { font-size: 12.5px; color: var(--muted); padding: 14px 4px; }
 .trow[hidden] { display: none; }
 /* A grid, not a flex row: a key, a status or a timestamp is worth reading
    down the column, and ragged ones make you re-find them on every line. */
 .trow a {
-  display: grid; grid-template-columns: 8px 62px minmax(0, 1fr) 360px 72px;
+  display: grid;
+  grid-template-columns:
+    var(--c-mark) var(--c-key) minmax(0, 1fr)
+    calc(var(--c-repo) + var(--c-who) + var(--c-note) + var(--c-state) + 15px)
+    var(--c-when);
   align-items: center; gap: 10px; padding: 7px 10px;
   text-decoration: none; color: var(--text-2); font-size: 12.5px;
   border-radius: var(--r-sm); border-left: 2px solid transparent;
@@ -443,11 +454,16 @@ body::before {
 .trow__runs { font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-left: 7px; }
 /* Fixed column, right-aligned: each row is its own grid, so only a width
    both agree on makes the tags line up down the page. */
-.trow__tags { display: flex; align-items: center; justify-content: flex-end; gap: 5px; overflow: hidden; }
+.trow__tags {
+  display: grid; align-items: center; gap: 5px;
+  grid-template-columns: var(--c-repo) var(--c-who) var(--c-note) var(--c-state);
+}
+.tslot { display: flex; justify-content: flex-start; min-width: 0; }
+.tslot .tag { overflow: hidden; text-overflow: ellipsis; }
 .trow__when { text-align: right; font-size: 11px; color: var(--muted); }
 /* a subtask is the parent's, not a second task beside it */
-.trow--child a { grid-template-columns: 8px 82px minmax(0, 1fr) 360px 72px; }
-.trow--child .tkey { margin-left: 20px; }
+/* the child indents inside its own cells — the columns stay put */
+.trow--child .tkey { margin-left: 18px; }
 .trow--child .trow__title::before {
   content: "└"; color: var(--border-2); margin-right: 7px; font-family: var(--mono);
 }
@@ -460,7 +476,7 @@ body::before {
 .tag--who { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); }
 /* A row with one tag more than the rest must lose characters, not a word:
    the repo name is the one that can say less and still be read. */
-.tag--repo { max-width: 108px; overflow: hidden; text-overflow: ellipsis; }
+.tag--repo { max-width: 100%; }
 .tag--who .live-dot { width: 6px; height: 6px; }
 .tag--state { letter-spacing: .04em; text-transform: uppercase; font-size: 9.5px; }
 .tag--shipped { color: var(--good); background: var(--good-bg); border-color: var(--good-bd); }

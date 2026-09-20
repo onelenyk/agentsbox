@@ -132,7 +132,7 @@
         </header>
 
         {% for sp in sprints %}
-        <details class="sprint" {{ 'open' if loop.first }}>
+        <details class="sprint" data-sprint="{{ sp.id }}" {{ 'open' if loop.first }}>
             <summary class="sprint__head">
                 <span class="sprint__chev">▸</span>
                 <span class="sprint__name">{{ sp.label }}</span>
@@ -153,11 +153,13 @@
                         <span class="trow__mark" title="new since your last visit"></span>
                         <span class="tkey">{{ row.key }}</span>
                         <span class="trow__title">{% if row.auto %}🤖 {% endif %}{{ row.title }}{% if row.runs > 1 %}<span class="trow__runs tnum">×{{ row.runs }}</span>{% endif %}</span>
+                        {# Every tag has a slot of its own, filled or not: a row
+                           with one tag fewer must not shift the ones beside it. #}
                         <span class="trow__tags">
-                            {% if row.repo %}<span class="tag tag--repo">{{ row.repo }}</span>{% endif %}
-                            {% if row.who %}<span class="tag tag--who">{{ icons.get(row.who, '•') }} {{ row.who }}{% if row.live %} <span class="live-dot"></span>{% endif %}</span>{% endif %}
-                            {% if row.review_status == 'changes_requested' %}<span class="tag tag--bad">changes requested</span>{% endif %}
-                            <span class="tag tag--state tag--{{ row.kind }}">{{ row.word }}</span>
+                            <span class="tslot">{% if row.repo %}<span class="tag tag--repo">{{ row.repo }}</span>{% endif %}</span>
+                            <span class="tslot">{% if row.who %}<span class="tag tag--who">{{ icons.get(row.who, '•') }} {{ row.who }}{% if row.live %} <span class="live-dot"></span>{% endif %}</span>{% endif %}</span>
+                            <span class="tslot">{% if row.review_status == 'changes_requested' %}<span class="tag tag--bad">changes requested</span>{% endif %}</span>
+                            <span class="tslot"><span class="tag tag--state tag--{{ row.kind }}">{{ row.word }}</span></span>
                         </span>
                         <span class="trow__when"><span class="reltime" data-created="{{ row.when }}"></span></span>
                     </a>
@@ -191,6 +193,15 @@
     // Filtering happens on the rows already here: the board refreshes every
     // seven seconds, and a round trip per keystroke would fight the refresh
     // and lose your place in the list.
+    // Every poll replaces this list wholesale, so what the reader chose has to
+    // outlive the swap: the filters they set, and the sprints they unfolded.
+    var STATE = 'boardView';
+    function readState() {
+        try { return JSON.parse(sessionStorage.getItem(STATE) || '{}'); } catch (e) { return {}; }
+    }
+    function writeState(patch) {
+        try { sessionStorage.setItem(STATE, JSON.stringify(Object.assign(readState(), patch))); } catch (e) { }
+    }
     var search = document.querySelector('.f-search');
     var picks = [].slice.call(document.querySelectorAll('.f-pick'));
     var clear = document.querySelector('.f-clear');
@@ -218,13 +229,37 @@
         if (clear) clear.hidden = !active;
         if (none) none.hidden = !(active && shown === 0);
     }
-    if (search) search.addEventListener('input', filter);
-    picks.forEach(function (p) { p.addEventListener('change', filter); });
+    function remember() {
+        var f = {};
+        picks.forEach(function (p) { if (p.value) f[p.dataset.field] = p.value; });
+        writeState({ q: search ? search.value : '', f: f });
+    }
+    if (search) search.addEventListener('input', function () { remember(); filter(); });
+    picks.forEach(function (p) { p.addEventListener('change', function () { remember(); filter(); }); });
+    document.querySelectorAll('.sprint').forEach(function (sp, i) {
+        sp.addEventListener('toggle', function () {
+            var open = readState().open || {};
+            open[sp.dataset.sprint || i] = sp.open;
+            writeState({ open: open });
+        });
+    });
     if (clear) clear.onclick = function () {
         if (search) search.value = '';
         picks.forEach(function (p) { p.value = ''; });
+        remember();
         filter();
     };
+
+    (function restore() {
+        var st = readState();
+        if (search && st.q) search.value = st.q;
+        picks.forEach(function (p) { if (st.f && st.f[p.dataset.field]) p.value = st.f[p.dataset.field]; });
+        var open = st.open || {};
+        document.querySelectorAll('.sprint').forEach(function (sp, i) {
+            var k = sp.dataset.sprint || i;
+            if (k in open) sp.open = open[k];
+        });
+    })();
 
     // "Finished while I wasn't looking" is the one thing about done work worth
     // a person's attention, and it is exactly what an archive sorted by date

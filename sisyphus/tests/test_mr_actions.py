@@ -354,3 +354,24 @@ class TestDiskIsReclaimedWhenTheLastMrCloses:
         mr = self._mr(db_path)
         mergerequests.mark_merged(mr["id"], "abc123")
         assert mergerequests.get_mr(mr["id"])["status"] == "merged"
+
+
+class TestAVerdictStopsBeingNewsOnceTheBranchLands:
+    """"changes requested" next to SHIPPED reads as an open complaint about
+    code that is already in main. The verdict was answered or overridden; the
+    thread is where that story lives."""
+
+    def test_an_open_mr_shows_the_verdict(self, db_path, tmp_path):
+        mr, real, bare = _mr(db_path, tmp_path, target="develop")
+        mergerequests.set_review_status(mr["id"], "changes_requested")
+        store.set_status(mr["task_id"], "done")
+        html = TestClient(app).get("/api/tasks/list").text
+        assert "changes requested" in html
+
+    def test_a_merged_one_does_not(self, db_path, tmp_path):
+        mr, real, bare = _mr(db_path, tmp_path, target="develop")
+        mergerequests.set_review_status(mr["id"], "changes_requested")
+        mergerequests.mark_merged(mr["id"], "abc1234")
+        store.set_status(mr["task_id"], "done")
+        html = TestClient(app).get("/api/tasks/list").text
+        assert "changes requested" not in html
