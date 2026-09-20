@@ -1,25 +1,30 @@
 <div class="modal-backdrop" onclick="if(event.target===this)this.remove()">
-    <div class="modal modal--wide" onclick="event.stopPropagation()">
-        <div class="modal__head" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
-            <h2 style="font-size:15px">Run logs</h2>
+    <div class="modal modal--wide modal--tall" onclick="event.stopPropagation()">
+        <div class="modal__head modal__head--row">
+            <div class="mr-title">
+                <h2>Run logs</h2>
+                {% if selected %}<code class="mono">{{ selected }}</code>{% endif %}
+            </div>
             <button type="button" class="btn btn--ghost btn--sm" onclick="this.closest('.modal-backdrop').remove()">Close</button>
         </div>
         <div class="modal__body">
             {% if not logs %}
             <div class="empty">No run logs for this task yet — they appear once a worker has run.</div>
             {% else %}
-            {# One button per worker run; the newest opens by default. #}
-            <div class="acts" style="margin:0 0 12px;flex-wrap:wrap">
+            {# One chip per worker run; the newest opens by default. What each
+               CLI actually printed is where the reason lives when a worker
+               ends without reporting. #}
+            <div class="logpicks">
                 {% for l in logs %}
-                <button class="btn btn--sm {{ 'btn--primary' if l.name == selected else 'btn--ghost' }}"
+                <button class="logpick {{ 'is-on' if l.name == selected }}"
                         hx-get="/api/tasks/{{ task_id }}/logs?name={{ l.name }}"
                         hx-target="#modal-container" hx-swap="innerHTML">
-                    {{ l.role }} <span class="muted mono" style="font-size:10px">{{ (l.size / 1024) | round | int }}KB</span>
+                    {{ l.role }}<span class="logpick__size">{{ (l.size / 1024) | round | int }}KB</span>
                 </button>
                 {% endfor %}
             </div>
             {% if text %}
-            <pre class="mono" style="max-height:60vh;overflow:auto;font-size:11.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word;margin:0">{{ text }}</pre>
+            <pre class="logtext">{{ text }}</pre>
             {% else %}
             <div class="empty">That log could not be read.</div>
             {% endif %}
