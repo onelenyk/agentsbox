@@ -85,8 +85,11 @@
     </div>
 
     {% if result and (result.summary or result.change or result.commits) %}
-    <div class="result">
-        <div class="result__label">Result</div>
+    {# On a failed task this block holds the reason it failed, which is the
+       opposite kind of news — the card says so rather than presenting it in
+       the colour of success. #}
+    <div class="result{{ ' result--failed' if task.status == 'failed' }}">
+        <div class="result__label">{{ '✗ How it ended' if task.status == 'failed' else '✓ Result' }}</div>
         {% if result.summary %}{% set ds = diffstat_table(result.summary) %}{% if ds %}<div style="margin-bottom:10px">{{ ds }}</div>{% else %}<div class="result__summary msg__body--md">{{ result.summary | md }}</div>{% endif %}{% endif %}
         {% if result.change %}
         <div style="margin-bottom:10px">
