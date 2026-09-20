@@ -331,7 +331,7 @@ def test_result_body_rendered_once_on_detail(db_path):
     # the thread collapses the result to a one-line "shown above" row…
     assert "shown above" in html
     assert 'id="result-' in html
-    assert 'msg__kind">/result' in html
+    assert 'msg__kind">result' in html      # the row still says what kind it is
     # …and keeps only the RAW source behind the fold, not another rendering
     assert html.count("**RESULT MARKER** body") == 1
 
@@ -1064,11 +1064,15 @@ class TestFinishedGraceBadge:
         assert "engineer finished" in html and "m ago" in html
 
     def test_no_grace_badge_while_worker_runs(self, db_path):
+        import re
         from core import store
         t = store.create_task("g")
         store.set_status(t["id"], "active")
         store.post_message(t["id"], "system", kind="worker_started", text="spawning engineer: x")
-        assert "m ago" not in _make_client().get(f"/api/tasks/{t['id']}/detail").text
+        html = _make_client().get(f"/api/tasks/{t['id']}/detail").text
+        # markup only: the page's own clock-formatting script says "m ago" too
+        markup = re.sub(r"<script.*?</script>", "", html, flags=re.S)
+        assert "m ago" not in markup
 
 
 class TestBoardCards:
