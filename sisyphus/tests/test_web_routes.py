@@ -483,7 +483,7 @@ def test_every_sprint_is_on_the_page_newest_open(db_path):
     assert "This week" in html and "Week 32" in html
     assert "this week" in html and "long ago" in html          # both weeks present
     assert html.count('<details class="sprint"') == 2          # both weeks rendered
-    assert html.count('<details class="sprint" open') == 1     # only the newest unfolded
+    assert html.count("open>") == 1                            # only the newest unfolded
 
 
 def test_a_row_carries_the_tags_you_filter_by(db_path):
