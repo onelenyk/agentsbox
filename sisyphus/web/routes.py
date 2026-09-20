@@ -1182,7 +1182,11 @@ def _sprint_of(when: str) -> dict:
     from datetime import date, datetime, timedelta
 
     try:
-        d = datetime.fromisoformat(when).date()
+        # Stamps are stored in UTC; a sprint is a week in the week the reader
+        # lives in. Without the conversion a task started at 00:12 on Monday
+        # filed itself under "last week", because in UTC it was still Sunday.
+        parsed = datetime.fromisoformat(when)
+        d = (parsed.astimezone() if parsed.tzinfo else parsed).date()
     except (TypeError, ValueError):
         d = date.today()
     year, week, weekday = d.isocalendar()

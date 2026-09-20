@@ -298,7 +298,10 @@ body::before {
 
 /* ── Wants you ───────────────────────────────────────────────────────── */
 .zone--you { --col: var(--warn); --col-bg: var(--warn-bg); }
-.asks { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 10px; }
+/* auto-FIT, not auto-fill: with one thing asking for you, an auto-fill grid
+   left it 340px wide beside three empty tracks, which read as a card that
+   failed to load rather than as the one thing on the page that wants you. */
+.asks { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 10px; }
 .ask {
   display: block; text-decoration: none; padding: 13px 15px;
   background: var(--panel); border: 1px solid var(--warn-bd, rgba(224, 168, 58, .3));
@@ -450,7 +453,7 @@ body::before {
    moving the columns it shares with its parent. */
 .trows {
   --c-mark: 8px; --c-key: 64px; --c-repo: 92px; --c-who: 112px;
-  --c-note: 136px; --c-state: 78px; --c-when: 74px;
+  --c-note: 136px; --c-state: 96px; --c-when: 74px;
   list-style: none; display: flex; flex-direction: column; padding-bottom: 10px;
 }
 .trows__none { font-size: 13px; color: var(--muted); padding: 16px 4px; }
