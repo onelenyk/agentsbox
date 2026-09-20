@@ -1,53 +1,64 @@
 <div class="modal-backdrop" onclick="if(event.target===this)this.remove()">
-    <div class="modal modal--wide" onclick="event.stopPropagation()">
-        <div class="modal__head" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
-            <div class="row" style="gap:10px">
-                <h2 style="font-size:15px">Merge request</h2>
-                <span class="status status--{{ 'done' if mr.status=='merged' else ('failed' if mr.status=='closed' else 'active') }}">{{ mr.status }}</span>
-                {% if mr.review_status == 'pending' %}<span class="badge badge--mono">⏳ review</span>{% elif mr.review_status == 'approved' %}<span class="badge" style="color:var(--good);background:var(--good-bg);border-color:var(--good-bd)">✓ reviewed</span>{% elif mr.review_status == 'changes_requested' %}<span class="badge" style="color:var(--bad);background:var(--bad-bg);border-color:var(--bad-bd)">✗ changes requested</span>{% elif mr.review_status == 'died' %}<span class="badge" style="color:var(--bad);background:var(--bad-bg);border-color:var(--bad-bd)">✗ review died</span>{% endif %}
+    <div class="modal modal--wide modal--tall" onclick="event.stopPropagation()">
+        <div class="modal__head modal__head--row">
+            <div class="mr-title">
+                <h2>Merge request</h2>
+                <span class="mr-branches">
+                    <code class="mono">{{ mr.source_branch }}</code>
+                    <span class="muted">→</span>
+                    <form hx-post="/api/mr/{{ mr.id }}/target" hx-target="#modal-container" hx-swap="innerHTML" hx-trigger="change">
+                        <select name="target" {% if mr.status != 'open' %}disabled{% endif %}>
+                            {% for b in branches %}<option value="{{ b }}" {% if b == mr.target_branch %}selected{% endif %}>{{ b }}</option>{% endfor %}
+                            {% if mr.target_branch not in branches %}<option value="{{ mr.target_branch }}" selected>{{ mr.target_branch }}</option>{% endif %}
+                        </select>
+                    </form>
+                </span>
             </div>
-            <button type="button" class="btn btn--ghost btn--sm" onclick="this.closest('.modal-backdrop').remove()">Close</button>
+            <div class="row" style="gap:8px">
+                <span class="status status--{{ 'done' if mr.status=='merged' else ('failed' if mr.status=='closed' else 'active') }}">{{ mr.status }}</span>
+                <button type="button" class="btn btn--ghost btn--sm" onclick="this.closest('.modal-backdrop').remove()">Close</button>
+            </div>
         </div>
         <div class="modal__body">
             {% if flash %}<div class="mr-flash ok">✓ {{ flash }}</div>{% endif %}
             {% if error %}<div class="mr-flash err">✗ {{ error }}</div>{% endif %}
 
-            <div class="mr-branches">
-                <span class="badge badge--mono">{{ mr.source_branch }}</span>
-                <span class="muted">→</span>
-                <form hx-post="/api/mr/{{ mr.id }}/target" hx-target="#modal-container" hx-swap="innerHTML" hx-trigger="change" style="display:inline">
-                    <select name="target" {% if mr.status != 'open' %}disabled{% endif %} style="width:auto;min-width:140px">
-                        {% for b in branches %}<option value="{{ b }}" {% if b == mr.target_branch %}selected{% endif %}>{{ b }}</option>{% endfor %}
-                        {% if mr.target_branch not in branches %}<option value="{{ mr.target_branch }}" selected>{{ mr.target_branch }}</option>{% endif %}
-                    </select>
-                </form>
+            {# What this merge would rest on. A human pressing Merge could not
+               see the daemon's own verdict at all — it lived on the MR row and
+               in the origin task's thread, never where the decision is made.
+               Three facts, one shape, so none of them can hide behind another. #}
+            <div class="mr-facts">
+                <div class="mr-fact mr-fact--{{ 'ok' if mr.review_status == 'approved' else ('bad' if mr.review_status in ('changes_requested', 'died') else 'idle') }}">
+                    <span class="mr-fact__k">Review</span>
+                    <span class="mr-fact__v">
+                        {%- if mr.review_status == 'approved' %}✓ approved
+                        {%- elif mr.review_status == 'changes_requested' %}✗ changes requested
+                        {%- elif mr.review_status == 'died' %}✗ the review died without a verdict
+                        {%- elif mr.review_status == 'pending' %}⏳ in review
+                        {%- else %}○ nobody has reviewed this branch{% endif -%}
+                    </span>
+                </div>
+                <div class="mr-fact mr-fact--{{ 'ok' if mr.check_status == 'passed' else ('bad' if mr.check_status == 'failed' else 'idle') }}">
+                    <span class="mr-fact__k">Check</span>
+                    <span class="mr-fact__v">
+                        {%- if mr.check_status == 'passed' %}✓{% elif mr.check_status == 'failed' %}✗{% else %}○{% endif %} {{ verdict }}
+                        {% if mr.check_output %}
+                        <details class="mr-fact__more"><summary>check output</summary><pre>{{ mr.check_output[-1200:] }}</pre></details>
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="mr-fact mr-fact--{{ 'ok' if (merge.ok and merge.mergeable) else ('bad' if merge.ok else 'idle') }}">
+                    <span class="mr-fact__k">Git</span>
+                    <span class="mr-fact__v">
+                        {%- if not merge.ok %}○ mergeability unknown — {{ merge.error }}
+                        {%- elif merge.mergeable %}✓ merges cleanly into {{ mr.target_branch }}
+                        {%- else %}✗ {{ merge.conflicts|length }} conflicting file(s): {{ merge.conflicts|join(', ') }}{% endif -%}
+                    </span>
+                </div>
             </div>
-
-            {# What this merge would rest on. A human pressing Merge could not see
-               the daemon's own verdict at all — it lived on the MR row and in
-               the origin task's thread, never in the modal where the decision
-               is actually made. #}
-            <div class="mr-merge {{ 'ok' if mr.check_status == 'passed' else ('bad' if mr.check_status == 'failed' else 'muted') }}"
-                 style="margin-top:10px">
-                {% if mr.check_status == 'passed' %}✓{% elif mr.check_status == 'failed' %}✗{% else %}○{% endif %}
-                {{ verdict }}
-                {% if mr.check_output %}
-                <details style="margin-top:6px"><summary class="muted" style="cursor:pointer">check output</summary><pre style="white-space:pre-wrap;font-size:11px;margin:6px 0 0">{{ mr.check_output[-1200:] }}</pre></details>
-                {% endif %}
-            </div>
-
-            {% if merge.ok %}
-                {% if merge.mergeable %}
-                <div class="mr-merge ok">🟢 merges cleanly into {{ mr.target_branch }}</div>
-                {% else %}
-                <div class="mr-merge bad">🔴 {{ merge.conflicts|length }} conflicting file(s): {{ merge.conflicts|join(', ') }}</div>
-                {% endif %}
-            {% else %}
-                <div class="mr-merge muted">mergeability: {{ merge.error }}</div>
-            {% endif %}
 
             {% if mr.status == 'open' %}
-            <div class="row" style="gap:8px;margin:14px 0 4px">
+            <div class="mr-actions">
                 <button type="button" class="btn btn--ghost btn--sm" hx-post="/api/mr/{{ mr.id }}/land" hx-target="#modal-container" hx-swap="innerHTML"
                         hx-confirm="Fetch {{ mr.source_branch }} into your real repo ({{ mr.source_path }})? Adds a branch — nothing else is touched.">Land branch</button>
                 {% if blocked %}
@@ -70,14 +81,17 @@
                         hx-confirm="Close this merge request without merging?">Close MR</button>
             </div>
             {% elif mr.status == 'merged' %}
-            <div class="mr-merge ok" style="margin-top:12px">✓ merged into {{ mr.target_branch }} as {{ mr.merge_sha[:8] }}</div>
+            <div class="mr-merge ok">✓ merged into {{ mr.target_branch }} as {{ mr.merge_sha[:8] }}</div>
             {% if resolved_files %}
             {# Persisted on the MR row, so this stays visible long after the flash. #}
-            <div class="mr-merge bad" style="margin-top:8px">🤖 AI-resolved merge — {{ resolved_files|length }} file(s) rewritten by the model: {{ resolved_files|join(', ') }}. Review those hunks before pushing.</div>
+            <div class="mr-merge bad">🤖 AI-resolved merge — {{ resolved_files|length }} file(s) rewritten by the model: {{ resolved_files|join(', ') }}. Review those hunks before pushing.</div>
             {% endif %}
             {% endif %}
 
-            <div class="diffstat" style="margin-top:14px"><span style="color:var(--good)">+{{ adds }}</span> · <span style="color:var(--bad)">−{{ dels }}</span></div>
+            <div class="diff-head">
+                <span class="diff-head__label">Diff</span>
+                <span class="diffstat"><span class="add">+{{ adds }}</span> <span class="del">−{{ dels }}</span></span>
+            </div>
             <div class="diff">{% for cls, ln in lines %}<span class="dl {{ cls }}">{{ ln }}</span>{% endfor %}</div>
         </div>
     </div>
