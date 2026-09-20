@@ -163,21 +163,21 @@ class TestTheCardPredictsTheButton:
 
     def test_reviewed_and_checked_reads_as_ready(self, db_path, tmp_path):
         html = self._card(db_path, tmp_path, review="approved", check="passed")
-        assert "ready to merge" in html
+        assert "waiting for your merge" in html
 
     def test_an_approval_over_a_failing_check_never_reads_as_ready(self, db_path, tmp_path):
         html = self._card(db_path, tmp_path, review="approved", check="failed")
-        assert "check failed" in html
-        assert "ready to merge" not in html
+        assert "recorded check failed" in html
+        assert "waiting for your merge" not in html
 
     def test_a_branch_nobody_reviewed_says_so(self, db_path, tmp_path):
         html = self._card(db_path, tmp_path)
-        assert "unreviewed" in html
-        assert "ready to merge" not in html
+        assert "Nobody reviewed this branch" in html
+        assert "waiting for your merge" not in html
 
     def test_a_review_that_died_says_so_not_silence(self, db_path, tmp_path):
         html = self._card(db_path, tmp_path, review="died", check="passed")
-        assert "review died" in html
+        assert "review died" in html.lower()
         assert "ready to merge" not in html
 
     def test_the_badge_and_the_gate_cannot_disagree(self, db_path, tmp_path):

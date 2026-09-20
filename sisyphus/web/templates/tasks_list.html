@@ -1,104 +1,140 @@
-{# The board answers two questions, in this order: what is happening, and what
-   needs me. Finished work answers neither, so it is not a third, fourth and
-   fifth column of cards competing for the same room — it is one list of rows
-   underneath, newest first.
+{# A task's status is not a column it sits in — it is what the task is doing to
+   you. Four of them ask for different things, so each gets its own surface:
 
-   The three live lanes are always drawn, empty or not: "nothing needs you" is
-   an answer, and a lane that disappears when empty makes you check whether it
-   was ever there. #}
-{% set live_cols = [
-    ("in-progress", "⚙", "In progress", "Nothing running"),
-    ("needs-you", "✋", "Needs you", "Nothing waiting on you"),
-    ("to-merge", "⇄", "To merge", "Nothing to merge"),
-] %}
+     wants you   the loudest thing on the page, with the question it asked or
+                 the merge it is waiting for. Never filtered, never folded.
+     running     who is working, for how long, how far along.
+     queued      created, nothing started yet — one quiet line, no ceremony.
+     finished    over. Worth a moment only while you haven't seen it; after
+                 that it belongs to its sprint.
+
+   The sprint (a week) is how the archive stays answerable: "what got done last
+   week" is a question; an endless scroll is not. #}
 {% set icons = {'orchestrator':'🧭','engineer':'🔧','reviewer':'🔍','explorer':'🔭','planner':'🗺️','mr-reviewer':'🔍','human':'🧑'} %}
-{% set kind_label = {'shipped': 'shipped', 'done': 'done', 'failed': 'failed'} %}
+{% set kind_word = {'shipped': 'shipped', 'done': 'done', 'failed': 'failed'} %}
 
 <div class="board">
-    <div class="lanes">
-        {% for col_key, col_icon, col_label, empty_text in live_cols %}
-        {% set cards = columns[col_key] %}
-        <section class="lane lane--{{ col_key }} {{ 'lane--empty' if not cards }}">
-            <header class="lane__head">
-                <span class="lane__name"><span class="lane__ic">{{ col_icon }}</span>{{ col_label }}</span>
-                {% if cards %}<span class="lane__count tnum">{{ cards|length }}</span>{% endif %}
-            </header>
-            <div class="lane__body">
-                {% for t in cards %}
-                <a class="card {{ 'card--live' if t.live_role }}" href="/tasks/{{ t.id }}"
-                   title="{{ t.id }}{% if t.repo %} · {{ t.repo }}{% endif %}">
-                    {% if t.live_role %}
-                    <div class="card__live"><span class="live-dot"></span>{{ icons.get(t.live_role, '⚙️') }} {{ t.live_role }} · {{ t.live_mins }}m</div>
-                    {% endif %}
-                    <div class="card__title">{{ task_display_title(t) }}</div>
-                    {% if t.question %}<div class="card__q">❓ {{ t.question }}</div>{% endif %}
-                    {% if t.stages %}
-                    <div class="stagebar">
-                        {% for name, done in t.stages %}
-                        <span class="stg {{ 'on' if done }} {{ 'now' if name == t.stage_now }}" title="{{ name }}"></span>
-                        {% if not loop.last %}<span class="stg-link {{ 'on' if done }}"></span>{% endif %}
-                        {% endfor %}
-                        <span class="stagebar__label">{{ t.stage_now }}</span>
-                    </div>
-                    {% endif %}
-                    {% if t.last_event and not t.question %}
-                    <div class="card__event">{{ icons.get(t.last_author, '⚡') }} {{ t.last_event }}</div>
-                    {% endif %}
-                    <div class="card__meta">
-                        {% if t.child_total %}<span class="chip">⑂ {{ t.child_done }}/{{ t.child_total }}</span>{% endif %}
-                        {#- While the MR is open the badge is the merge gate's verdict, so the
-                            card predicts the button. Once settled it records the verdict. -#}
-                        {% if t.gate %}
-                        {% set gate_badge = {
-                            'ready':        ('✓ ready to merge', 'good'),
-                            'check-failed': ('✗ check failed', 'bad'),
-                            'changes':      ('✗ changes requested', 'bad'),
-                            'pending':      ('⏳ in review', ''),
-                            'died':         ('✗ review died', 'bad'),
-                            'unreviewed':   ('○ unreviewed', ''),
-                        }[t.gate] %}
-                        <span class="badge{% if not gate_badge[1] %} badge--mono{% endif %}"
-                              {%- if gate_badge[1] %} style="color:var(--{{ gate_badge[1] }});background:var(--{{ gate_badge[1] }}-bg);border-color:var(--{{ gate_badge[1] }}-bd)"{% endif %}>{{ gate_badge[0] }}</span>
-                        {% endif %}
-                        <span class="card__when">🕐 <span class="reltime" data-created="{{ t.created_at }}"></span>{% if t.cost %} · 💰 {{ t.cost }}{% endif %}</span>
-                    </div>
-                </a>
-                {% else %}
-                <p class="lane__empty">{{ empty_text }}</p>
-                {% endfor %}
-            </div>
-        </section>
-        {% endfor %}
-    </div>
 
-    {% if history %}
-    <section class="history">
-        <header class="history__head">
-            <h2>History</h2>
-            <div class="history__filters" role="group">
-                <button type="button" class="fchip is-on" data-filter="all">All <span class="tnum">{{ history|length }}</span></button>
-                {% for k in ("shipped", "done", "failed") %}
-                {% set n = history|selectattr("kind", "equalto", k)|list|length %}
-                {% if n %}<button type="button" class="fchip fchip--{{ k }}" data-filter="{{ k }}">{{ kind_label[k] }} <span class="tnum">{{ n }}</span></button>{% endif %}
-                {% endfor %}
-            </div>
+    {# ── wants you ───────────────────────────────────────────────────── #}
+    <section class="zone zone--you {{ 'zone--quiet' if not needs_you }}">
+        <header class="zone__head">
+            <h2>Wants you</h2>
+            {% if needs_you %}<span class="zone__count tnum">{{ needs_you|length }}</span>{% endif %}
         </header>
-        <ol class="hrows">
-            {% for h in history %}
-            <li class="hrow hrow--{{ h.kind }}" data-kind="{{ h.kind }}">
+        {% if needs_you %}
+        <div class="asks">
+            {% for t in needs_you %}
+            <a class="ask ask--{{ 'question' if t.question else 'merge' }}" href="/tasks/{{ t.id }}">
+                <div class="ask__top">
+                    <span class="tkey">{{ t.key }}</span>
+                    <span class="ask__title">{{ task_display_title(t) }}</span>
+                    <span class="ask__age"><span class="reltime" data-created="{{ t.updated_at or t.created_at }}"></span></span>
+                </div>
+                {% if t.question %}
+                <p class="ask__what">❓ {{ t.question }}</p>
+                <span class="ask__do">Answer in the thread →</span>
+                {% else %}
+                {% set gate = {
+                    'ready':        ('Reviewed and checked — waiting for your merge', 'good'),
+                    'check-failed': ('The recorded check failed — your call', 'bad'),
+                    'changes':      ('The reviewer asked for changes', 'bad'),
+                    'pending':      ('In review', ''),
+                    'died':         ('The review died without a verdict', 'bad'),
+                    'unreviewed':   ('Nobody reviewed this branch', ''),
+                }.get(t.gate, ('Waiting on you', '')) %}
+                <p class="ask__what {{ 'is-' ~ gate[1] if gate[1] }}">⇄ {{ gate[0] }}</p>
+                <span class="ask__do">Open the merge request →</span>
+                {% endif %}
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="zone__empty">Nothing is waiting on you.</p>
+        {% endif %}
+    </section>
+
+    {# ── running ─────────────────────────────────────────────────────── #}
+    {% if running or queued %}
+    <section class="zone zone--run">
+        <header class="zone__head">
+            <h2>In flight</h2>
+            <span class="zone__count tnum">{{ running|length + queued|length }}</span>
+        </header>
+        <div class="runs">
+            {% for t in running %}
+            <a class="run" href="/tasks/{{ t.id }}">
+                <div class="run__top">
+                    <span class="tkey">{{ t.key }}</span>
+                    <span class="run__title">{{ task_display_title(t) }}</span>
+                    {% if t.child_total %}<span class="chip">⑂ {{ t.child_done }}/{{ t.child_total }}</span>{% endif %}
+                    {% if t.live_role %}
+                    <span class="run__who"><span class="live-dot"></span>{{ icons.get(t.live_role, '⚙️') }} {{ t.live_role }} · {{ t.live_mins }}m</span>
+                    {% else %}
+                    <span class="run__who run__who--idle">between steps</span>
+                    {% endif %}
+                </div>
+                {% if t.stages %}
+                <div class="stagebar">
+                    {% for name, done in t.stages %}
+                    <span class="stg {{ 'on' if done }} {{ 'now' if name == t.stage_now }}" title="{{ name }}"></span>
+                    {% if not loop.last %}<span class="stg-link {{ 'on' if done }}"></span>{% endif %}
+                    {% endfor %}
+                    <span class="stagebar__label">{{ t.stage_now }}</span>
+                </div>
+                {% endif %}
+                {% if t.last_event %}<p class="run__event">{{ icons.get(t.last_author, '⚡') }} {{ t.last_event }}</p>{% endif %}
+            </a>
+            {% endfor %}
+            {% for t in queued %}
+            <a class="queued" href="/tasks/{{ t.id }}">
+                <span class="tkey">{{ t.key }}</span>
+                <span class="queued__title">{{ task_display_title(t) }}</span>
+                {% if t.child_total %}<span class="chip">⑂ {{ t.child_done }}/{{ t.child_total }}</span>{% endif %}
+                <span class="queued__state">queued · waiting for the orchestrator</span>
+                <span class="queued__age"><span class="reltime" data-created="{{ t.created_at }}"></span></span>
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {# ── the sprint ──────────────────────────────────────────────────── #}
+    {% if sprints %}
+    <section class="zone zone--sprint">
+        <header class="zone__head">
+            <h2>Finished</h2>
+            <select class="sprint-pick" name="sprint"
+                    hx-get="/api/tasks/list{% if repo %}?repo={{ repo|urlencode }}{% endif %}"
+                    hx-target="#tasks-list" hx-swap="innerHTML" hx-include="this">
+                {% for sp in sprints %}
+                <option value="{{ sp.id }}" {{ 'selected' if sp.id == sprint }}>{{ sp.label }} · {{ sp.span }} · {{ sp.count }}</option>
+                {% endfor %}
+            </select>
+            <span class="zone__new" hidden>
+                <span class="zone__new-n tnum">0</span> new since you last looked
+                <button type="button" class="seen-btn">Mark seen</button>
+            </span>
+        </header>
+        <ol class="rows">
+            {% for h in finished %}
+            <li class="row row--{{ h.kind }}" data-when="{{ h.when }}">
                 <a href="/tasks/{{ h.id }}">
-                    <span class="hrow__dot" title="{{ kind_label[h.kind] }}"></span>
-                    <span class="hrow__title">{% if h.auto %}🤖 {% endif %}{{ h.title }}</span>
-                    {% if h.runs > 1 %}<span class="hrow__runs tnum">×{{ h.runs }}</span>{% endif %}
-                    {% if h.review_status == 'changes_requested' %}<span class="hrow__note">changes requested</span>{% endif %}
-                    <span class="hrow__when"><span class="reltime" data-created="{{ h.when }}"></span></span>
+                    <span class="row__mark" title="new since your last visit"></span>
+                    <span class="tkey">{{ h.key }}</span>
+                    <span class="row__title">{% if h.auto %}🤖 {% endif %}{{ h.title }}</span>
+                    {% if h.runs > 1 %}<span class="row__runs tnum">×{{ h.runs }}</span>{% endif %}
+                    <span class="row__state row__state--{{ h.kind }}">{{ kind_word[h.kind] }}</span>
+                    {% if h.review_status == 'changes_requested' %}<span class="row__note">changes requested</span>{% endif %}
+                    <span class="row__when"><span class="reltime" data-created="{{ h.when }}"></span></span>
                 </a>
             </li>
+            {% else %}
+            <li class="row row--none"><span class="zone__empty">Nothing finished in this sprint.</span></li>
             {% endfor %}
         </ol>
     </section>
-    {% elif not live_total %}
-    <p class="board-quiet">All quiet — nothing in flight, nothing shipped yet.</p>
+    {% elif not needs_you and not running and not queued %}
+    <p class="board-quiet">All quiet — nothing in flight, nothing finished yet.</p>
     {% endif %}
 </div>
 <script>
@@ -115,21 +151,33 @@
     document.querySelectorAll('.reltime').forEach(function (el) {
         if (el.dataset.created) el.textContent = rel(el.dataset.created);
     });
-    // Filtering is one class on the list — the rows are already rendered, and a
-    // round trip to re-fetch them would lose the scroll position on every
-    // seven-second board refresh.
-    var list = document.querySelector('.hrows');
-    var chips = document.querySelectorAll('.fchip');
-    function apply(kind) {
-        if (!list) return;
-        list.dataset.only = kind === 'all' ? '' : kind;
-        chips.forEach(function (c) { c.classList.toggle('is-on', c.dataset.filter === kind); });
-        try { sessionStorage.setItem('historyFilter', kind); } catch (e) { }
+
+    // "Finished while I wasn't looking" is the one thing about done work that
+    // is worth a person's attention, and it is exactly what an archive sorted
+    // by date cannot show. The watermark is per-browser and only ever moves
+    // when you say so — a board that marked itself read on load would mean you
+    // could miss a result by glancing at the page.
+    var KEY = 'tasksSeenAt';
+    var box = document.querySelector('.zone__new');
+    function watermark() { try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; } }
+    function paint() {
+        var since = watermark(), n = 0;
+        document.querySelectorAll('.row[data-when]').forEach(function (row) {
+            var isNew = since ? row.dataset.when > since : false;
+            row.classList.toggle('is-new', isNew);
+            if (isNew) n++;
+        });
+        if (!box) return;
+        box.hidden = n === 0;
+        box.querySelector('.zone__new-n').textContent = n;
     }
-    chips.forEach(function (c) { c.onclick = function () { apply(c.dataset.filter); }; });
-    try {
-        var saved = sessionStorage.getItem('historyFilter');
-        if (saved && document.querySelector('.fchip[data-filter="' + saved + '"]')) apply(saved);
-    } catch (e) { }
+    if (box) box.querySelector('.seen-btn').onclick = function () {
+        try { localStorage.setItem(KEY, new Date().toISOString()); } catch (e) { }
+        paint();
+    };
+    // First visit ever: start the watermark now, so the next thing that
+    // finishes is the first thing marked new.
+    if (!watermark()) { try { localStorage.setItem(KEY, new Date().toISOString()); } catch (e) { } }
+    paint();
 })();
 </script>
