@@ -1061,13 +1061,8 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = ""):
         auto_groups[col] = sorted(groups.values(), key=lambda g: g["name"])
 
     # A status here is not a column a card sits in — it is what the task is
-    # doing to you right now. Four of them ask for different things, so they
-    # get four different surfaces instead of one card shape repeated:
-    #   waiting / to-merge → it wants YOU. Loudest, pinned, never filtered away.
-    #   running            → it is working. Show who, how long, how far.
-    #   queued             → created, nothing started yet. One quiet line.
-    #   done / failed      → over. Interesting only while you have not seen it,
-    #                        then it belongs to the sprint archive.
+    # doing to you right now, and the three that ask something of you get
+    # their own surface above everything else.
     needs_you = columns["needs-you"] + columns["to-merge"]
     running, queued = [], []
     for t in columns["in-progress"]:
@@ -1076,58 +1071,104 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = ""):
         # task with neither is genuinely still queued behind the orchestrator.
         (running if (t.get("live_role") or t.get("started")) else queued).append(t)
 
-    finished = []
+    # Everything else is the backlog, and a backlog is read the way a sprint
+    # board is read: grouped by week, parents with their subtasks under them,
+    # every row carrying the tags you would filter by.
+    who = _assignees()
+    rows, by_id = [], {}
     for col in ("shipped", "done", "failed"):
         for g in auto_groups[col]:
-            finished.append({"kind": col, "title": g["name"], "runs": g["count"],
-                             "id": g["latest"]["id"], "key": g["latest"].get("key") or "",
-                             "auto": True, "repo": g["latest"].get("repo", ""),
-                             "when": g["latest"].get("updated_at") or g["latest"].get("created_at")})
+            rows.append(_row(g["latest"], col, who, runs=g["count"], auto=True,
+                             title=g["name"]))
         for t in columns[col]:
-            finished.append({"kind": col, "title": store.task_display_title(t), "runs": 1,
-                             "id": t["id"], "key": t.get("key") or "", "auto": False,
-                             "repo": t.get("repo", ""), "cost": t.get("cost"),
-                             "review_status": t.get("review_status"),
-                             "when": t.get("updated_at") or t.get("created_at")})
-    finished.sort(key=lambda h: h["when"] or "", reverse=True)
+            rows.append(_row(t, col, who))
+    for col in ("in-progress", "needs-you", "to-merge"):
+        for t in columns[col]:
+            rows.append(_row(t, col, who))
+    for r in rows:
+        by_id[r["id"]] = r
+
+    # Subtasks hang under their parent instead of standing beside it: a plan's
+    # steps are the plan, not four more items competing with it.
+    children = [_row(t, board_column(t, task_latest_mr.get(t["id"])), who)
+                for t in store.list_tasks() if t.get("parent_id")
+                and (not repo or t.get("repo") == repo)]
+    for c in children:
+        parent = by_id.get(c["parent_id"])
+        if parent is not None:
+            parent.setdefault("children", []).append(c)
+    top = [r for r in rows if not r.get("parent_id")]
+    top.sort(key=lambda r: r["when"] or "", reverse=True)
     # Two review runs of the same MR read as a duplicate row, and the board had
     # pairs of them. Same title, same outcome, adjacent in time → one row, ×2.
     folded = []
-    for h in finished:
+    for r in top:
         prev = folded[-1] if folded else None
-        if prev and not prev["auto"] and not h["auto"] and prev["title"] == h["title"] \
-                and prev["kind"] == h["kind"]:
+        if prev and not prev["auto"] and not r["auto"] and prev["title"] == r["title"] \
+                and prev["kind"] == r["kind"] and not r.get("children"):
             prev["runs"] += 1
             continue
-        folded.append(h)
+        folded.append(r)
 
-    # A week is a sprint. Grouping by it is what makes an archive answerable
-    # ("what got done last week") instead of an endless scroll.
-    for h in folded:
-        h["sprint"] = _sprint_of(h["when"])
+    # A week is a sprint. Every one of them is on the page, newest open and the
+    # rest collapsed — a dropdown that shows one week at a time hides the very
+    # comparison ("more failed this week than last") the grouping exists for.
     sprints = []
-    for h in folded:
-        if not sprints or sprints[-1]["id"] != h["sprint"]["id"]:
-            sprints.append({**h["sprint"], "count": 0})
-        sprints[-1]["count"] += 1
-    seen_ids = set()
-    unique_sprints = []
-    for sp in sprints:
-        if sp["id"] in seen_ids:
-            continue
-        seen_ids.add(sp["id"])
-        unique_sprints.append(sp)
-    for sp in unique_sprints:
-        sp["count"] = sum(1 for h in folded if h["sprint"]["id"] == sp["id"])
-    current = sprint if any(sp["id"] == sprint for sp in unique_sprints) else (
-        unique_sprints[0]["id"] if unique_sprints else "")
-    in_sprint = [h for h in folded if h["sprint"]["id"] == current]
+    for r in folded:
+        sp = _sprint_of(r["when"])
+        if not sprints or sprints[-1]["id"] != sp["id"]:
+            sprints.append({**sp, "rows": [], "done": 0, "failed": 0})
+        sprints[-1]["rows"].append(r)
+        if r["kind"] == "failed":
+            sprints[-1]["failed"] += 1
+        elif r["kind"] in ("shipped", "done"):
+            sprints[-1]["done"] += 1
 
     return _tmpl().TemplateResponse(request, "tasks_list.html", {
         "needs_you": needs_you, "running": running, "queued": queued,
-        "finished": in_sprint, "sprints": unique_sprints, "sprint": current,
-        "repo": repo,
+        "sprints": sprints, "repo": repo,
+        "repos": sorted({r["repo"] for r in folded if r["repo"]}),
+        "whos": sorted({r["who"] for r in folded if r["who"]}),
     })
+
+
+_KIND_WORD = {"in-progress": "in flight", "needs-you": "wants you",
+              "to-merge": "to merge", "shipped": "shipped",
+              "done": "done", "failed": "failed"}
+
+
+def _row(t: dict, kind: str, who: dict, runs: int = 1, auto: bool = False,
+         title: str = "") -> dict:
+    """One task as the backlog draws it: the tags a person filters by, and
+    nothing that needs a second query per row."""
+    from core import store
+    return {
+        "id": t["id"], "key": t.get("key") or "", "parent_id": t.get("parent_id"),
+        "title": title or store.task_display_title(t),
+        "kind": kind, "word": _KIND_WORD.get(kind, kind),
+        "repo": t.get("repo") or "", "auto": auto, "runs": runs,
+        "who": t.get("live_role") or who.get(t["id"]) or t.get("agent") or "",
+        "live": bool(t.get("live_role")),
+        "review_status": t.get("review_status"),
+        "when": t.get("updated_at") or t.get("created_at"),
+    }
+
+
+def _assignees() -> dict:
+    """Who last worked each task, from the usage ledger — one query for the
+    whole board rather than a thread read per row. A task nobody has run yet
+    is absent, which the row renders as unassigned."""
+    from core.db import get_conn
+
+    conn = get_conn()
+    try:
+        rows = conn.execute("""
+            SELECT task_id, agent FROM usage
+            WHERE id IN (SELECT MAX(id) FROM usage GROUP BY task_id)
+        """).fetchall()
+    finally:
+        conn.close()
+    return {r["task_id"]: r["agent"] for r in rows}
 
 
 def _sprint_of(when: str) -> dict:

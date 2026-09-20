@@ -407,20 +407,24 @@ def test_board_lists_done_task_with_open_mr_under_to_merge(db_path):
 
     r = _make_client().get("/api/tasks/list")
     assert r.status_code == 200
-    assert "ask--merge" in r.text          # it wants a decision from the human
+    assert "Open the merge request" in r.text   # it wants a decision from the human
     assert task["id"] in r.text
 
 
-def test_board_hides_children_and_shows_parent_chip(db_path):
+def test_a_subtask_hangs_under_its_parent(db_path):
+    """A plan's steps are the plan, not four more items competing with it in
+    the same list."""
     from core import store
     with patch("core.orchestrator.emit"):
-        parent = store.create_task("ticket")
-        child = store.create_task("iOS", repo="ios-app", parent_id=parent["id"])
+        parent = store.create_task("ticket", repo="test-repo")
+        child = store.create_task("iOS", repo="test-repo", parent_id=parent["id"])
+    for t in (parent, child):
+        store.set_status(t["id"], "done")
 
-    r = _make_client().get("/api/tasks/list")
-    assert parent["id"] in r.text        # parent shown
-    assert child["id"] not in r.text     # child hidden from top-level board
-    assert "0/1" in r.text               # parent's subtask progress chip
+    html = _make_client().get("/api/tasks/list").text
+    assert parent["key"] in html and child["key"] in html
+    assert "trow--child" in html                       # the child is drawn as one
+    assert html.index(parent["key"]) < html.index(child["key"])   # under its parent
 
 
 def test_each_status_gets_its_own_surface(db_path):
@@ -449,7 +453,7 @@ def test_each_status_gets_its_own_surface(db_path):
         assert "queued · waiting for the orchestrator" in html
         assert html.index("just created") > html.index("under way")   # queued below running
         # over: a row in the sprint list, not a card
-        assert 'class="row row--done"' in html
+        assert "trow--done" in html
         for t in (fresh, asking, running, finished):
             assert t["key"] in html         # every task names itself the same way
     finally:
@@ -461,9 +465,9 @@ def test_a_quiet_board_says_nothing_is_waiting_on_you(db_path):
     assert "Nothing is waiting on you." in html
 
 
-def test_the_sprint_picker_lists_weeks_and_filters_to_one(db_path):
-    """A week is a sprint: "what got done last week" is a question an archive
-    can answer, an endless scroll is not."""
+def test_every_sprint_is_on_the_page_newest_open(db_path):
+    """A week is a sprint. All of them render — folded, but present: showing
+    one week at a time hides the comparison the grouping exists for."""
     from core import store
     from core.db import get_conn
     client = _make_client()
@@ -476,12 +480,24 @@ def test_the_sprint_picker_lists_weeks_and_filters_to_one(db_path):
     conn.commit(); conn.close()
 
     html = client.get("/api/tasks/list").text
-    assert 'class="sprint-pick"' in html
     assert "This week" in html and "Week 32" in html
-    assert "this week" in html and "long ago" not in html      # newest sprint by default
+    assert "this week" in html and "long ago" in html          # both weeks present
+    assert html.count('<details class="sprint"') == 2          # both weeks rendered
+    assert html.count('<details class="sprint" open') == 1     # only the newest unfolded
 
-    older = client.get("/api/tasks/list?sprint=2026-W32").text
-    assert "long ago" in older and "this week" not in older
+
+def test_a_row_carries_the_tags_you_filter_by(db_path):
+    from core import store
+    t = store.create_task("tagged work", repo="test-repo", agent="engineer")
+    store.set_status(t["id"], "done")
+    html = _make_client().get("/api/tasks/list").text
+    row = html.split('data-when', 1)[1].split("</li>", 1)[0]
+    assert 'data-repo="test-repo"' in row
+    assert 'data-who="engineer"' in row
+    assert 'data-kind="done"' in row
+    assert "tagged work" in row.lower() and t["key"].lower() in row.lower()
+    # and the filters offer those values
+    assert '<option value="test-repo">' in html and '<option value="engineer">' in html
 
 
 # ── Inbox (needs-you feed) ───────────────────────────────────────────────
