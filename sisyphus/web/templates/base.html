@@ -95,7 +95,12 @@
             if (e.detail.target && e.detail.target.id === "overlay-body") openedTaskPanel();
         });
         document.addEventListener("keydown", function (e) {
-            if (e.key === "Escape") closeTaskPanel();
+            if (e.key !== "Escape") return;
+            // Innermost thing first: a diff opened from a task panel closes
+            // back to the panel, not all the way out to the board.
+            var dialogs = document.querySelectorAll(".modal-backdrop");
+            if (dialogs.length) { dialogs[dialogs.length - 1].remove(); return; }
+            closeTaskPanel();
         });
         // Back should close the panel, not leave the board behind it.
         window.addEventListener("popstate", function () { closeTaskPanel(true); });

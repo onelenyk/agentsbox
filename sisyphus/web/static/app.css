@@ -788,7 +788,22 @@ body::before {
 .modal__body { padding: 16px 20px; display: flex; flex-direction: column; gap: 15px; }
 .modal__actions { display: flex; justify-content: flex-end; gap: 8px; padding: 4px 20px 20px; }
 
-.modal--wide { max-width: 840px; }
+.modal--wide { max-width: 940px; }
+/* A dialog that carries a diff is a reading surface: it takes the height it
+   can, and its own head stays put while the diff scrolls under it. */
+.modal--tall { display: flex; flex-direction: column; max-height: 84vh; }
+.modal--tall .modal__body { overflow-y: auto; min-height: 0; }
+/* The body is a flex column with a capped height, so its children shrink by
+   default: the three facts a merge rests on collapsed into a one-row window
+   you had to scroll inside to read. Nothing in a dialog body shrinks. */
+.modal--tall .modal__body > * { flex: 0 0 auto; }
+.modal__head--row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.modal__head--row h2 { font-size: 15px; }
+.mr-title { display: flex; align-items: center; gap: 12px; min-width: 0; flex-wrap: wrap; }
+.mr-title code {
+  font-size: 12px; color: var(--text-2); background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: var(--r-sm); padding: 2px 7px;
+}
 
 /* diff viewer (in-dialog) */
 .diff {
@@ -797,15 +812,35 @@ body::before {
   padding: 8px 0; overflow-x: auto; max-height: 62vh; overflow-y: auto;
 }
 .diff .dl { display: block; white-space: pre; padding: 0 14px; min-height: 1.45em; }
+.diff .dl:hover { background: rgba(255, 255, 255, .03); }
 .diff .add  { background: rgba(70,209,127,.10); color: #8ee6ad; }
 .diff .del  { background: rgba(245,84,77,.11);  color: #f6968f; }
 .diff .hunk { color: var(--accent-hi); background: var(--accent-bg); }
 .diff .meta { color: var(--muted); }
 .diff .ctx  { color: var(--text-2); }
-.diffstat { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-bottom: 10px; }
+.diffstat { font-family: var(--mono); font-size: 11.5px; color: var(--muted); display: inline-flex; gap: 8px; }
+.diffstat .add { color: var(--good); }
+.diffstat .del { color: var(--bad); }
 
 /* MR view */
-.mr-branches { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.mr-branches { display: flex; align-items: center; gap: 8px; }
+.mr-branches select { width: auto; min-width: 130px; font-size: 12px; padding: 3px 24px 3px 9px; }
+
+/* The three facts a merge rests on — review, check, git — in one shape, so
+   none of them can hide behind another's formatting. */
+.mr-facts { display: flex; flex-direction: column; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
+.mr-fact { display: flex; gap: 12px; padding: 10px 13px; background: var(--panel); font-size: 12.5px; }
+.mr-fact__k { flex: none; width: 58px; color: var(--muted); font-size: 11px; letter-spacing: .05em; text-transform: uppercase; padding-top: 1px; }
+.mr-fact__v { min-width: 0; color: var(--text-2); line-height: 1.5; }
+.mr-fact--ok .mr-fact__v { color: var(--good); }
+.mr-fact--bad .mr-fact__v { color: var(--bad); }
+.mr-fact--idle .mr-fact__v { color: var(--muted); }
+.mr-fact__more summary { cursor: pointer; color: var(--muted); font-size: 11.5px; margin-top: 5px; }
+.mr-fact__more pre { white-space: pre-wrap; font-size: 11px; color: var(--text-2); margin: 6px 0 0; }
+.mr-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mr-actions .btn--danger { margin-left: auto; }
+.diff-head { display: flex; align-items: baseline; gap: 10px; }
+.diff-head__label { font-size: 10.5px; font-weight: 650; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
 .mr-merge { font-family: var(--mono); font-size: 12px; padding: 8px 11px; border-radius: 7px; }
 .mr-merge.ok  { color: var(--good); background: var(--good-bg); }
 .mr-merge.bad { color: var(--bad);  background: var(--bad-bg); }

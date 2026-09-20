@@ -379,3 +379,24 @@ class TestAVerdictIsShownWhetherOrNotTheBranchLanded:
         tag = self._row(db_path, tmp_path, merged=True)
         assert "is-settled" in tag
         assert "merged anyway" in tag
+
+
+class TestTheModalSaysWhatTheMergeRestsOn:
+    """A person pressing Merge decides on three facts — what the reviewer said,
+    what the recorded check said, and whether git can do it at all. They are
+    rendered as three rows of one shape so none can hide behind another."""
+
+    def test_all_three_facts_are_present(self, db_path, tmp_path):
+        mr, real, bare = _mr(db_path, tmp_path, target="develop")
+        mergerequests.set_review_status(mr["id"], "approved")
+        mergerequests.set_check_result(mr["id"], "passed", command="pytest -q")
+        html = TestClient(app).get(f"/api/mr/{mr['id']}/view").text
+        facts = html.split('class="mr-facts"', 1)[1].split("</div>\n            </div>", 1)[0]
+        for label in ("Review", "Check", "Git"):
+            assert f'>{label}<' in facts, label
+        assert "approved" in facts
+
+    def test_an_unreviewed_branch_says_so_rather_than_showing_nothing(self, db_path, tmp_path):
+        mr, real, bare = _mr(db_path, tmp_path, target="develop")
+        html = TestClient(app).get(f"/api/mr/{mr['id']}/view").text
+        assert "nobody has reviewed this branch" in html
