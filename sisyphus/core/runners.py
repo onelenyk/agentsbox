@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import subprocess
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from typing import Optional
@@ -307,6 +308,13 @@ async def health_check(runner_id: str) -> dict:
                 None,
                 lambda: urllib.request.urlopen(req, timeout=5),
             )
+        except urllib.error.HTTPError as e:
+            # An HTTP status IS a reachable server: the host resolved, the TLS
+            # handshake finished, something answered. OpenRouter replies 404 to
+            # a HEAD on /api/v1 — which flipped a runner that worked perfectly
+            # to "unhealthy", the one word this page exists to get right. Only a
+            # transport failure below means the URL cannot be reached at all.
+            logger.debug("base URL %s answered HTTP %s to HEAD", base_url, e.code)
         except Exception as e:
             issues.append(f"Base URL '{base_url}' unreachable: {e}")
 

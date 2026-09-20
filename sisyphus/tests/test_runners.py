@@ -183,3 +183,42 @@ class TestTheInstalledCliVersionIsWatched:
 
         assert result["status"] == "healthy"       # a new CLI version is not a broken runner
         assert "99.0.0" in result["error"]
+
+
+class TestHealthTellsTheTruthAboutABaseUrl:
+    """The one word this page exists to get right is "healthy"."""
+
+    @pytest.mark.asyncio
+    async def test_an_http_status_means_the_server_is_there(self, db_path, monkeypatch):
+        import urllib.error
+        from core import runners
+
+        r = runners.add_runner("probe-url", binary="opencode", runner_type="opencode",
+                               base_url="https://openrouter.ai/api/v1")
+        monkeypatch.setattr("core.runner_detect.resolve", lambda b: "/abs/opencode")
+        monkeypatch.setattr("core.runners._version_note", lambda runner, path: None)
+
+        def head(req, timeout=5):      # what OpenRouter actually answers to HEAD
+            raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, None)
+
+        monkeypatch.setattr(runners.urllib.request, "urlopen", head)
+        result = await runners.health_check(r["id"])
+        assert result["status"] == "healthy", result["error"]
+
+    @pytest.mark.asyncio
+    async def test_a_transport_failure_is_still_unhealthy(self, db_path, monkeypatch):
+        import urllib.error
+        from core import runners
+
+        r = runners.add_runner("probe-dead", binary="opencode", runner_type="opencode",
+                               base_url="https://nope.invalid/v1")
+        monkeypatch.setattr("core.runner_detect.resolve", lambda b: "/abs/opencode")
+        monkeypatch.setattr("core.runners._version_note", lambda runner, path: None)
+
+        def head(req, timeout=5):
+            raise urllib.error.URLError("nodename nor servname provided")
+
+        monkeypatch.setattr(runners.urllib.request, "urlopen", head)
+        result = await runners.health_check(r["id"])
+        assert result["status"] == "unhealthy"
+        assert "unreachable" in result["error"]
