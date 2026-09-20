@@ -563,49 +563,98 @@ body::before {
 .subtask:hover { border-color: var(--border-2); background: var(--hover); }
 .subtask .goal { font-size: 13px; color: var(--text); }
 
-/* thread */
-.thread { display: flex; flex-direction: column; gap: 9px; }
+/* ── Thread ──────────────────────────────────────────────────────────────
+   A task thread is a conversation between agents and one human, and the
+   human's half is the half that has to be findable: their replies carry the
+   accent and say "You". Everything else is ranked by how much it is worth
+   reading — a worker's report, the orchestrator's decision, a commit line,
+   and the service traffic folded away behind one line. */
+.thread { display: flex; flex-direction: column; gap: 10px; }
 .msg {
-  padding: 11px 13px;
+  padding: 12px 14px;
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-left: 2px solid var(--border-2);
+  border-left: 3px solid var(--border-2);
   border-radius: var(--r);
   transition: border-color .12s, background .12s;
 }
-.msg:hover { border-color: var(--border-2); background: var(--hover); }
+.msg:hover { border-color: var(--border-2); }
 .msg--orchestrator { border-left-color: var(--violet); }
 .msg--human        { border-left-color: var(--accent); }
 .msg--worker       { border-left-color: var(--good); }
 .msg--external     { border-left-color: var(--warn); }
-.msg__head { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
-.msg__who { font-size: 12.5px; font-weight: 600; color: var(--text); }
-.msg__who .msg__kind { color: var(--muted); font-weight: 400; font-family: var(--mono); }
-.msg__time { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; margin-left: auto; }
-.msg__body { font-size: 13px; color: var(--text-2); white-space: pre-wrap; word-break: break-word; }
-.msg__att { margin-top: 6px; font-size: 12px; }
+/* the reader's own turn in the conversation */
+.msg--you { background: var(--accent-bg); border-color: var(--accent-bd); }
+.msg--you .msg__who { color: var(--accent-hi); }
+.msg--you .msg__body { color: var(--text); }
+
+.msg__head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.msg__who { font-size: 13px; font-weight: 650; color: var(--text); }
+.msg__kind {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .05em;
+  text-transform: uppercase; color: var(--muted);
+  background: var(--inset); border: 1px solid var(--border);
+  border-radius: var(--r-pill); padding: 1px 7px;
+}
+.msg__time {
+  font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums;
+  margin-left: auto; white-space: nowrap;
+}
+.msg__body { font-size: 13.5px; line-height: 1.6; color: var(--text-2); white-space: pre-wrap; word-break: break-word; }
+.msg__att { margin-top: 8px; font-size: 12px; }
 
 /* a result-kind thread message collapses to a one-line "shown above" row —
    the full rendering lives once, in the Result card above the thread */
 .msg--result { padding: 0; }
 .msg--result > summary {
   cursor: pointer; list-style: none; user-select: none;
-  display: flex; align-items: center; gap: 9px;
-  padding: 11px 13px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px;
 }
 .msg--result > summary::-webkit-details-marker { display: none; }
-.msg--result > summary:hover { color: var(--text); }
+.msg--result > summary:hover { background: var(--hover); border-radius: var(--r); }
 .msg--result > summary .msg__time { margin-left: auto; }
-.msg--result > summary .result-row__hint {
-  font-family: var(--mono); font-size: 11px; color: var(--accent-hi);
-}
-.msg--result[open] > summary { border-bottom: 1px solid var(--border); }
+.msg--result > summary .result-row__hint { font-size: 11.5px; color: var(--muted); }
+.msg--result[open] > summary { border-bottom: 1px solid var(--border); border-radius: 0; }
 .msg--result .msg__body--raw,
-.msg--result .diffstat-table { margin: 11px 13px; }
+.msg--result .diffstat-table { margin: 12px 14px; }
 .msg__body--raw {
-  font-family: var(--mono); font-size: 12px; line-height: 1.5;
+  font-family: var(--mono); font-size: 12px; line-height: 1.55;
   white-space: pre-wrap; overflow-wrap: anywhere; margin: 0;
 }
+
+/* two-lane thread: collapsed machinery runs + thin commit lines */
+.msg-run {
+  border: 1px solid var(--border); border-radius: var(--r);
+  background: var(--inset);
+}
+.msg-run > summary {
+  cursor: pointer; list-style: none; user-select: none;
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11.5px; color: var(--muted); padding: 7px 14px;
+}
+.msg-run > summary::-webkit-details-marker { display: none; }
+.msg-run__ic { opacity: .7; }
+.msg-run__hint { margin-left: auto; font-size: 11px; color: var(--border-2); }
+.msg-run > summary:hover { color: var(--text-2); }
+.msg-run > summary:hover .msg-run__hint { color: var(--muted); }
+.msg-run[open] > summary { border-bottom: 1px solid var(--border); }
+.msg-run[open] .msg-run__hint { visibility: hidden; }
+.msg-run .row-line {
+  font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+  padding: 5px 14px; overflow-wrap: anywhere;
+}
+.msg-run .row-line:last-child { padding-bottom: 9px; }
+/* a commit is one fact; it gets one line and the colour of work landing */
+.msg--commit {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px; font-family: var(--mono); font-size: 12.5px;
+  color: var(--good); border-left-color: var(--good); background: var(--good-bg);
+  border-color: rgba(70, 209, 127, .22);
+}
+.msg--commit .msg__ic { opacity: .85; }
+.badge--ok   { color: var(--good); background: var(--good-bg); border-color: rgba(70,209,127,.25); }
+.badge--warn { color: var(--warn); background: var(--warn-bg); border-color: rgba(224,168,58,.3); }
 
 /* diffstat-shaped message bodies ("path | 5 +++++") as a compact table */
 .diffstat-table {
@@ -655,19 +704,28 @@ body::before {
 .msg__body--md code { font-family: var(--mono); font-size: 12px; background: var(--inset); padding: 1px 4px; border-radius: 4px; }
 .msg__body--md pre code { background: none; padding: 0; }
 
-.tag {
-  font-size: 11px; font-weight: 600; line-height: 1;
-  padding: 3px 8px; border-radius: var(--r-pill);
-  background: var(--panel-2); color: var(--text-2);
+/* The thread's old role pills are gone: nothing renders them since the
+   two-lane thread replaced them with .av avatars, and their .tag base was
+   quietly overriding the board's tags. */
+/* ── Composer ────────────────────────────────────────────────────────────
+   A reply is what unparks a waiting task, so the box says so and looks like
+   somewhere to write rather than a form nailed to the bottom of a log. */
+.composer {
+  margin-top: 16px; padding: 12px 14px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-left: 3px solid var(--border-2); border-radius: var(--r-lg);
+  transition: border-color .12s;
 }
-.tag--orchestrator { color: var(--violet); background: var(--violet-bg); }
-.tag--human        { color: var(--accent); background: var(--accent-bg); }
-.tag--worker       { color: var(--good);   background: var(--good-bg); }
-.tag--external     { color: var(--warn);   background: var(--warn-bg); }
-
-/* composer */
-.composer { margin-top: 14px; }
-.composer textarea { width: 100%; resize: vertical; }
+.composer:focus-within { border-left-color: var(--accent); }
+.composer textarea {
+  width: 100%; resize: vertical; min-height: 56px;
+  font-size: 13.5px; line-height: 1.5; background: var(--inset);
+}
+.composer__foot { display: flex; align-items: center; gap: 12px; margin-top: 9px; }
+.composer__foot .btn { margin-left: auto; }
+/* the task is parked until this is answered — say it without a banner */
+.composer--wanted { border-left-color: var(--warn); }
+.composer--wanted textarea::placeholder { color: var(--warn); opacity: .8; }
 
 /* ── Tables ──────────────────────────────────────────────────────────── */
 .table { width: 100%; border-collapse: collapse; }
