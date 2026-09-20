@@ -377,21 +377,38 @@ body::before {
 .queued__age { margin-left: auto; flex: none; font-size: 11px; color: var(--muted); }
 
 /* ── The backlog: sprints, nesting, tags ─────────────────────────────── */
-.filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.f-search {
-  font-size: 12px; padding: 4px 10px; width: 210px;
-  background-color: var(--panel); color: var(--text);
+/* Filters read as one instrument, not four loose controls: a single inset
+   strip, a search that says what it searches, and pickers that look chosen
+   when they are. */
+.filters {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 5px 6px; background: var(--inset);
+  border: 1px solid var(--border); border-radius: var(--r-pill);
 }
+.f-search {
+  font-size: 12.5px; padding: 5px 12px 5px 30px; width: 230px;
+  background-color: transparent; border-color: transparent; color: var(--text);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%237c7a73' stroke-width='1.6'%3E%3Ccircle cx='7' cy='7' r='4.2'/%3E%3Cpath d='M10.2 10.2 14 14'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: 9px center; background-size: 14px;
+}
+.f-search:focus { background-color: var(--panel); border-color: var(--border-2); }
 .f-pick {
-  font-size: 12px; padding: 4px 24px 4px 9px; width: auto;
-  background-color: var(--panel); color: var(--text-2);
+  font-size: 12.5px; padding: 5px 26px 5px 11px; width: auto;
+  background-color: transparent; border-color: transparent; color: var(--text-2);
+}
+.f-pick:hover { background-color: var(--panel); }
+/* A picker that is filtering says so instead of blending into the strip.
+   Class, not :valid — a select is valid whether or not anything is chosen,
+   and the value attribute never reflects the choice. */
+.f-pick.is-set {
+  color: var(--accent-hi); background-color: var(--accent-bg); border-color: var(--accent-bd);
 }
 .f-clear {
-  font: inherit; font-size: 11px; cursor: pointer; color: var(--muted);
+  font: inherit; font-size: 11.5px; cursor: pointer; color: var(--muted);
   background: transparent; border: 1px solid var(--border);
-  border-radius: var(--r-pill); padding: 3px 10px;
+  border-radius: var(--r-pill); padding: 4px 11px;
 }
-.f-clear:hover { color: var(--text-2); border-color: var(--border-2); }
+.f-clear:hover { color: var(--text); border-color: var(--border-2); background: var(--panel); }
 .zone__new {
   margin-left: auto; display: flex; align-items: center; gap: 8px;
   font-size: 11.5px; color: var(--accent-hi);
@@ -937,15 +954,60 @@ select { cursor: pointer; appearance: none;
 .ressub { font-size: 11px; color: var(--muted); }
 .resitem .btn { flex: none; }
 
-/* ── Task box: the one place work starts ─────────────────────────────── */
-.taskbox { margin-bottom: 14px; }
-.taskbox__row { display: flex; gap: 8px; align-items: flex-start; }
-.taskbox__row textarea { flex: 1 1 auto; min-width: 0; min-height: 40px; resize: none; overflow-y: auto; }
-.taskbox__row select { flex: 0 0 auto; max-width: 160px; }
-.taskbox__row .btn { flex: none; }
-.taskbox__more { margin-top: 6px; font-size: 12px; color: var(--muted); }
+/* ── Toolbar: the same bar on every working surface ──────────────────────
+   The list, a project and a task each used to build their own header, so
+   moving between them moved the title, changed the height and read as a
+   reload. One bar, one height, crumbs left and actions right; only what is
+   under it changes. */
+.toolbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  min-height: 46px; padding: 0 2px 12px;
+  border-bottom: 1px solid var(--border); margin-bottom: 16px;
+}
+.toolbar__crumbs { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 15px; }
+.toolbar__crumbs a { color: var(--muted); text-decoration: none; font-weight: 500; }
+.toolbar__crumbs a:hover { color: var(--text-2); }
+.toolbar__sep { color: var(--border-2); }
+.toolbar__here {
+  display: flex; align-items: center; gap: 8px; min-width: 0;
+  font-weight: 650; color: var(--text); letter-spacing: -0.01em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.toolbar__here .tkey { font-size: 11.5px; }
+.toolbar__actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.toolbar__note { font-size: 11.5px; color: var(--muted); }
+
+/* ── Task box: the one place work starts ─────────────────────────────────
+   It is the only control on these pages that creates something, so it reads
+   as its own object rather than as a field in a row of filters: full-width
+   surface, a visible frame, an accent rail down the side and the key that
+   sends it named in the hint. */
+.taskbox {
+  margin-bottom: 18px; padding: 12px 14px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-left: 3px solid var(--accent); border-radius: var(--r-lg);
+  transition: border-color .12s, box-shadow .12s;
+}
+.taskbox:focus-within { border-color: var(--border-2); border-left-color: var(--accent-hi); box-shadow: 0 6px 22px rgba(0,0,0,.35); }
+.taskbox__row { display: flex; gap: 10px; align-items: flex-start; }
+.taskbox__row textarea {
+  flex: 1 1 auto; min-width: 0; min-height: 42px; resize: none; overflow-y: auto;
+  font-size: 14.5px; line-height: 1.45; padding: 9px 12px;
+  background: var(--inset); border-color: var(--border);
+}
+.taskbox__row textarea::placeholder { color: var(--muted); }
+.taskbox__row select { flex: 0 0 auto; max-width: 170px; background-color: var(--inset); }
+.taskbox__row .btn { flex: none; align-self: stretch; padding-inline: 18px; }
+.taskbox__foot { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.taskbox__hint { font-size: 11.5px; color: var(--muted); }
+.taskbox__hint kbd {
+  font-family: var(--mono); font-size: 10.5px; color: var(--text-2);
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-bottom-width: 2px; border-radius: 4px; padding: 1px 5px; margin: 0 2px;
+}
+.taskbox__more { margin-left: auto; font-size: 12px; color: var(--muted); }
 .taskbox__more summary { cursor: pointer; width: max-content; }
-.taskbox__more label { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.taskbox__more label { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 @media (max-width: 640px) { .taskbox__row { flex-wrap: wrap; } .taskbox__row textarea { flex-basis: 100%; } }
 .project-autopilots { font-size: 12px; margin: -4px 0 14px; color: var(--muted); }
 .project-autopilots a { color: var(--text-2); text-decoration: none; }

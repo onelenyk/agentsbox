@@ -3,18 +3,16 @@
 {# the board is a full-width, full-height surface — it opts out of the reading
    column that suits text pages #}
 {% block main_class %}main--board{% endblock %}
+{% import "_ui.html" as ui %}
 {% block content %}
 <div class="board-shell">
     {# Watch rail temporarily unhooked from the board (2026-09-20) while the
        page is reworked. Its route (/api/board/watch) and watch_rail.html are
        untouched — putting it back is re-adding the aside below. #}
     <div class="board-main">
-        <div class="page-head">
-            <div>
-                <h1>Tasks</h1>
-                <div class="sub">Autonomous work, coordinated on one thread per task.</div>
-            </div>
-        </div>
+        {% call ui.toolbar([{'label': 'Tasks'}]) %}
+        <span class="toolbar__note">every task, every repo</span>
+        {% endcall %}
         {% include "_task_box.html" %}
         <div id="tasks-list" hx-get="/api/tasks/list" hx-trigger="load, taskCreated from:body, taskUpdated from:body, every 7s[boardIdle()]" hx-swap="innerHTML">
             <div class="empty">Loading…</div>

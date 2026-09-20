@@ -21,6 +21,8 @@
         {% endif %}
         <button type="submit" class="btn btn--primary">Start ↵</button>
     </div>
+    <div class="taskbox__foot">
+        <span class="taskbox__hint"><kbd>↵</kbd> starts it · <kbd>⇧↵</kbd> new line · the orchestrator picks who works on it</span>
     <details class="taskbox__more">
         <summary>More</summary>
         <label>Handled by
@@ -32,6 +34,7 @@
             </select>
         </label>
     </details>
+    </div>
 </form>
 <script>
     function taskboxKey(e, form) {
