@@ -4,7 +4,7 @@ Things verified to be missing or wrong, with enough detail to act on. Each was
 found by using the system, not by reading it. Remove an entry when it is fixed —
 this file is only useful if it is true.
 
-Last reviewed: 2026-09-03.
+Last reviewed: 2026-09-20.
 
 Closed 2026-08-30, found by a coverage pass over the whole suite
 (`tests/coverage_report.md`) rather than by a run: the merge gate accepting a
@@ -100,6 +100,20 @@ telling engineers to unset the flag would reopen the very hole it guards.
 Candidates: persona note "the recorded MR check is the authoritative suite
 run; treat DB_READONLY errors as environmental", or a test-only DB path
 exemption in core/db.py (risky — needs care not to become a bypass).
+
+### Seatbelt could not stop a worker from writing the daemon's database
+**Status:** CLOSED 2026-09-20 — the Seatbelt profile now denies writes to the
+database, its WAL/shm/journal sidecars and the backups directory, as the LAST
+rule so the workspace allow above cannot re-open them
+(`core/sandbox.py::_daemon_state_paths`). Guarded by
+`tests/test_sandbox.py::TestTheDaemonsOwnStateIsOffLimits`, which runs the real
+`sandbox-exec` and asserts the kernel refuses the write.
+The profile allowed the whole workspace back, and `sisyphus.db` lives in it, so
+the only guard was `SISYPHUS_DB_PROTECT` — a Python check inside `core.db`. It
+governs connections `core.db` opens and nothing else, so `sqlite3 <path>` from
+an agent's own bash tool walked straight past it. The worst case was a hostile
+or confused worker corrupting the one record of every task, and the snapshots
+that would undo it.
 
 ### A worker's tool roster carries the user's whole desktop
 **Status:** CLOSED 2026-08-24 — the MCP half. The plugin half has its own

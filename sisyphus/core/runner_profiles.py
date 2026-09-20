@@ -107,6 +107,46 @@ def credential_store(rtype: str) -> Optional[str]:
     return _CREDENTIAL_STORE.get(rtype)
 
 
+# ── CLI versions this profile was written against ───────────────────────
+
+# Every flag in build_argv below is this project's reading of a CLI it does not
+# own: `run --format json --auto --pure --agent --dir` for opencode, the
+# stream-json pair for claude-cli. A CLI that renames one of them, or changes
+# the shape of what --format json prints, breaks every run — and it breaks them
+# at the worst moment, in a worker nobody is watching, with an error that looks
+# like the model misbehaving.
+#
+# So the versions that were actually exercised are written down. A different
+# version is NOT an error (these CLIs update constantly and almost every update
+# is harmless); it is a note on the runner's health, so that when runs start
+# failing strangely there is somewhere that says "this is not the version this
+# was tested against". Update the value after running the suite against the new
+# CLI.
+VERIFIED_VERSIONS = {
+    "opencode": "1.18.31",
+    "claude-cli": "2.1.278",
+}
+
+
+def parse_version(out: str) -> str:
+    """The version number in a CLI's `--version` output. opencode prints a bare
+    "1.18.31"; claude-cli prints "2.1.278 (Claude Code)". Anything else yields
+    "" — an unreadable version is not worth guessing at."""
+    import re
+    m = re.search(r"\d+\.\d+(?:\.\d+)?", out or "")
+    return m.group(0) if m else ""
+
+
+def version_note(rtype: str, version: str) -> Optional[str]:
+    """What health should say about *version*, or None when there is nothing to
+    say (it matches, or we could not read it, or this type has no record)."""
+    verified = VERIFIED_VERSIONS.get(rtype)
+    if not verified or not version or version == verified:
+        return None
+    return (f"{rtype} {version} is installed; this daemon's launch flags were "
+            f"verified against {verified}")
+
+
 # ── what each CLI leaves in, and reads from, a working tree ─────────────
 
 # Per type: (path, human label) for the files and directories that CLI owns

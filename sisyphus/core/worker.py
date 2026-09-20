@@ -15,6 +15,7 @@ differs between CLIs — config file shape and location, and how the model must
 spell our tool names in a call — comes from core.runner_profiles. This module
 resolves the runner's type once per run and threads it through both.
 """
+import asyncio
 import logging
 import os
 import sys
@@ -372,33 +373,18 @@ def _diagnose(result) -> str:
             f"failed before reaching the model. Last output: {(stderr or stdout)[:300]}")
 
 
-async def spawn_worker(
-    task_id: str,
-    role: str,
-    instruction: str,
-    repo_name: Optional[str] = None,
-    timeout: Optional[int] = WORKER_TIMEOUT_SECONDS,
-    idle_timeout: Optional[int] = WORKER_IDLE_TIMEOUT_SECONDS,
-) -> None:
-    """Launch one worker for *task_id*. Fire-and-forget: the outcome lands on
-    the thread via the agent's own tool calls, not in a return value."""
-    role_def = agents.get_agent(role)   # `role` is now an agent name
-    if not role_def:
-        raise ValueError(f"unknown agent {role!r}")
-    task = store.get_task(task_id)
-    if not task:
-        raise ValueError(f"unknown task {task_id}")
+def _prepare_workspace(task_id: str, role: str, task: dict, requested_repo):
+    """Everything a worker needs on disk before its CLI starts: the bare clone,
+    the task branch, the worktree, its access mode and the repo's setup hook.
 
-    # An agent may pin a specific CLI runtime; NULL runner_id → default runner.
-    runner_name = None
-    if role_def.get("runner_id"):
-        from .runners import get_runner
-        r = get_runner(role_def["runner_id"])
-        runner_name = r["name"] if r else None
+    Every step is blocking git or shell work that can run for minutes on a big
+    repo or a real setup hook. spawn_worker is a coroutine on the daemon's only
+    event loop, so running this inline froze the whole daemon — web, API,
+    dispatcher, watchdog, autopilots — until the clone finished. It is called
+    through asyncio.to_thread for that reason; keep it sync and keep it here.
 
-    model_override = role_def.get("model") or None
-
-    requested_repo = repo_name or task.get("repo")
+    Returns (worktree_path, setup_result).
+    """
     bare_path, branch = _prepare_repo(task_id, requested_repo)
     if requested_repo and not bare_path:
         # The task named a repo we couldn't prepare — unregistered, or the
@@ -454,7 +440,38 @@ async def spawn_worker(
         worktree_path = f"{ws}/scratch/{task_id}"
         os.makedirs(worktree_path, exist_ok=True)
         setup_result = None     # no repo, so nothing to set up — not "setup succeeded"
+    return worktree_path, setup_result
 
+
+async def spawn_worker(
+    task_id: str,
+    role: str,
+    instruction: str,
+    repo_name: Optional[str] = None,
+    timeout: Optional[int] = WORKER_TIMEOUT_SECONDS,
+    idle_timeout: Optional[int] = WORKER_IDLE_TIMEOUT_SECONDS,
+) -> None:
+    """Launch one worker for *task_id*. Fire-and-forget: the outcome lands on
+    the thread via the agent's own tool calls, not in a return value."""
+    role_def = agents.get_agent(role)   # `role` is now an agent name
+    if not role_def:
+        raise ValueError(f"unknown agent {role!r}")
+    task = store.get_task(task_id)
+    if not task:
+        raise ValueError(f"unknown task {task_id}")
+
+    # An agent may pin a specific CLI runtime; NULL runner_id → default runner.
+    runner_name = None
+    if role_def.get("runner_id"):
+        from .runners import get_runner
+        r = get_runner(role_def["runner_id"])
+        runner_name = r["name"] if r else None
+
+    model_override = role_def.get("model") or None
+
+    requested_repo = repo_name or task.get("repo")
+    worktree_path, setup_result = await asyncio.to_thread(
+        _prepare_workspace, task_id, role, task, requested_repo)
     instruction_first_line = instruction.split("\n")[0][:120]
     token = sessions.mint(task_id, role, worktree=worktree_path,
                           instruction=instruction_first_line,

@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
 import urllib.request
 from datetime import datetime, timezone
 from typing import Optional
@@ -239,6 +240,24 @@ def _clear_default():
     conn.close()
 
 
+def _version_note(runner: dict, binary_path: str) -> Optional[str]:
+    """Whether the installed CLI is the version this daemon's launch flags were
+    verified against (core.runner_profiles.VERIFIED_VERSIONS). A drifted version
+    is a note, never an issue: these CLIs update weekly and nearly every update
+    is harmless — but when runs start failing in ways that look like the model
+    misbehaving, this is the line that says where to look first."""
+    from . import runner_profiles
+
+    rtype = (runner.get("type") or "").strip() or runner_profiles.DEFAULT_TYPE
+    try:
+        proc = subprocess.run([binary_path, "--version"], capture_output=True,
+                              text=True, timeout=10)
+    except Exception:  # noqa: BLE001 — a CLI that won't report a version is not unhealthy
+        logger.debug("could not read %s --version", binary_path, exc_info=True)
+        return None
+    return runner_profiles.version_note(rtype, runner_profiles.parse_version(proc.stdout or proc.stderr))
+
+
 async def health_check(runner_id: str) -> dict:
     runner = get_runner(runner_id)
     if not runner:
@@ -257,8 +276,13 @@ async def health_check(runner_id: str) -> dict:
     from .runner_profiles import credential_store
 
     binary = runner["binary"]
-    if not _resolve_binary(binary):
+    resolved = _resolve_binary(binary)
+    if not resolved:
         issues.append(f"Binary '{binary}' not found in PATH or the usual install dirs")
+    else:
+        note = await asyncio.to_thread(_version_note, runner, resolved)
+        if note:
+            notes.append(note)
 
     api_env = runner.get("api_key_env", "")
     if api_env and not os.environ.get(api_env):

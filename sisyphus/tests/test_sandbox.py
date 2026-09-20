@@ -165,3 +165,46 @@ class TestSandboxCanBeRequired:
         assert sandbox.required() is False
         monkeypatch.setattr(sandbox, "available", lambda: True)
         assert sandbox.required() is True
+
+
+class TestTheDaemonsOwnStateIsOffLimits:
+    """Seatbelt re-allows the whole workspace, and the daemon's database lives
+    inside it. The Python guard (SISYPHUS_DB_PROTECT) only governs connections
+    core.db opens, so `sqlite3 <path>` from an agent's bash tool walked past it
+    and could corrupt the one record of every task."""
+
+    def test_the_database_is_denied_after_the_workspace_is_allowed(self, tmp_path):
+        ws = tmp_path / "workspace"; ws.mkdir()
+        profile = sandbox.build_seatbelt_profile(
+            str(ws / "wt"), str(ws / "out"), workspace_root=str(ws), home=str(tmp_path),
+            protected=[], db_path=str(ws / "sisyphus.db"))
+        allow_at = profile.index("(allow file-write*")
+        deny_at = profile.rindex("(deny file-write*")
+        assert deny_at > allow_at, "the database deny must come last — SBPL takes the last match"
+        for suffix in ("", "-wal", "-shm"):
+            assert f"sisyphus.db{suffix}" in profile
+        assert "backups" in profile
+
+    @pytest.mark.skipif(platform.system() != "Darwin" or not os.path.exists("/usr/bin/sandbox-exec"),
+                        reason="Seatbelt only on macOS")
+    def test_the_kernel_actually_refuses_the_write(self, tmp_path):
+        if not _sandbox_can_apply():
+            pytest.skip("nested sandbox — sandbox_apply refused, enforcement can't be probed here")
+        ws = tmp_path / "workspace"; ws.mkdir()
+        db = ws / "sisyphus.db"
+        db.write_text("pretend-database")
+        (ws / "backups").mkdir()
+        out = ws / "out"; out.mkdir()
+        profile = out / "p.sb"
+        profile.write_text(sandbox.build_seatbelt_profile(
+            str(ws), str(out), workspace_root=str(ws), home=str(tmp_path), protected=[],
+            db_path=str(db)))
+
+        def run(cmd):
+            return subprocess.run(["/usr/bin/sandbox-exec", "-f", str(profile), "/bin/sh", "-c", cmd],
+                                  capture_output=True, text=True)
+
+        assert run(f"echo x > {ws / 'scratch.txt'}").returncode == 0, "workspace write was blocked"
+        assert run(f"echo wiped > {db}").returncode != 0, "the daemon's database was writable"
+        assert db.read_text() == "pretend-database"
+        assert run(f"echo x > {ws / 'backups' / 'snap.db'}").returncode != 0, "backups were writable"

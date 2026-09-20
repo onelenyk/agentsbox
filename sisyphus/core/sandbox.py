@@ -168,10 +168,28 @@ def _protected_paths(home: str) -> List[str]:
     return out
 
 
+def _daemon_state_paths(db_path: Optional[str] = None) -> List[str]:
+    """SBPL rules for the daemon's own state: the live database (with its WAL
+    and shared-memory sidecars, which are as good as the database) and the
+    backup snapshots. Literals for the database files so a worker can still
+    write its own scratch files beside them, a subpath for the backups dir."""
+    if db_path is None:
+        from core.db import DB_PATH
+        db_path = DB_PATH
+
+    out: List[str] = []
+    if db_path:
+        out += [f"(literal {_q(db_path + suffix)})" for suffix in ("", "-wal", "-shm", "-journal")]
+        backups = str(Path(db_path).parent / "backups")
+        out.append(f"(subpath {_q(backups)})")
+    return out
+
+
 def build_seatbelt_profile(worktree: str, output_dir: str,
                            workspace_root: Optional[str] = None,
                            home: Optional[str] = None,
-                           protected: Optional[List[str]] = None) -> str:
+                           protected: Optional[List[str]] = None,
+                           db_path: Optional[str] = None) -> str:
     """Allow-by-default, then deny writes to the protected paths (repo sources +
     credential dirs), then re-allow the workspace areas a worker needs — so a
     path under a protected repo but inside the workspace stays writable (last
@@ -190,6 +208,17 @@ def build_seatbelt_profile(worktree: str, output_dir: str,
         lines.append(f"(deny file-write* {deny})")
     if allow:
         lines.append("(allow file-write*\n" + allow + "\n)")
+    # LAST, because the workspace allow above re-opens everything under it —
+    # and the daemon's own database lives there. Nothing inside the sandbox has
+    # any business writing it: a worker reaches the daemon over its HTTP/MCP
+    # bridge, never through sqlite. The Python-level guard (SISYPHUS_DB_PROTECT,
+    # core/db.py) only governs connections core.db opens, so `sqlite3 <path>`
+    # from the agent's bash tool walked straight past it and could corrupt the
+    # one record of every task. Same for the snapshots that would undo it.
+    keep_out = _daemon_state_paths(db_path)
+    if keep_out:
+        lines.append("(deny file-write*\n"
+                     + "\n".join(keep_out) + "\n)")
     return "\n".join(lines) + "\n"
 
 
