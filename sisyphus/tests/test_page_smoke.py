@@ -91,9 +91,10 @@ class TestIndicatorsTrackTheData:
         store.set_status(waiting["id"], "waiting")
 
         html = _client().get("/api/tasks/list").text
-        # the card must sit under Needs you, not merely exist somewhere
-        needs_you = html.split("Needs you", 1)[1]
-        assert "needs a human decision" in needs_you.split("Shipped", 1)[0]
+        # it must sit in the zone that asks for a human, not merely exist
+        wants_you = html.split("Wants you", 1)[1]
+        assert "needs a human decision" in wants_you.split("In flight", 1)[0]
+        assert "which branch?" in wants_you          # the question itself, on the card
 
     def test_dashboard_reports_the_real_done_and_failed_counts(self, db_path):
         for i in range(4):

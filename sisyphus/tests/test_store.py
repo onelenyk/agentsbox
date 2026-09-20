@@ -1,6 +1,8 @@
 """Tests for core/store.py — the Task + Thread model."""
 import pytest
 
+from core import store
+
 from core.store import (
     create_task,
     delete_task,
@@ -318,3 +320,57 @@ class TestMessageLane:
     def test_unknown_kind_fails_open_to_dialogue(self):
         from core.store import message_lane
         assert message_lane(self._m(kind="mystery_kind")) == "dialogue"
+
+
+class TestTasksHaveAKeyAHumanCanSay:
+    """"task-8466db18" is a machine's name: you cannot read it aloud, retype it
+    from memory, or tell it from the one above it."""
+
+    def test_the_key_is_the_repo_prefix_and_a_running_number(self, db_path):
+        a = store.create_task("first", repo="sisyphus")
+        b = store.create_task("second", repo="sisyphus")
+        assert a["key"] == "SIS-1" and b["key"] == "SIS-2"
+
+    def test_numbers_run_per_repo_and_repoless_tasks_get_their_own(self, db_path):
+        store.create_task("s", repo="sisyphus")
+        ios = store.create_task("i", repo="ios-app")
+        loose = store.create_task("no repo")
+        assert ios["key"] == "IOS-1"
+        assert loose["key"] == "TSK-1"
+
+    def test_a_key_is_never_reused_after_a_delete(self, db_path):
+        store.create_task("one", repo="sisyphus")
+        two = store.create_task("two", repo="sisyphus")
+        store.delete_task(two["id"])
+        assert store.create_task("three", repo="sisyphus")["key"] == "SIS-3"
+
+    def test_a_repo_named_in_punctuation_still_yields_letters(self):
+        assert store.key_prefix("my.repo-v2") == "MYR"
+        assert store.key_prefix("") == "TSK"
+        assert store.key_prefix("42") == "TSK"
+
+    def test_existing_tasks_are_backfilled_in_creation_order(self, tmp_path, monkeypatch):
+        """A database that predates keys gets them on the next open, numbered
+        the way they would have been numbered at the time."""
+        import sqlite3
+        from core import db as core_db
+
+        path = str(tmp_path / "old.db")
+        old = sqlite3.connect(path)
+        old.executescript("""
+            CREATE TABLE tasks (id TEXT PRIMARY KEY, goal TEXT NOT NULL, repo TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'active', parent_id TEXT, agent TEXT, base_branch TEXT,
+                title TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+            INSERT INTO tasks VALUES ('task-b','g','sisyphus','done',NULL,NULL,NULL,NULL,'2026-01-02','2026-01-02');
+            INSERT INTO tasks VALUES ('task-a','g','sisyphus','done',NULL,NULL,NULL,NULL,'2026-01-01','2026-01-01');
+        """)
+        old.commit(); old.close()
+
+        monkeypatch.setattr(core_db, "DB_PATH", path)
+        conn = core_db.get_conn()
+        store.init_store(conn)
+        conn.commit()
+        keys = dict(conn.execute("SELECT id, key FROM tasks").fetchall())
+        conn.close()
+        assert keys["task-a"] == "SIS-1"    # older task, lower number
+        assert keys["task-b"] == "SIS-2"

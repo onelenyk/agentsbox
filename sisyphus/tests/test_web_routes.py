@@ -407,7 +407,7 @@ def test_board_lists_done_task_with_open_mr_under_to_merge(db_path):
 
     r = _make_client().get("/api/tasks/list")
     assert r.status_code == 200
-    assert "lane--to-merge" in r.text
+    assert "ask--merge" in r.text          # it wants a decision from the human
     assert task["id"] in r.text
 
 
@@ -423,27 +423,65 @@ def test_board_hides_children_and_shows_parent_chip(db_path):
     assert "0/1" in r.text               # parent's subtask progress chip
 
 
-def test_every_live_lane_stays_on_the_board_and_says_what_it_means(db_path):
-    """An empty lane is an answer ("nothing needs you"), so it keeps its place
-    and says so in words. Finished work is not a fourth lane — it is the
-    history list underneath, which is where the room went."""
-    from core import store
+def test_each_status_gets_its_own_surface(db_path):
+    """A status is what the task is doing to you, so the four of them are four
+    different things on the page, not one card shape in four colours."""
+    from core import sessions, store
+    sessions.clear()
     client = _make_client()
-    done = store.create_task("already shipped", repo="test-repo")
-    store.set_status(done["id"], "done")
+
+    fresh = store.create_task("just created", repo="test-repo")           # queued
+    asking = store.create_task("needs an answer", repo="test-repo")
+    store.post_message(asking["id"], "engineer", kind="question", text="Which database?")
+    store.set_status(asking["id"], "waiting")
+    running = store.create_task("under way", repo="test-repo")
+    store.post_message(running["id"], "engineer", kind="commit", text="feat: half of it")
+    store.set_status(running["id"], "active")
+    finished = store.create_task("all over", repo="test-repo")
+    store.set_status(finished["id"], "done")
 
     html = client.get("/api/tasks/list").text
-    for key in ("in-progress", "needs-you", "to-merge"):
-        assert f"lane--{key}" in html, key
-    assert "Nothing waiting on you" in html
-    assert html.count("lane--empty") == 3
-    assert "already shipped" in html and 'class="hrows"' in html   # archive is a list
+    try:
+        # it wants you: the question itself, not a badge saying there is one
+        assert "Which database?" in html and "Answer in the thread" in html
+        # in flight: progress, and a queued task says it is only queued
+        assert "stagebar" in html and "feat: half of it" in html
+        assert "queued · waiting for the orchestrator" in html
+        assert html.index("just created") > html.index("under way")   # queued below running
+        # over: a row in the sprint list, not a card
+        assert 'class="row row--done"' in html
+        for t in (fresh, asking, running, finished):
+            assert t["key"] in html         # every task names itself the same way
+    finally:
+        sessions.clear()
 
-    working = store.create_task("working now", repo="test-repo")
-    store.set_status(working["id"], "active")
+
+def test_a_quiet_board_says_nothing_is_waiting_on_you(db_path):
+    html = _make_client().get("/api/tasks/list").text
+    assert "Nothing is waiting on you." in html
+
+
+def test_the_sprint_picker_lists_weeks_and_filters_to_one(db_path):
+    """A week is a sprint: "what got done last week" is a question an archive
+    can answer, an endless scroll is not."""
+    from core import store
+    from core.db import get_conn
+    client = _make_client()
+    now = store.create_task("this week", repo="test-repo")
+    old = store.create_task("long ago", repo="test-repo")
+    for t in (now, old):
+        store.set_status(t["id"], "done")
+    conn = get_conn()
+    conn.execute("UPDATE tasks SET updated_at = ? WHERE id = ?", ("2026-08-05T10:00:00+00:00", old["id"]))
+    conn.commit(); conn.close()
+
     html = client.get("/api/tasks/list").text
-    assert html.count("lane--empty") == 2        # in-progress filled up
-    assert "working now" in html
+    assert 'class="sprint-pick"' in html
+    assert "This week" in html and "Week 32" in html
+    assert "this week" in html and "long ago" not in html      # newest sprint by default
+
+    older = client.get("/api/tasks/list?sprint=2026-W32").text
+    assert "long ago" in older and "this week" not in older
 
 
 # ── Inbox (needs-you feed) ───────────────────────────────────────────────
@@ -1028,7 +1066,7 @@ class TestBoardCards:
             html = _make_client().get("/api/tasks/list").text
         finally:
             sessions.clear()
-        assert "card--live" in html
+        assert "live-dot" in html
         assert "engineer" in html
 
     def test_waiting_card_shows_question(self, db_path):

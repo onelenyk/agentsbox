@@ -46,6 +46,13 @@ CREATE TABLE IF NOT EXISTS messages (
     UNIQUE(task_id, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_messages_task ON messages(task_id, seq);
+-- Task numbers live here, not in MAX(key) over the tasks themselves: a key
+-- said out loud, or written into a commit message, must never come back
+-- pointing at a different task because the first one was deleted.
+CREATE TABLE IF NOT EXISTS key_counters (
+    prefix TEXT PRIMARY KEY,
+    last   INTEGER NOT NULL
+);
 """
 
 
@@ -69,6 +76,24 @@ def _migrate(conn) -> None:
         conn.execute("ALTER TABLE tasks ADD COLUMN base_branch TEXT")
     if "title" not in cols:
         conn.execute("ALTER TABLE tasks ADD COLUMN title TEXT")
+    if "key" not in cols:
+        # A task the human can say out loud. "task-8466db18" is a machine's
+        # name: unreadable, unrepeatable, and impossible to tell from the one
+        # above it at a glance. Existing tasks are numbered in the order they
+        # were created, so a backfilled key means the same thing as a new one.
+        conn.execute("ALTER TABLE tasks ADD COLUMN key TEXT")
+        rows = conn.execute("SELECT id, repo FROM tasks ORDER BY created_at, rowid").fetchall()
+        counters: dict = {}
+        for r in rows:
+            prefix = key_prefix(r["repo"])
+            counters[prefix] = counters.get(prefix, 0) + 1
+            conn.execute("UPDATE tasks SET key = ? WHERE id = ?",
+                         (f"{prefix}-{counters[prefix]}", r["id"]))
+        for prefix, last in counters.items():
+            conn.execute("INSERT INTO key_counters (prefix, last) VALUES (?, ?) "
+                         "ON CONFLICT(prefix) DO UPDATE SET last = max(last, excluded.last)",
+                         (prefix, last))
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_key ON tasks(key)")
 
 
 def _now() -> str:
@@ -80,6 +105,27 @@ def _dict(row) -> Optional[dict]:
 
 
 # ── Tasks ───────────────────────────────────────────────────────────────
+
+
+def key_prefix(repo: str) -> str:
+    """The short, stable, spoken-aloud prefix for a repo's task keys:
+    "sisyphus" → SIS, "ios-app" → IOS, no repo → TSK. Letters only, so a repo
+    named with dots or dashes still yields something pronounceable."""
+    letters = "".join(c for c in (repo or "") if c.isalpha())
+    return (letters[:3].upper() or "TSK")
+
+
+def _next_key(conn, repo: str) -> str:
+    """Next key for *repo*, from the counter table. Numbers run per prefix and
+    are never reused: deleting SIS-2 does not hand SIS-2 to the next task."""
+    prefix = key_prefix(repo)
+    conn.execute(
+        "INSERT INTO key_counters (prefix, last) VALUES (?, 1) "
+        "ON CONFLICT(prefix) DO UPDATE SET last = last + 1",
+        (prefix,),
+    )
+    last = conn.execute("SELECT last FROM key_counters WHERE prefix = ?", (prefix,)).fetchone()["last"]
+    return f"{prefix}-{last}"
 
 
 def task_display_title(task: dict) -> str:
@@ -100,10 +146,12 @@ def create_task(goal: str, repo: str = "", status: str = "active",
     task_id = f"task-{uuid4().hex[:8]}"
     now = _now()
     conn = get_conn()
+    key = _next_key(conn, repo)
     conn.execute(
-        "INSERT INTO tasks (id, goal, repo, status, parent_id, agent, base_branch, title, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (task_id, goal, repo, status, parent_id, agent or None, base_branch or None, title or None, now, now),
+        "INSERT INTO tasks (id, goal, repo, status, parent_id, agent, base_branch, title, key, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (task_id, goal, repo, status, parent_id, agent or None, base_branch or None, title or None,
+         key, now, now),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()

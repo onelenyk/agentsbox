@@ -905,6 +905,10 @@ def _enrich_now_card(t, mr, status):
     from core import store, usage
 
     th = store.get_thread(t["id"])
+    # An empty thread means nothing has happened to this task yet — it is
+    # queued behind the orchestrator, not working. With a thread it is in
+    # flight even between two workers, and it has progress worth drawing.
+    t["started"] = bool(th)
     has_commit = any(m["kind"] == "commit" for m in th)
     reviewed = any(m["kind"] == "result" and m["author"] not in ("engineer", "human")
                    and (m["text"].startswith("APPROVED") or m["text"].startswith("CHANGES REQUESTED"))
@@ -974,7 +978,7 @@ async def project_page(request: Request, name: str):
     })
 
 @router.get("/api/tasks/list", response_class=HTMLResponse)
-async def tasks_list_view(request: Request, repo: str = ""):
+async def tasks_list_view(request: Request, repo: str = "", sprint: str = ""):
     from core import store
 
     all_mrs = mergerequests.list_mrs()
@@ -1056,40 +1060,98 @@ async def tasks_list_view(request: Request, repo: str = ""):
         columns[col] = keep
         auto_groups[col] = sorted(groups.values(), key=lambda g: g["name"])
 
-    # The board's job is "what is happening and what needs me". Finished work
-    # answers neither, and there is a lot more of it: three archive columns of
-    # cards pushed the live ones into slivers, 95% of the page spent on the
-    # past. So the archive becomes one reverse-chronological list of rows —
-    # every item still reachable, a fraction of the room.
-    history = []
+    # A status here is not a column a card sits in — it is what the task is
+    # doing to you right now. Four of them ask for different things, so they
+    # get four different surfaces instead of one card shape repeated:
+    #   waiting / to-merge → it wants YOU. Loudest, pinned, never filtered away.
+    #   running            → it is working. Show who, how long, how far.
+    #   queued             → created, nothing started yet. One quiet line.
+    #   done / failed      → over. Interesting only while you have not seen it,
+    #                        then it belongs to the sprint archive.
+    needs_you = columns["needs-you"] + columns["to-merge"]
+    running, queued = [], []
+    for t in columns["in-progress"]:
+        # A live worker is in flight whatever the thread says; a thread with
+        # anything in it means work has begun even between two workers. Only a
+        # task with neither is genuinely still queued behind the orchestrator.
+        (running if (t.get("live_role") or t.get("started")) else queued).append(t)
+
+    finished = []
     for col in ("shipped", "done", "failed"):
         for g in auto_groups[col]:
-            history.append({"kind": col, "title": f"{g['name']}", "runs": g["count"],
-                            "id": g["latest"]["id"], "auto": True,
-                            "when": g["latest"].get("updated_at") or g["latest"].get("created_at"),
-                            "repo": g["latest"].get("repo", ""), "cost": None})
+            finished.append({"kind": col, "title": g["name"], "runs": g["count"],
+                             "id": g["latest"]["id"], "key": g["latest"].get("key") or "",
+                             "auto": True, "repo": g["latest"].get("repo", ""),
+                             "when": g["latest"].get("updated_at") or g["latest"].get("created_at")})
         for t in columns[col]:
-            history.append({"kind": col, "title": store.task_display_title(t), "runs": 1,
-                            "id": t["id"], "auto": False,
-                            "when": t.get("updated_at") or t.get("created_at"),
-                            "repo": t.get("repo", ""), "cost": t.get("cost"),
-                            "review_status": t.get("review_status")})
-    history.sort(key=lambda h: h["when"] or "", reverse=True)
+            finished.append({"kind": col, "title": store.task_display_title(t), "runs": 1,
+                             "id": t["id"], "key": t.get("key") or "", "auto": False,
+                             "repo": t.get("repo", ""), "cost": t.get("cost"),
+                             "review_status": t.get("review_status"),
+                             "when": t.get("updated_at") or t.get("created_at")})
+    finished.sort(key=lambda h: h["when"] or "", reverse=True)
     # Two review runs of the same MR read as a duplicate row, and the board had
     # pairs of them. Same title, same outcome, adjacent in time → one row, ×2.
     folded = []
-    for h in history:
+    for h in finished:
         prev = folded[-1] if folded else None
         if prev and not prev["auto"] and not h["auto"] and prev["title"] == h["title"] \
                 and prev["kind"] == h["kind"]:
             prev["runs"] += 1
             continue
         folded.append(h)
-    live_total = sum(len(columns[c]) for c in ("in-progress", "needs-you", "to-merge"))
-    return _tmpl().TemplateResponse(request, "tasks_list.html",
-                                    {"columns": columns, "auto_groups": auto_groups,
-                                     "history": folded, "live_total": live_total,
-                                     "repo": repo})
+
+    # A week is a sprint. Grouping by it is what makes an archive answerable
+    # ("what got done last week") instead of an endless scroll.
+    for h in folded:
+        h["sprint"] = _sprint_of(h["when"])
+    sprints = []
+    for h in folded:
+        if not sprints or sprints[-1]["id"] != h["sprint"]["id"]:
+            sprints.append({**h["sprint"], "count": 0})
+        sprints[-1]["count"] += 1
+    seen_ids = set()
+    unique_sprints = []
+    for sp in sprints:
+        if sp["id"] in seen_ids:
+            continue
+        seen_ids.add(sp["id"])
+        unique_sprints.append(sp)
+    for sp in unique_sprints:
+        sp["count"] = sum(1 for h in folded if h["sprint"]["id"] == sp["id"])
+    current = sprint if any(sp["id"] == sprint for sp in unique_sprints) else (
+        unique_sprints[0]["id"] if unique_sprints else "")
+    in_sprint = [h for h in folded if h["sprint"]["id"] == current]
+
+    return _tmpl().TemplateResponse(request, "tasks_list.html", {
+        "needs_you": needs_you, "running": running, "queued": queued,
+        "finished": in_sprint, "sprints": unique_sprints, "sprint": current,
+        "repo": repo,
+    })
+
+
+def _sprint_of(when: str) -> dict:
+    """The sprint (ISO week) an instant belongs to: its id, its label and the
+    dates it spans. A week is the unit a person actually reviews work in."""
+    from datetime import date, datetime, timedelta
+
+    try:
+        d = datetime.fromisoformat(when).date()
+    except (TypeError, ValueError):
+        d = date.today()
+    year, week, weekday = d.isocalendar()
+    monday = d - timedelta(days=weekday - 1)
+    sunday = monday + timedelta(days=6)
+    today_year, today_week, _ = date.today().isocalendar()
+    if (year, week) == (today_year, today_week):
+        label = "This week"
+    elif monday <= date.today() - timedelta(days=7) <= sunday:
+        label = "Last week"
+    else:
+        label = f"Week {week}"
+    span = f"{monday.strftime('%-d %b')} – {sunday.strftime('%-d %b')}"
+    return {"id": f"{year}-W{week:02d}", "label": label, "span": span}
+
 
 @router.post("/api/tasks")
 async def tasks_create(goal: str = Form(...), repo: str = Form(""), agent: str = Form(""),
