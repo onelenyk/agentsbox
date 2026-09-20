@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Request, Form
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -1330,22 +1330,12 @@ async def plans_delete(request: Request, pid: str):
 
 @router.get("/tasks/{task_id}", response_class=HTMLResponse)
 async def task_page(request: Request, task_id: str):
-    from core import store
-
-    task = store.get_task(task_id)
-    if not task:
-        return HTMLResponse('<div class="detail-panel"><p style="color:#f85149">Task not found</p></div>', status_code=404)
-    from core import usage
-    return _tmpl().TemplateResponse(request, "task_detail.html", {
-        "active_page": "tasks",
-        "task": task, "messages": store.get_thread(task_id),
-        "result": store.result_view(task_id),
-        "children": store.list_children(task_id),
-        "parent": store.get_task(task["parent_id"]) if task.get("parent_id") else None,
-        "mr": mergerequests.latest_for_task(task_id),
-        "review_of": _review_of(task),
-        "usage": usage.task_usage(task_id),
-    })
+    ctx = _task_ctx(task_id)
+    if ctx is None:
+        return HTMLResponse('<div class="detail-panel"><p style="color:#f85149">Task not found</p></div>',
+                            status_code=404)
+    ctx["active_page"] = "tasks"
+    return _tmpl().TemplateResponse(request, "task_detail.html", ctx)
 
 def _review_of(task) -> dict:
     """For a review task, the MR it reviews and the task that opened it.
@@ -1582,21 +1572,21 @@ async def mr_close(request: Request, mr_id: str):
     mergerequests.set_status(mr_id, "closed")
     return _tmpl().TemplateResponse(request, "mr_modal.html", _mr_view_ctx(request, mergerequests.get_mr(mr_id)))
 
-@router.get("/api/tasks/{task_id}/detail", response_class=HTMLResponse)
-async def task_detail_view(request: Request, task_id: str):
-    from core import store
+def _task_ctx(task_id: str) -> Optional[dict]:
+    """Everything a task's content template needs — built once and rendered
+    three ways: the full page, the panel over the board, and the poll that
+    refreshes either of them. Returns None when there is no such task."""
+    from datetime import datetime, timezone
+    from core import store, usage
 
     task = store.get_task(task_id)
     if not task:
-        return HTMLResponse('<div class="detail-panel"><p style="color:#f85149">Task not found</p></div>')
-    from core import usage
+        return None
     messages = store.get_thread(task_id)
 
     # Live "what is happening right now" for the header: a worker running or
     # queued, with elapsed minutes — the thread is silent while an agent works,
     # which reads as "stuck" without this.
-    from datetime import datetime, timezone
-
     working = None
     if task["status"] == "active" and messages:
         last = messages[-1]
@@ -1627,18 +1617,36 @@ async def task_detail_view(request: Request, task_id: str):
                     finished = {"text": m["text"], "mins": mins}
                 break
 
-    live_sessions = sessions.list_for_task(task_id)
-
-    return _tmpl().TemplateResponse(request, "task_detail_content.html", {
+    return {
         "task": task, "messages": messages, "working": working, "finished": finished,
-        "live_sessions": _enrich_sessions(live_sessions),
+        "live_sessions": _enrich_sessions(sessions.list_for_task(task_id)),
         "result": store.result_view(task_id),
         "children": store.list_children(task_id),
         "parent": store.get_task(task["parent_id"]) if task.get("parent_id") else None,
         "mr": mergerequests.latest_for_task(task_id),
         "review_of": _review_of(task),
         "usage": usage.task_usage(task_id),
-    })
+    }
+
+
+@router.get("/api/tasks/{task_id}/panel", response_class=HTMLResponse)
+async def task_panel(request: Request, task_id: str):
+    """A task, ready to drop into the overlay over the board — the same shell
+    the full page uses, so it polls itself the same way. The board opens this
+    instead of navigating: reading a task should not cost you your place in a
+    list you scrolled to, and /tasks/{id} still answers for a shared link."""
+    ctx = _task_ctx(task_id)
+    if ctx is None:
+        return HTMLResponse('<div class="empty">Task not found</div>', status_code=404)
+    return _tmpl().TemplateResponse(request, "_task_shell.html", ctx)
+
+
+@router.get("/api/tasks/{task_id}/detail", response_class=HTMLResponse)
+async def task_detail_view(request: Request, task_id: str):
+    ctx = _task_ctx(task_id)
+    if ctx is None:
+        return HTMLResponse('<div class="detail-panel"><p style="color:#f85149">Task not found</p></div>')
+    return _tmpl().TemplateResponse(request, "task_detail_content.html", ctx)
 
 @router.post("/api/tasks/{task_id}/messages")
 async def task_reply(task_id: str, text: str = Form(...)):

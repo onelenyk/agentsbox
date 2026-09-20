@@ -1,0 +1,10 @@
+{# The polling wrapper around a task's content, shared by the full page and
+   the overlay that opens over the board. The toolbar lives INSIDE it: its
+   buttons depend on the task's status (Stop vs Reopen/Retry), and a header
+   outside the swap would keep offering to stop a task that finished two
+   minutes ago. #}
+<div id="task-detail" hx-get="/api/tasks/{{ task.id }}/detail"
+     hx-trigger="taskUpdated from:body{% if task.status in ('active', 'waiting') %}, every 3s{% endif %}"
+     hx-swap="innerHTML">
+    {% include "task_detail_content.html" %}
+</div>

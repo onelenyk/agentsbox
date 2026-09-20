@@ -53,9 +53,53 @@
     </div>
 
     <div id="modal-container"></div>
+
+    {# Reading a task should not cost you your place in a list you scrolled
+       to, so the board opens it over itself. The URL still becomes
+       /tasks/{id} — a link you share, reload or bookmark lands on the full
+       page, and Back closes the panel instead of leaving the board. #}
+    <div id="task-overlay" class="overlay" hidden>
+        <div class="overlay__scrim" onclick="closeTaskPanel()"></div>
+        <aside class="overlay__panel" role="dialog" aria-modal="true" aria-label="Task">
+            <button type="button" class="overlay__close" onclick="closeTaskPanel()" title="Close (Esc)">✕</button>
+            <div id="overlay-body"></div>
+        </aside>
+    </div>
     <div id="toast" class="toast" style="display:none"></div>
 
     <script>
+        var overlayReturn = null;     // where the board was when the panel opened
+        function openedTaskPanel() {
+            var o = document.getElementById("task-overlay");
+            if (!o) return;
+            o.hidden = false;
+            document.body.classList.add("has-overlay");
+        }
+        function closeTaskPanel(skipHistory) {
+            var o = document.getElementById("task-overlay");
+            if (!o || o.hidden) return;
+            o.hidden = true;
+            document.body.classList.remove("has-overlay");
+            document.getElementById("overlay-body").innerHTML = "";
+            if (!skipHistory && overlayReturn !== null) {
+                history.pushState({}, "", overlayReturn);
+                overlayReturn = null;
+            }
+        }
+        document.body.addEventListener("htmx:beforeRequest", function (e) {
+            if (e.detail.target && e.detail.target.id === "overlay-body" && overlayReturn === null) {
+                overlayReturn = location.pathname + location.search;
+            }
+        });
+        document.body.addEventListener("htmx:afterSwap", function (e) {
+            if (e.detail.target && e.detail.target.id === "overlay-body") openedTaskPanel();
+        });
+        document.addEventListener("keydown", function (e) {
+            if (e.key === "Escape") closeTaskPanel();
+        });
+        // Back should close the panel, not leave the board behind it.
+        window.addEventListener("popstate", function () { closeTaskPanel(true); });
+
         function flash(msg, kind) {
             var t = document.getElementById("toast");
             t.textContent = msg;

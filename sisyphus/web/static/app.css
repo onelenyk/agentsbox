@@ -1012,6 +1012,39 @@ select { cursor: pointer; appearance: none;
 .ressub { font-size: 11px; color: var(--muted); }
 .resitem .btn { flex: none; }
 
+/* ── Task overlay ────────────────────────────────────────────────────────
+   A task opens over the board rather than instead of it: the list keeps its
+   scroll, its filters and its unfolded sprints, and closing costs nothing.
+   The panel is a full-height sheet on the right — the board stays visible
+   down the left edge, so you never lose the sense of where you are. */
+.overlay { position: fixed; inset: 0; z-index: 70; display: flex; justify-content: flex-end; }
+.overlay[hidden] { display: none; }
+.overlay__scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, .55); animation: scrim-in .14s ease; }
+.overlay__panel {
+  position: relative; width: min(900px, 92vw); height: 100%;
+  background: var(--bg); border-left: 1px solid var(--border);
+  box-shadow: -20px 0 60px rgba(0, 0, 0, .5);
+  overflow-y: auto; padding: 20px 24px 40px;
+  animation: panel-in .16s ease;
+}
+.overlay__close {
+  position: absolute; top: 14px; right: 16px; z-index: 2;
+  font: inherit; font-size: 14px; line-height: 1; cursor: pointer;
+  color: var(--muted); background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--r-sm); padding: 6px 9px;
+}
+.overlay__close:hover { color: var(--text); border-color: var(--border-2); background: var(--hover); }
+/* the toolbar inside the panel keeps clear of the close button */
+.overlay__panel .toolbar { padding-right: 44px; }
+.overlay__panel .task-detail { grid-template-columns: 1fr 240px; }
+body.has-overlay { overflow: hidden; }
+@keyframes scrim-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes panel-in { from { transform: translateX(24px); opacity: .6; } to { transform: none; opacity: 1; } }
+@media (max-width: 900px) {
+  .overlay__panel { width: 100%; padding: 16px 14px 32px; }
+  .overlay__panel .task-detail { grid-template-columns: 1fr; }
+}
+
 /* ── Toolbar: the same bar on every working surface ──────────────────────
    The list, a project and a task each used to build their own header, so
    moving between them moved the title, changed the height and read as a

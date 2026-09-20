@@ -21,7 +21,7 @@
         {% if needs_you %}
         <div class="asks">
             {% for t in needs_you %}
-            <a class="ask" href="/tasks/{{ t.id }}">
+            <a class="ask" href="/tasks/{{ t.id }}" hx-get="/api/tasks/{{ t.id }}/panel" hx-target="#overlay-body" hx-swap="innerHTML" hx-push-url="/tasks/{{ t.id }}">
                 <div class="ask__top">
                     <span class="tkey">{{ t.key }}</span>
                     <span class="ask__title">{{ task_display_title(t) }}</span>
@@ -59,7 +59,7 @@
         </header>
         <div class="runs">
             {% for t in running %}
-            <a class="run" href="/tasks/{{ t.id }}">
+            <a class="run" href="/tasks/{{ t.id }}" hx-get="/api/tasks/{{ t.id }}/panel" hx-target="#overlay-body" hx-swap="innerHTML" hx-push-url="/tasks/{{ t.id }}">
                 <div class="run__top">
                     <span class="tkey">{{ t.key }}</span>
                     <span class="run__title">{{ task_display_title(t) }}</span>
@@ -83,7 +83,7 @@
             </a>
             {% endfor %}
             {% for t in queued %}
-            <a class="queued" href="/tasks/{{ t.id }}">
+            <a class="queued" href="/tasks/{{ t.id }}" hx-get="/api/tasks/{{ t.id }}/panel" hx-target="#overlay-body" hx-swap="innerHTML" hx-push-url="/tasks/{{ t.id }}">
                 <span class="tkey">{{ t.key }}</span>
                 <span class="queued__title">{{ task_display_title(t) }}</span>
                 {% if t.child_total %}<span class="chip">⑂ {{ t.child_done }}/{{ t.child_total }}</span>{% endif %}
@@ -149,7 +149,7 @@
                 <li class="trow trow--{{ row.kind }} {{ 'trow--child' if row.parent_id }}"
                     data-when="{{ row.when }}" data-repo="{{ row.repo }}" data-who="{{ row.who }}"
                     data-kind="{{ row.kind }}" data-text="{{ (row.key ~ ' ' ~ row.title)|lower }}">
-                    <a href="/tasks/{{ row.id }}">
+                    <a href="/tasks/{{ row.id }}" hx-get="/api/tasks/{{ row.id }}/panel" hx-target="#overlay-body" hx-swap="innerHTML" hx-push-url="/tasks/{{ row.id }}">
                         <span class="trow__mark" title="new since your last visit"></span>
                         <span class="tkey">{{ row.key }}</span>
                         <span class="trow__title">{% if row.auto %}🤖 {% endif %}{{ row.title }}{% if row.runs > 1 %}<span class="trow__runs tnum">×{{ row.runs }}</span>{% endif %}</span>
