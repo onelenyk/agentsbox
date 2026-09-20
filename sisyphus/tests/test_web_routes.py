@@ -1350,3 +1350,35 @@ class TestATaskOpensOverTheBoard:
         html = _make_client().get("/tasks").text
         assert 'id="task-overlay"' in html and 'id="overlay-body"' in html
         assert "closeTaskPanel" in html
+
+
+class TestASprintIsAWeekWhereTheReaderLives:
+    """Stamps are stored in UTC. A sprint is a week in the week the reader
+    lives in — east of UTC, a task started just after midnight on Monday was
+    filed under "last week", because in UTC it was still Sunday night."""
+
+    def test_a_utc_stamp_is_read_in_local_time(self):
+        import os
+        import time
+        from web.routes import _sprint_of
+
+        os.environ["TZ"] = "Europe/Kyiv"      # UTC+3 in September
+        time.tzset()
+        try:
+            # Monday 21 Sep 2026, 00:12 local == Sunday 20 Sep, 21:12 UTC
+            assert _sprint_of("2026-09-20T21:12:00+00:00")["id"] == "2026-W39"
+            # and an hour earlier is genuinely still the week before
+            assert _sprint_of("2026-09-20T20:12:00+00:00")["id"] == "2026-W38"
+        finally:
+            del os.environ["TZ"]
+            time.tzset()
+
+    def test_a_naive_stamp_is_taken_as_given(self):
+        from web.routes import _sprint_of
+        assert _sprint_of("2026-09-21T00:12:00")["id"] == "2026-W39"
+
+    def test_nonsense_falls_back_to_this_week_rather_than_crashing(self):
+        from datetime import date
+        from web.routes import _sprint_of
+        year, week, _ = date.today().isocalendar()
+        assert _sprint_of("not a date")["id"] == f"{year}-W{week:02d}"
