@@ -19,7 +19,7 @@
         <div class="project-autopilots">
             <span class="muted">Autopilot:</span>
             {% for a in autopilots %}
-            <a href="/autopilots" class="{{ '' if a.enabled else 'muted' }}">{{ a.name }}{% if a.cron %} <span class="mono muted">{{ a.cron }}</span>{% endif %}{% if not a.enabled %} (paused){% endif %}</a>{% if not loop.last %} · {% endif %}
+            <a href="/autopilots" class="{{ '' if a.enabled else 'muted' }}">{{ a.name }}{% if a.cron %} <code class="mono">{{ a.cron }}</code>{% endif %}{% if not a.enabled %} (paused){% endif %}</a>{% if not loop.last %} · {% endif %}
             {% endfor %}
         </div>
         {% endif %}

@@ -1055,8 +1055,41 @@ async def tasks_list_view(request: Request, repo: str = ""):
                 g["latest"] = t
         columns[col] = keep
         auto_groups[col] = sorted(groups.values(), key=lambda g: g["name"])
+
+    # The board's job is "what is happening and what needs me". Finished work
+    # answers neither, and there is a lot more of it: three archive columns of
+    # cards pushed the live ones into slivers, 95% of the page spent on the
+    # past. So the archive becomes one reverse-chronological list of rows —
+    # every item still reachable, a fraction of the room.
+    history = []
+    for col in ("shipped", "done", "failed"):
+        for g in auto_groups[col]:
+            history.append({"kind": col, "title": f"{g['name']}", "runs": g["count"],
+                            "id": g["latest"]["id"], "auto": True,
+                            "when": g["latest"].get("updated_at") or g["latest"].get("created_at"),
+                            "repo": g["latest"].get("repo", ""), "cost": None})
+        for t in columns[col]:
+            history.append({"kind": col, "title": store.task_display_title(t), "runs": 1,
+                            "id": t["id"], "auto": False,
+                            "when": t.get("updated_at") or t.get("created_at"),
+                            "repo": t.get("repo", ""), "cost": t.get("cost"),
+                            "review_status": t.get("review_status")})
+    history.sort(key=lambda h: h["when"] or "", reverse=True)
+    # Two review runs of the same MR read as a duplicate row, and the board had
+    # pairs of them. Same title, same outcome, adjacent in time → one row, ×2.
+    folded = []
+    for h in history:
+        prev = folded[-1] if folded else None
+        if prev and not prev["auto"] and not h["auto"] and prev["title"] == h["title"] \
+                and prev["kind"] == h["kind"]:
+            prev["runs"] += 1
+            continue
+        folded.append(h)
+    live_total = sum(len(columns[c]) for c in ("in-progress", "needs-you", "to-merge"))
     return _tmpl().TemplateResponse(request, "tasks_list.html",
-                                    {"columns": columns, "auto_groups": auto_groups})
+                                    {"columns": columns, "auto_groups": auto_groups,
+                                     "history": folded, "live_total": live_total,
+                                     "repo": repo})
 
 @router.post("/api/tasks")
 async def tasks_create(goal: str = Form(...), repo: str = Form(""), agent: str = Form(""),

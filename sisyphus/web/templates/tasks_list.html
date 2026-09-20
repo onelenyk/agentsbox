@@ -1,103 +1,106 @@
-{# One flow of columns, left to right, filling the viewport. Every column is
-   the same kind of thing (a stack of cards) and scrolls on its own, so a long
-   archive never pushes live work off screen.
+{# The board answers two questions, in this order: what is happening, and what
+   needs me. Finished work answers neither, so it is not a third, fourth and
+   fifth column of cards competing for the same room — it is one list of rows
+   underneath, newest first.
 
-   Live buckets are always drawn — an empty "needs you" is information. Archive
-   buckets are drawn only when they hold something, so a board with nothing
-   failed doesn't spend a column saying so. #}
+   The three live lanes are always drawn, empty or not: "nothing needs you" is
+   an answer, and a lane that disappears when empty makes you check whether it
+   was ever there. #}
 {% set live_cols = [
-    ("in-progress", "⚙", "In progress"),
-    ("needs-you", "✋", "Needs you"),
-    ("to-merge", "⇄", "To merge"),
-] %}
-{% set archive_cols = [
-    ("shipped", "🚀", "Shipped"),
-    ("done", "✓", "Done"),
-    ("failed", "✗", "Failed"),
+    ("in-progress", "⚙", "In progress", "Nothing running"),
+    ("needs-you", "✋", "Needs you", "Nothing waiting on you"),
+    ("to-merge", "⇄", "To merge", "Nothing to merge"),
 ] %}
 {% set icons = {'orchestrator':'🧭','engineer':'🔧','reviewer':'🔍','explorer':'🔭','planner':'🗺️','mr-reviewer':'🔍','human':'🧑'} %}
-{% set board_total = columns.values()|map("length")|sum + (auto_groups or {}).values()|map("length")|sum %}
+{% set kind_label = {'shipped': 'shipped', 'done': 'done', 'failed': 'failed'} %}
 
-{% if board_total == 0 %}
-<div class="board-quiet">All quiet — nothing in flight, nothing shipped yet.</div>
-{% else %}
-<div class="board board--flow">
-    {% for col_key, col_icon, col_label in live_cols + archive_cols %}
-    {% if col_key in ("in-progress", "needs-you", "to-merge") or columns[col_key] or (auto_groups or {}).get(col_key) %}
-    {% set is_live = col_key in ("in-progress", "needs-you", "to-merge") %}
-    {% set col_count = columns[col_key]|length + ((auto_groups or {}).get(col_key, []) | sum(attribute='count')) %}
-    {#- An empty live column is still information ("nothing in progress"), but
-        it is not worth a full column's width — collapse it to a slim strip so
-        the columns that hold cards (and Shipped/Done) stay on screen. It grows
-        back to full width the moment it holds a card. -#}
-    <div class="board-col board-col--{{ col_key }} {{ 'board-col--archive' if not is_live }} {{ 'board-col--collapsed' if is_live and col_count == 0 }}">
-        <div class="board-col__head">
-            <span class="label"><span class="col-ic">{{ col_icon }}</span>{{ col_label }}</span>
-            <span class="count tnum">{{ col_count }}</span>
-        </div>
-        <div class="board-col__body">
-            {% for g in (auto_groups or {}).get(col_key, []) %}
-            <a class="task-card task-card--auto" href="/tasks/{{ g.latest.id }}"
-               title="{{ g.count }} run(s) of '{{ g.name }}' — opens the latest">
-                <div class="task-card__title">🤖 {{ g.name }}</div>
-                <div class="task-card__meta">
-                    <span class="chip">{{ g.count }} run{{ '' if g.count == 1 else 's' }}</span>
-                    <span class="task-card__foot-info">last 🕐 <span class="reltime" data-created="{{ g.latest.updated_at or g.latest.created_at }}"></span></span>
-                </div>
-            </a>
-            {% endfor %}
-            {% for t in columns[col_key] %}
-            <a class="task-card {{ 'task-card--rich' if is_live }} {{ 'task-card--live' if t.live_role }}"
-               href="/tasks/{{ t.id }}"
-               title="{{ t.id }}{% if t.repo %} · {{ t.repo }}{% endif %}">
-                {% if t.live_role %}
-                <div class="task-card__live"><span class="live-dot"></span>{{ icons.get(t.live_role, '⚙️') }} {{ t.live_role }} working · {{ t.live_mins }}m</div>
-                {% endif %}
-                <div class="task-card__title">{{ task_display_title(t) }}</div>
-                {% if is_live %}
-                {% if t.question %}<div class="task-card__q">❓ {{ t.question }}</div>{% endif %}
-                {% if t.stages %}
-                <div class="stagebar">
-                    {% for name, done in t.stages %}
-                    <span class="stg {{ 'on' if done }} {{ 'now' if name == t.stage_now }}" title="{{ name }}"></span>
-                    {% if not loop.last %}<span class="stg-link {{ 'on' if done }}"></span>{% endif %}
-                    {% endfor %}
-                    <span class="stagebar__label">{{ t.stage_now }}</span>
-                </div>
-                {% endif %}
-                {% if t.last_event and not t.question %}
-                <div class="task-card__event">{{ icons.get(t.last_author, '⚡') }} {{ t.last_event }}</div>
-                {% endif %}
-                {% endif %}
-                <div class="task-card__meta">
-                    {% if t.child_total %}<span class="chip">⑂ {{ t.child_done }}/{{ t.child_total }}</span>{% endif %}
-                    {#- While the MR is open the badge is the merge gate's verdict, so the
-                        card predicts the button. Once it is settled it goes back to being a
-                        record of what the reviewer said. -#}
-                    {% if t.gate %}
-                    {% set gate_badge = {
-                        'ready':        ('✓ ready to merge', 'good'),
-                        'check-failed': ('✗ check failed', 'bad'),
-                        'changes':      ('✗ changes requested', 'bad'),
-                        'pending':      ('⏳ in review', ''),
-                        'died':         ('✗ review died', 'bad'),
-                        'unreviewed':   ('○ unreviewed', ''),
-                    }[t.gate] %}
-                    <span class="badge{% if not gate_badge[1] %} badge--mono{% endif %}"
-                          {%- if gate_badge[1] %} style="color:var(--{{ gate_badge[1] }});background:var(--{{ gate_badge[1] }}-bg);border-color:var(--{{ gate_badge[1] }}-bd)"{% endif %}>{{ gate_badge[0] }}</span>
-                    {% elif t.review_status == 'pending' %}<span class="badge badge--mono">⏳ review</span>{% elif t.review_status == 'approved' %}<span class="badge" style="color:var(--good);background:var(--good-bg);border-color:var(--good-bd)">✓ reviewed</span>{% elif t.review_status == 'changes_requested' %}<span class="badge" style="color:var(--bad);background:var(--bad-bg);border-color:var(--bad-bd)">✗ changes requested</span>{% endif %}
-                    <span class="task-card__foot-info">🕐 <span class="reltime" data-created="{{ t.created_at }}"></span>{% if t.cost %} · 💰 {{ t.cost }}{% endif %}</span>
-                </div>
-            </a>
-            {% else %}
-            {% if not (auto_groups or {}).get(col_key) %}<div class="empty empty--col">—</div>{% endif %}
-            {% endfor %}
-        </div>
+<div class="board">
+    <div class="lanes">
+        {% for col_key, col_icon, col_label, empty_text in live_cols %}
+        {% set cards = columns[col_key] %}
+        <section class="lane lane--{{ col_key }} {{ 'lane--empty' if not cards }}">
+            <header class="lane__head">
+                <span class="lane__name"><span class="lane__ic">{{ col_icon }}</span>{{ col_label }}</span>
+                {% if cards %}<span class="lane__count tnum">{{ cards|length }}</span>{% endif %}
+            </header>
+            <div class="lane__body">
+                {% for t in cards %}
+                <a class="card {{ 'card--live' if t.live_role }}" href="/tasks/{{ t.id }}"
+                   title="{{ t.id }}{% if t.repo %} · {{ t.repo }}{% endif %}">
+                    {% if t.live_role %}
+                    <div class="card__live"><span class="live-dot"></span>{{ icons.get(t.live_role, '⚙️') }} {{ t.live_role }} · {{ t.live_mins }}m</div>
+                    {% endif %}
+                    <div class="card__title">{{ task_display_title(t) }}</div>
+                    {% if t.question %}<div class="card__q">❓ {{ t.question }}</div>{% endif %}
+                    {% if t.stages %}
+                    <div class="stagebar">
+                        {% for name, done in t.stages %}
+                        <span class="stg {{ 'on' if done }} {{ 'now' if name == t.stage_now }}" title="{{ name }}"></span>
+                        {% if not loop.last %}<span class="stg-link {{ 'on' if done }}"></span>{% endif %}
+                        {% endfor %}
+                        <span class="stagebar__label">{{ t.stage_now }}</span>
+                    </div>
+                    {% endif %}
+                    {% if t.last_event and not t.question %}
+                    <div class="card__event">{{ icons.get(t.last_author, '⚡') }} {{ t.last_event }}</div>
+                    {% endif %}
+                    <div class="card__meta">
+                        {% if t.child_total %}<span class="chip">⑂ {{ t.child_done }}/{{ t.child_total }}</span>{% endif %}
+                        {#- While the MR is open the badge is the merge gate's verdict, so the
+                            card predicts the button. Once settled it records the verdict. -#}
+                        {% if t.gate %}
+                        {% set gate_badge = {
+                            'ready':        ('✓ ready to merge', 'good'),
+                            'check-failed': ('✗ check failed', 'bad'),
+                            'changes':      ('✗ changes requested', 'bad'),
+                            'pending':      ('⏳ in review', ''),
+                            'died':         ('✗ review died', 'bad'),
+                            'unreviewed':   ('○ unreviewed', ''),
+                        }[t.gate] %}
+                        <span class="badge{% if not gate_badge[1] %} badge--mono{% endif %}"
+                              {%- if gate_badge[1] %} style="color:var(--{{ gate_badge[1] }});background:var(--{{ gate_badge[1] }}-bg);border-color:var(--{{ gate_badge[1] }}-bd)"{% endif %}>{{ gate_badge[0] }}</span>
+                        {% endif %}
+                        <span class="card__when">🕐 <span class="reltime" data-created="{{ t.created_at }}"></span>{% if t.cost %} · 💰 {{ t.cost }}{% endif %}</span>
+                    </div>
+                </a>
+                {% else %}
+                <p class="lane__empty">{{ empty_text }}</p>
+                {% endfor %}
+            </div>
+        </section>
+        {% endfor %}
     </div>
+
+    {% if history %}
+    <section class="history">
+        <header class="history__head">
+            <h2>History</h2>
+            <div class="history__filters" role="group">
+                <button type="button" class="fchip is-on" data-filter="all">All <span class="tnum">{{ history|length }}</span></button>
+                {% for k in ("shipped", "done", "failed") %}
+                {% set n = history|selectattr("kind", "equalto", k)|list|length %}
+                {% if n %}<button type="button" class="fchip fchip--{{ k }}" data-filter="{{ k }}">{{ kind_label[k] }} <span class="tnum">{{ n }}</span></button>{% endif %}
+                {% endfor %}
+            </div>
+        </header>
+        <ol class="hrows">
+            {% for h in history %}
+            <li class="hrow hrow--{{ h.kind }}" data-kind="{{ h.kind }}">
+                <a href="/tasks/{{ h.id }}">
+                    <span class="hrow__dot" title="{{ kind_label[h.kind] }}"></span>
+                    <span class="hrow__title">{% if h.auto %}🤖 {% endif %}{{ h.title }}</span>
+                    {% if h.runs > 1 %}<span class="hrow__runs tnum">×{{ h.runs }}</span>{% endif %}
+                    {% if h.review_status == 'changes_requested' %}<span class="hrow__note">changes requested</span>{% endif %}
+                    <span class="hrow__when"><span class="reltime" data-created="{{ h.when }}"></span></span>
+                </a>
+            </li>
+            {% endfor %}
+        </ol>
+    </section>
+    {% elif not live_total %}
+    <p class="board-quiet">All quiet — nothing in flight, nothing shipped yet.</p>
     {% endif %}
-    {% endfor %}
 </div>
-{% endif %}
 <script>
 (function () {
     function rel(iso) {
@@ -112,14 +115,21 @@
     document.querySelectorAll('.reltime').forEach(function (el) {
         if (el.dataset.created) el.textContent = rel(el.dataset.created);
     });
-    // A column that scrolls says so — otherwise a clipped stack reads as the
-    // whole list. Re-checked on resize because the cut-off point moves.
-    function markScrollable() {
-        document.querySelectorAll('.board-col__body').forEach(function (el) {
-            el.classList.toggle('is-scrollable', el.scrollHeight > el.clientHeight + 2);
-        });
+    // Filtering is one class on the list — the rows are already rendered, and a
+    // round trip to re-fetch them would lose the scroll position on every
+    // seven-second board refresh.
+    var list = document.querySelector('.hrows');
+    var chips = document.querySelectorAll('.fchip');
+    function apply(kind) {
+        if (!list) return;
+        list.dataset.only = kind === 'all' ? '' : kind;
+        chips.forEach(function (c) { c.classList.toggle('is-on', c.dataset.filter === kind); });
+        try { sessionStorage.setItem('historyFilter', kind); } catch (e) { }
     }
-    markScrollable();
-    window.addEventListener('resize', markScrollable);
+    chips.forEach(function (c) { c.onclick = function () { apply(c.dataset.filter); }; });
+    try {
+        var saved = sessionStorage.getItem('historyFilter');
+        if (saved && document.querySelector('.fchip[data-filter="' + saved + '"]')) apply(saved);
+    } catch (e) { }
 })();
 </script>
