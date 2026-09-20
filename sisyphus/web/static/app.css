@@ -290,10 +290,11 @@ body::before {
 
 /* the key you can say out loud, everywhere a task is named */
 .tkey {
-  flex: none; font-family: var(--mono); font-size: 10.5px; letter-spacing: .04em;
-  color: var(--muted); background: var(--panel-2); border: 1px solid var(--border);
-  border-radius: var(--r-sm); padding: 1px 6px;
+  flex: none; font-family: var(--mono); font-size: 11px; letter-spacing: .03em;
+  color: var(--text-2); background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: var(--r-sm); padding: 2px 6px; text-align: center;
 }
+.trow a:hover .tkey { color: var(--accent-hi); border-color: var(--accent-bd); }
 
 /* ── Wants you ───────────────────────────────────────────────────────── */
 .zone--you { --col: var(--warn); --col-bg: var(--warn-bg); }
@@ -412,79 +413,90 @@ body::before {
 .sprint[hidden] { display: none; }
 .sprint__head {
   display: flex; align-items: baseline; gap: 10px; cursor: pointer;
-  padding: 10px 4px; list-style: none; user-select: none;
+  padding: 14px 12px 10px; list-style: none; user-select: none;
 }
 .sprint__head::-webkit-details-marker { display: none; }
 .sprint__head:hover .sprint__name { color: var(--text); }
 .sprint__chev { color: var(--muted); font-size: 10px; transition: transform .12s; }
 .sprint[open] .sprint__chev { transform: rotate(90deg); }
-.sprint__name { font-size: 13px; font-weight: 650; color: var(--text-2); }
+.sprint__name { font-size: 14px; font-weight: 650; color: var(--text); }
 .sprint__span { font-size: 11.5px; color: var(--muted); font-family: var(--mono); }
-.sprint__stats { margin-left: auto; font-size: 11.5px; color: var(--muted); }
+.sprint__stats { margin-left: auto; font-size: 12px; color: var(--muted); padding-right: 2px; }
 .sprint__stats .is-good { color: var(--good); }
 .sprint__stats .is-bad { color: var(--bad); }
 
 /* One set of bounds for every row on the board, so a key, a tag or a time is
    in the same place on line 40 as on line 1 — and a subtask indents without
    moving the columns it shares with its parent. */
+/* One set of bounds for every row on the board, so a key, a tag or a time is
+   in the same place on line 40 as on line 1 — and a subtask indents without
+   moving the columns it shares with its parent. */
 .trows {
-  --c-mark: 8px; --c-key: 64px; --c-repo: 96px; --c-who: 116px;
-  --c-note: 112px; --c-state: 74px; --c-when: 72px;
-  list-style: none; display: flex; flex-direction: column; padding-bottom: 8px;
+  --c-mark: 8px; --c-key: 64px; --c-repo: 92px; --c-who: 112px;
+  --c-note: 136px; --c-state: 78px; --c-when: 74px;
+  list-style: none; display: flex; flex-direction: column; padding-bottom: 10px;
 }
-.trows__none { font-size: 12.5px; color: var(--muted); padding: 14px 4px; }
+.trows__none { font-size: 13px; color: var(--muted); padding: 16px 4px; }
 .trow[hidden] { display: none; }
-/* A grid, not a flex row: a key, a status or a timestamp is worth reading
-   down the column, and ragged ones make you re-find them on every line. */
+/* A row is a line of text a person scans by the hundred: it gets the size and
+   the contrast of something meant to be read, a height the eye can track
+   across, and a banding so the eye does not lose the line it is on. */
 .trow a {
   display: grid;
   grid-template-columns:
     var(--c-mark) var(--c-key) minmax(0, 1fr)
     calc(var(--c-repo) + var(--c-who) + var(--c-note) + var(--c-state) + 15px)
     var(--c-when);
-  align-items: center; gap: 10px; padding: 7px 10px;
-  text-decoration: none; color: var(--text-2); font-size: 12.5px;
+  align-items: center; gap: 12px; padding: 11px 12px; min-height: 44px;
+  text-decoration: none; color: var(--text); font-size: 13.5px; line-height: 1.4;
   border-radius: var(--r-sm); border-left: 2px solid transparent;
 }
-.trow a:hover { background: var(--panel); color: var(--text); border-left-color: var(--border-2); }
-.trow__mark { width: 6px; height: 6px; border-radius: 50%; flex: none; background: transparent; }
-.trow.is-new .trow__mark { background: var(--accent); }
-.trow.is-new a { color: var(--text); }
+.trow:nth-child(odd) a { background: rgba(255, 255, 255, .016); }
+.trow a:hover {
+  background: var(--hover); border-left-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.trow__mark { width: 7px; height: 7px; border-radius: 50%; background: transparent; }
+.trow.is-new .trow__mark { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.trow.is-new .trow__title { font-weight: 600; }
 .trow__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.trow__runs { font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-left: 7px; }
-/* Fixed column, right-aligned: each row is its own grid, so only a width
-   both agree on makes the tags line up down the page. */
+/* work that ended badly is legible as such before you read a word of it */
+.trow--failed .trow__title { color: var(--text-2); }
+.trow--failed a { border-left-color: rgba(245, 84, 77, .45); }
+.trow__runs { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-left: 8px; }
+.trow__when { text-align: right; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.trow a:hover .trow__when { color: var(--text-2); }
+/* the child indents inside its own cells — the columns stay put */
+.trow--child .tkey { margin-left: 18px; }
+.trow--child .trow__title::before {
+  content: "└"; color: var(--border-2); margin-right: 8px; font-family: var(--mono);
+}
+
+/* Every tag keeps a slot whether or not it is filled, so one tag fewer never
+   slides the rest of the line along. */
 .trow__tags {
   display: grid; align-items: center; gap: 5px;
   grid-template-columns: var(--c-repo) var(--c-who) var(--c-note) var(--c-state);
 }
 .tslot { display: flex; justify-content: flex-start; min-width: 0; }
 .tslot .tag { overflow: hidden; text-overflow: ellipsis; }
-.trow__when { text-align: right; font-size: 11px; color: var(--muted); }
-/* a subtask is the parent's, not a second task beside it */
-/* the child indents inside its own cells — the columns stay put */
-.trow--child .tkey { margin-left: 18px; }
-.trow--child .trow__title::before {
-  content: "└"; color: var(--border-2); margin-right: 7px; font-family: var(--mono);
-}
 
 .tag {
-  flex: none; font-size: 10.5px; line-height: 1.7; padding: 0 7px;
+  font-size: 11px; line-height: 1.8; padding: 0 8px;
   border-radius: var(--r-pill); border: 1px solid var(--border);
-  color: var(--muted); background: var(--panel-2); white-space: nowrap;
+  color: var(--text-2); background: var(--panel-2); white-space: nowrap;
 }
-.tag--who { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); }
-/* A row with one tag more than the rest must lose characters, not a word:
-   the repo name is the one that can say less and still be read. */
-.tag--repo { max-width: 100%; }
+.tag--repo { max-width: 100%; color: var(--muted); }
+.tag--who { display: inline-flex; align-items: center; gap: 5px; }
 .tag--who .live-dot { width: 6px; height: 6px; }
-.tag--state { letter-spacing: .04em; text-transform: uppercase; font-size: 9.5px; }
+.tag--state { letter-spacing: .05em; text-transform: uppercase; font-size: 10px; font-weight: 600; }
 .tag--shipped { color: var(--good); background: var(--good-bg); border-color: var(--good-bd); }
 .tag--failed, .tag--bad { color: var(--bad); background: var(--bad-bg); border-color: var(--bad-bd); }
 /* the verdict still stands vs. the verdict was overtaken by a merge */
 .tag--bad.is-settled { color: var(--muted); background: var(--panel-2); border-color: var(--border); }
 .tag--needs-you { color: var(--warn); background: var(--warn-bg); border-color: var(--warn-bd); }
 .tag--to-merge, .tag--in-progress { color: var(--accent-hi); background: var(--accent-bg); border-color: var(--accent-bd); }
+.tag--done { color: var(--text-2); }
 
 /* ── Panels / detail ─────────────────────────────────────────────────── */
 .panel {
