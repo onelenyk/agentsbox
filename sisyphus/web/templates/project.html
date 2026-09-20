@@ -1,18 +1,14 @@
 {% extends "base.html" %}
 {% block title %}{{ repo.name }} — Sisyphus{% endblock %}
 {% block main_class %}main--board{% endblock %}
+{% import "_ui.html" as ui %}
 {% block content %}
 <div class="board-shell">
     <div class="board-main">
-        <div class="page-head">
-            <div>
-                <h1>⌥ {{ repo.name }}</h1>
-                <div class="sub mono">{{ repo.source }}{% if repo.branch %} · {{ repo.branch }}{% endif %}</div>
-            </div>
-            <div class="actions">
-                <a class="btn btn--ghost" href="/repos/{{ repo.name }}" title="Resources, setup, edit">⚙ Settings</a>
-            </div>
-        </div>
+        {% call ui.toolbar([{'label': 'Tasks', 'href': '/tasks'}, {'label': repo.name}]) %}
+        <span class="toolbar__note mono">{{ repo.source }}{% if repo.branch %} · {{ repo.branch }}{% endif %}</span>
+        <a class="btn btn--ghost btn--sm" href="/repos/{{ repo.name }}" title="Resources, setup, edit">⚙ Settings</a>
+        {% endcall %}
         {% set fixed_repo = repo.name %}
         {% include "_task_box.html" %}
         {% if autopilots %}

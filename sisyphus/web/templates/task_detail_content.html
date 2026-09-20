@@ -1,3 +1,31 @@
+{% import "_ui.html" as ui %}
+{% call ui.toolbar([{'label': 'Tasks', 'href': '/tasks'},
+                    {'key': task.key, 'label': task_display_title(task)|truncate(52)}]) %}
+    <span class="status status--{{ task.status }}">{{ task.status }}</span>
+    {% if working %}
+    <span class="toolbar__note mono">⚙ {{ working.role }} {{ working.label }} · {{ working.mins }}m</span>
+    {% elif finished %}
+    <span class="toolbar__note mono" style="color:var(--good)">✓ {{ finished.text|truncate(40) }} · {{ finished.mins }}m ago</span>
+    {% endif %}
+    {% if task.status in ("done", "failed") %}
+    <button class="btn btn--sm" hx-post="/api/tasks/{{ task.id }}/reopen" hx-swap="none">Reopen</button>
+    <button class="btn btn--sm" hx-post="/api/tasks/{{ task.id }}/retry"
+            hx-confirm="Retry from scratch? This starts a brand-new task with the same goal — its thread and branch are deliberately ignored, so it begins with a clean history."
+            hx-swap="none">Retry</button>
+    {% else %}
+    {# the only way to stop work; without it a human had to find the pid #}
+    <button class="btn btn--sm" hx-post="/api/tasks/{{ task.id }}/stop"
+            hx-confirm="Stop this task? Its running worker is killed; the task parks as waiting and a reply resumes it."
+            hx-swap="none">Stop</button>
+    {% endif %}
+    {# What each worker's CLI actually printed. When a worker ends without
+       reporting, this is where the reason is. #}
+    <button class="btn btn--sm" hx-get="/api/tasks/{{ task.id }}/logs"
+            hx-target="#modal-container" hx-swap="innerHTML">Logs</button>
+    <button class="btn btn--danger btn--sm" hx-post="/api/tasks/{{ task.id }}/delete"
+            hx-confirm="Delete this task and its whole thread? This can't be undone."
+            hx-swap="none">Delete</button>
+{% endcall %}
 <div class="task-detail">
   {% macro diffstat_table(text) -%}
   {# Diffstat-shaped text ("path | 5 +++++") becomes a compact monospace
@@ -37,9 +65,11 @@
     {% if parent %}
     <div class="breadcrumb">↑ Part of <a href="/tasks/{{ parent.id }}">{{ task_display_title(parent) }}</a></div>
     {% endif %}
+    {# The title is in the toolbar above; repeating it here pushed the one
+       thing this block is for — what was actually asked — below the fold. #}
     <div class="panel__head">
         <div style="flex:1 1 auto; min-width:0">
-            <h2>{{ task_display_title(task) }}</h2>
+            <div class="rail-h">Goal</div>
             {# A short goal shows in full; a long spec collapses behind a
                toggle so the page leads with the result, not a wall of text.
                hx-preserve keeps the open state across the 3s poll. #}
@@ -51,38 +81,6 @@
                 <div class="task-goal-full msg__body--md">{{ task.goal | md }}</div>
             </details>
             {% endif %}
-        </div>
-        <div class="row" style="flex-shrink:0">
-            <span class="status status--{{ task.status }}">{{ task.status }}</span>
-            {% if working %}
-            <span class="muted mono" style="font-size:11px">⚙ {{ working.role }} · {{ working.label }} · {{ working.mins }}m</span>
-            {% elif finished %}
-            <span class="muted mono" style="font-size:11px;color:var(--good)">✓ {{ finished.text|truncate(60) }} · {{ finished.mins }}m ago</span>
-            {% endif %}
-            {% if task.status in ("done", "failed") %}
-            <button class="btn btn--sm"
-                    hx-post="/api/tasks/{{ task.id }}/reopen"
-                    hx-swap="none">Reopen</button>
-            <button class="btn btn--sm"
-                    hx-post="/api/tasks/{{ task.id }}/retry"
-                    hx-confirm="Retry from scratch? This starts a brand-new task with the same goal — its thread and branch are deliberately ignored, so it begins with a clean history."
-                    hx-swap="none">Retry from scratch</button>
-            {% else %}
-            {# the only way to stop work; without it a human had to find the pid #}
-            <button class="btn btn--sm"
-                    hx-post="/api/tasks/{{ task.id }}/stop"
-                    hx-confirm="Stop this task? Its running worker is killed; the task parks as waiting and a reply resumes it."
-                    hx-swap="none">Stop</button>
-            {% endif %}
-            {# What each worker's CLI actually printed. When a worker ends
-               without reporting, this is where the reason is. #}
-            <button class="btn btn--sm"
-                    hx-get="/api/tasks/{{ task.id }}/logs"
-                    hx-target="#modal-container" hx-swap="innerHTML">Run logs</button>
-            <button class="btn btn--danger btn--sm"
-                    hx-post="/api/tasks/{{ task.id }}/delete"
-                    hx-confirm="Delete this task and its whole thread? This can't be undone."
-                    hx-swap="none">Delete</button>
         </div>
     </div>
 

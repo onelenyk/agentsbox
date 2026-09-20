@@ -236,7 +236,8 @@
         writeState({ q: search ? search.value : '', f: f });
     }
     if (search) search.addEventListener('input', function () { remember(); filter(); });
-    picks.forEach(function (p) { p.addEventListener('change', function () { remember(); filter(); }); });
+    function markSet() { picks.forEach(function (p) { p.classList.toggle('is-set', !!p.value); }); }
+    picks.forEach(function (p) { p.addEventListener('change', function () { markSet(); remember(); filter(); }); });
     document.querySelectorAll('.sprint').forEach(function (sp, i) {
         sp.addEventListener('toggle', function () {
             var open = readState().open || {};
@@ -248,6 +249,7 @@
         if (search) search.value = '';
         picks.forEach(function (p) { p.value = ''; });
         remember();
+        markSet();
         filter();
     };
 
@@ -261,6 +263,7 @@
             if (k in open) sp.open = open[k];
         });
     })();
+    markSet();
 
     // "Finished while I wasn't looking" is the one thing about done work worth
     // a person's attention, and it is exactly what an archive sorted by date
