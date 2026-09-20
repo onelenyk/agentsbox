@@ -220,14 +220,10 @@ variants, not whole endpoints. Worst-covered handlers:
 
 | Route | Missed / body |
 |---|---|
-| `POST /api/board/chat` | 18/22 |
 | `POST /api/runners/{id}/smoke` | 14/24 |
 | `POST /api/mr/{id}/land` | 14/18 |
-| `POST /api/tasks/ai-parse` | 12/18 |
-| `POST /api/board/act` | 11/14 |
 
-The LLM-backed routes (`board/chat`, `ai-parse`, `board/act`) are thin for an
-obvious reason — they call a model. `POST /api/mr/{id}/land` at 14/18 is the one
+`POST /api/mr/{id}/land` at 14/18 is the one
 worth raising: it is a merge-adjacent action, and it is the least-covered route
 in Tier 1 territory.
 

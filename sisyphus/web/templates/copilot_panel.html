@@ -1,9 +1,0 @@
-<div id="cp-log" class="cp-log" data-session="{{ session.id }}" data-title="{{ session.title }}">
-    {% for m in messages %}
-    <div class="cp-msg cp-{{ 'user' if m.role == 'user' else ('sys' if m.role == 'system' else 'bot') }}"
-         title="{{ m.created_at[:16] }}">{{ m.text }}</div>
-    {% else %}
-    <div class="cp-msg cp-bot">Ask about the board — “what's stuck?”, “summarize today”, or tell me to “create a task to add tests to testrepo”. I'll confirm before acting.</div>
-    {% endfor %}
-</div>
-<script>if (window.cpAfterLoad) cpAfterLoad();</script>

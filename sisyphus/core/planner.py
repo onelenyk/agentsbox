@@ -705,8 +705,8 @@ def _find_json(out: str):
 
     This was a third copy of a regex that two other modules also carried, and
     the three had already drifted apart: two spelled it greedy, one lazy, and
-    each was broken on the output the others handled. One parser, so a reply
-    the copilot can read is one the planner can read.
+    each was broken on the output the others handled. One parser, so every
+    caller reads a reply the same way.
     """
     from core.ai_assist import find_json
     return find_json(out)

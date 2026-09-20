@@ -23,4 +23,3 @@ ignore = [
 "core/worker.py" = ["E402"]
 "core/stats.py" = ["E402"]
 "core/usage.py" = ["E402"]
-"core/copilot.py" = ["E402"]

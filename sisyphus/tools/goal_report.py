@@ -170,9 +170,8 @@ def reliability(conn, days: int) -> dict:
 
 
 def open_gaps(path: str = KNOWN_GAPS) -> dict:
-    """The ledger's own count — parsed by core.ledger, which is also what the
-    board copilot reads, so the report and the board can never disagree about
-    what is still owed."""
+    """The ledger's own count — parsed by core.ledger, the one parser of
+    docs/known-gaps.md."""
     from core.ledger import open_gaps as _parse
     return _parse(path)
 

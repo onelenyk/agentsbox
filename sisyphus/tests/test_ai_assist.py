@@ -1,4 +1,4 @@
-"""AI task-parse helper (core/ai_assist.py) — mocked runner, no tokens spent."""
+"""One-shot AI helpers (core/ai_assist.py) — mocked runner, no tokens spent."""
 from types import SimpleNamespace
 
 import pytest
@@ -13,42 +13,31 @@ def test_find_json_variants():
     assert ai_assist._find_json("no json at all") is None
 
 
-def test_parse_out_validates_against_lists():
-    r = ai_assist._parse_out('{"goal":"do it","repo":"testrepo","agent":"ghost"}',
-                             ["testrepo"], ["engineer"])
-    assert r == {"goal": "do it", "repo": "testrepo", "agent": ""}  # unknown agent dropped
-    assert ai_assist._parse_out('{"goal":"x","repo":"nope"}', ["testrepo"], [])["repo"] == ""
-
-
-def test_parse_out_no_json_is_empty():
-    assert ai_assist._parse_out("model was confused", ["testrepo"], []) == {
-        "goal": "", "repo": "", "agent": ""}
-
-
-def test_parse_task_mocks_runner(monkeypatch):
+def test_run_prompt_forces_the_runners_model(monkeypatch):
     monkeypatch.setattr("core.runners.get_default_runner",
                         lambda: {"binary": "opencode", "model": "m", "api_key_env": "", "base_url": ""})
     monkeypatch.setattr("core.runner_detect.resolve", lambda b: "/abs/opencode")
-    monkeypatch.setattr(ai_assist.subprocess, "run",
-                        lambda *a, **k: SimpleNamespace(
-                            stdout='{"goal":"Add multiply and divide with tests","repo":"testrepo","agent":""}',
-                            stderr="", returncode=0))
-    r = ai_assist.parse_task("add mul div in testrepo", "feature",
-                             [{"name": "testrepo"}], [{"name": "engineer"}])
-    assert r["goal"].startswith("Add multiply") and r["repo"] == "testrepo" and r["agent"] == ""
+    seen = {}
+
+    def fake_run(argv, **k):
+        seen["argv"] = argv
+        return SimpleNamespace(stdout='{"reply":"ok"}', stderr="", returncode=0)
+
+    monkeypatch.setattr(ai_assist.subprocess, "run", fake_run)
+    assert ai_assist.run_prompt("hello") == '{"reply":"ok"}'
+    assert seen["argv"][:5] == ["/abs/opencode", "run", "--pure", "--model", "m"]
 
 
-def test_parse_task_no_runner(monkeypatch):
+def test_run_prompt_no_runner(monkeypatch):
     monkeypatch.setattr("core.runners.get_default_runner", lambda: None)
     with pytest.raises(RuntimeError):
-        ai_assist.parse_task("x")
+        ai_assist.run_prompt("x")
 
 
 class TestReadingJsonOutOfAModelsProse:
-    """One parser for the planner, the copilot and the task-structure button.
+    """One parser for every module that reads a model's reply.
 
-    Three copies of a regex existed and had drifted apart — planner and copilot
-    greedy, ai_assist lazy — so the same model reply was readable by one and
+    Three copies of a regex existed and had drifted apart — two greedy, ai_assist lazy — so the same model reply was readable by one and
     unreadable by another. Each failure returned None, which every caller
     reports as "the model didn't give me anything usable": a retry over a reply
     that was fine. These are the two shapes that used to break."""
@@ -82,9 +71,8 @@ class TestReadingJsonOutOfAModelsProse:
         assert ai_assist.find_json("use the {placeholder} syntax") is None
 
     def test_every_module_that_reads_a_model_uses_this_one(self):
-        from core import copilot, planner
+        from core import planner
         out = 'Sure:\n{"goal": "g", "meta": {"a": 1}}\nand {an aside}.'
         want = {"goal": "g", "meta": {"a": 1}}
         assert planner._find_json(out) == want
-        assert copilot._find_json(out) == want
         assert ai_assist._find_json(out) == want

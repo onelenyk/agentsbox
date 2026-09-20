@@ -1,0 +1,56 @@
+{# The one way to start work: say what should get done, press Enter. Planning,
+   splitting and asking back belong to the orchestrator, so nothing here asks
+   for them up front. Include with `fixed_repo` set on a project page — the
+   page already names the repo. #}
+<form class="taskbox" hx-post="/api/tasks" hx-swap="none"
+      hx-on::after-request="if (event.detail.successful) taskboxDone(this)">
+    <div class="taskbox__row">
+        <textarea name="goal" rows="1" required autocomplete="off"
+                  placeholder="{% if fixed_repo %}What should get done in {{ fixed_repo }}?{% else %}What should get done?{% endif %}"
+                  onkeydown="taskboxKey(event, this.form)" oninput="taskboxGrow(this)"></textarea>
+        {% if fixed_repo %}
+        <input type="hidden" name="repo" value="{{ fixed_repo }}">
+        {% else %}
+        <select name="repo" class="taskbox__repo" onchange="taskboxRemember(this)" title="Repository — none runs read-only in a scratch dir">
+            <option value="">no repo</option>
+            {% set names = repo_names() %}
+            {% for r in names %}
+            <option value="{{ r }}"{% if names|length == 1 %} selected{% endif %}>{{ r }}</option>
+            {% endfor %}
+        </select>
+        {% endif %}
+        <button type="submit" class="btn btn--primary">Start ↵</button>
+    </div>
+    <details class="taskbox__more">
+        <summary>More</summary>
+        <label>Handled by
+            <select name="agent">
+                <option value="" selected>Auto — orchestrator dispatches</option>
+                {% for a in worker_agent_names() %}
+                <option value="{{ a }}">{{ a }} (solo)</option>
+                {% endfor %}
+            </select>
+        </label>
+    </details>
+</form>
+<script>
+    function taskboxKey(e, form) {
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+            e.preventDefault();
+            if (e.target.value.trim() && !form.classList.contains('htmx-request')) htmx.trigger(form, 'submit');
+        }
+    }
+    function taskboxGrow(ta) { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 240) + 'px'; }
+    function taskboxRemember(sel) { try { localStorage.setItem('taskboxRepo', sel.value); } catch (e) { } }
+    function taskboxDone(form) {
+        const ta = form.querySelector('textarea');
+        ta.value = ''; taskboxGrow(ta); ta.focus();
+        const more = form.querySelector('details'); if (more) { more.open = false; form.querySelector('[name=agent]').value = ''; }
+    }
+    document.querySelectorAll('.taskbox__repo').forEach(function (sel) {
+        try {
+            const v = localStorage.getItem('taskboxRepo');
+            if (v !== null && [...sel.options].some(o => o.value === v)) sel.value = v;
+        } catch (e) { }
+    });
+</script>

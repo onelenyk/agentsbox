@@ -191,7 +191,7 @@ def test_unknown_page_renders_html_404_with_section_links(db_path):
     assert response.status_code == 404
     assert "text/html" in response.headers["content-type"]
     assert "does not exist" in response.text
-    for section in ("/dashboard", "/tasks", "/plans", "/agents", "/runners",
+    for section in ("/dashboard", "/tasks", "/agents", "/runners",
                     "/repos", "/autopilots", "/stats", "/runtime", "/backups"):
         assert section in response.text
 
@@ -357,14 +357,12 @@ def test_diffstat_body_renders_as_compact_table(db_path):
     assert "5 +++++" not in html
 
 
-def test_new_task_form_allows_no_repo(db_path):
-    """The New Task form offers a repo-less option (backend #3 support)."""
-    client = _make_client()
-    response = client.get("/api/tasks/new-form")
-    assert response.status_code == 200
-    # a non-required select with an explicit None option
-    assert "research / planning" in response.text.lower()
-    assert 'name="repo" required' not in response.text
+def test_task_box_allows_no_repo(db_path):
+    """The task box offers a repo-less option (backend #3 support)."""
+    html = _make_client().get("/tasks").text
+    box = html.split('class="taskbox"')[1].split("</form>")[0]
+    assert '<option value="">no repo</option>' in box
+    assert 'name="repo" required' not in box
 
 
 def test_parent_detail_lists_subtasks(db_path):
@@ -771,10 +769,11 @@ def test_agents_delete_builtin_blocked(db_path):
     assert _make_client().post("/api/agents/engineer/delete").status_code == 422
 
 
-def test_new_task_form_has_agent_dropdown(db_path):
-    r = _make_client().get("/api/tasks/new-form")
-    assert "Auto" in r.text and "orchestrator dispatches" in r.text
-    assert "engineer (solo)" in r.text
+def test_task_box_hides_agent_choice_under_more(db_path):
+    html = _make_client().get("/tasks").text
+    more = html.split('class="taskbox__more"')[1].split("</details>")[0]
+    assert "Auto" in more and "orchestrator dispatches" in more
+    assert "engineer (solo)" in more
 
 
 def test_task_detail_shows_handling_agent(db_path):
@@ -786,109 +785,73 @@ def test_task_detail_shows_handling_agent(db_path):
     assert "orchestrator" in c.get(f"/api/tasks/{auto['id']}/detail").text
 
 
-# ── Command Bar: classify_command fallback ───────────────────────────────
+# ── Task box & project pages ─────────────────────────────────────────────
+
+_REPOS = [{"name": "alpha", "source": "/src/alpha", "branch": "main"},
+          {"name": "beta", "source": "/src/beta", "branch": "main"}]
 
 
-def test_classify_command_fallback_automation():
-    from core.ai_assist import classify_command
-    with patch("core.ai_assist.run_prompt", side_effect=RuntimeError("no runner")):
-        result = classify_command("run schema checks every day and report", [])
-    assert result["kind"] == "automation"
-
-
-def test_classify_command_fallback_mission():
-    from core.ai_assist import classify_command
-    long_text = (
-        "Redesign the entire authentication system.\n"
-        + "First, audit current endpoints.\n"
-        + "Then design new OAuth flow.\n"
-        + "Finally, migrate all users.\n"
-        + ("x" * 200)
-    )
-    with patch("core.ai_assist.run_prompt", side_effect=RuntimeError("no runner")):
-        result = classify_command(long_text, [])
-    assert result["kind"] == "mission"
-
-
-def test_classify_command_fallback_task():
-    from core.ai_assist import classify_command
-    with patch("core.ai_assist.run_prompt", side_effect=RuntimeError("no runner")):
-        result = classify_command("fix the login button color", [])
-    assert result["kind"] == "task"
-
-
-def test_classify_command_fallback_title_truncation():
-    from core.ai_assist import classify_command
-    very_long_line = "This is a very long first line that definitely exceeds eighty characters for sure"
-    with patch("core.ai_assist.run_prompt", side_effect=RuntimeError("no runner")):
-        result = classify_command(very_long_line, [])
-    assert len(result["title"]) <= 80
-    assert result["title"] == very_long_line[:80]
-
-
-# ── Command Bar: route tests ─────────────────────────────────────────────
-
-
-def test_command_classify_renders_card(db_path):
+def test_home_and_tasks_start_work_from_the_same_box(db_path):
+    """One way to start a task: no classify step, no modal, no templates."""
     client = _make_client()
-    mock_result = {"kind": "task", "title": "Fix login", "goal": "fix login button", "repo": "", "cron": ""}
-    mock_repos = [{"name": "sisyphus", "source": "x", "branch": "main"}]
-    with patch("core.ai_assist.classify_command", return_value=mock_result):
-        with patch("core.repos.list_repos", return_value=mock_repos):
-            response = client.post("/api/command/classify", data={"text": "fix login"})
-    assert response.status_code == 200
-    assert "class=" in response.text
-    assert "cmd-badge" in response.text
+    for page in ("/dashboard", "/tasks"):
+        html = client.get(page).text
+        assert 'class="taskbox" hx-post="/api/tasks"' in html
+        assert "/api/command/" not in html
+        assert "/api/tasks/new-form" not in html
 
 
-def test_dashboard_classify_form_has_in_flight_affordances(db_path):
-    """The classify command is a slow model call; the form must disable itself
-    and show a progress hint while the request is in flight, so it never reads
-    as a dead button."""
-    html = _make_client().get("/dashboard").text
-    form_tag = html.split('hx-post="/api/command/classify"')[1].split(">")[0]
-    assert 'hx-disabled-elt="this"' in form_tag
-    assert 'hx-indicator="#cmd-classify-indicator"' in form_tag
-    assert 'id="cmd-classify-indicator"' in html
-    assert "Classifying" in html
-
-
-def test_command_result_buttons_have_in_flight_affordances(db_path):
-    """The create-task/plan/automation buttons each take time too — they must
-    disable themselves and show a shared progress hint, matching the classify
-    form."""
-    mock_result = {"kind": "task", "title": "Fix login", "goal": "fix login button", "repo": "", "cron": ""}
-    mock_repos = [{"name": "sisyphus", "source": "x", "branch": "main"}]
+def test_retired_creation_routes_are_gone(db_path):
     client = _make_client()
-    with patch("core.ai_assist.classify_command", return_value=mock_result):
-        with patch("core.repos.list_repos", return_value=mock_repos):
-            response = client.post("/api/command/classify", data={"text": "fix login"})
-    assert response.status_code == 200
-    for endpoint in ("create-task", "create-plan", "create-automation"):
-        button_tag = response.text.split(f'hx-post="/api/command/{endpoint}"')[1].split(">")[0]
-        assert 'hx-disabled-elt="this"' in button_tag
-        assert 'hx-indicator="#cmd-working-indicator"' in button_tag
-    assert 'id="cmd-working-indicator"' in response.text
-    assert "Working" in response.text
+    assert client.get("/api/tasks/new-form").status_code == 404
+    for path in ("/api/command/classify", "/api/command/create-task",
+                 "/api/command/create-plan", "/api/command/create-automation",
+                 "/api/tasks/ai-parse"):
+        assert client.post(path, data={"text": "x", "goal": "x"}).status_code in (404, 405)
 
 
-def test_command_create_task(db_path):
+def test_sidebar_lists_each_repo_as_a_project(db_path):
+    with patch("core.repos.load_repos", return_value=_REPOS):
+        html = _make_client().get("/tasks").text
+    assert 'href="/p/alpha"' in html and 'href="/p/beta"' in html
+    assert 'href="/plans"' not in html
+
+
+def test_project_page_fixes_the_repo_and_narrows_the_board(db_path):
+    with patch("core.repos.load_repos", return_value=_REPOS):
+        html = _make_client().get("/p/alpha").text
+    box = html.split('class="taskbox"')[1].split("</form>")[0]
+    assert '<input type="hidden" name="repo" value="alpha">' in box
+    assert 'class="taskbox__repo"' not in box
+    assert 'hx-get="/api/tasks/list?repo=alpha"' in html
+    assert 'href="/repos/alpha"' in html
+    assert 'class="active" title="alpha' in html
+
+
+def test_unknown_project_is_a_404(db_path):
+    with patch("core.repos.load_repos", return_value=_REPOS):
+        r = _make_client().get("/p/nope", headers={"accept": "text/html"})
+    assert r.status_code == 404
+
+
+def test_board_filters_by_repo(db_path):
     from core import store
+    store.create_task("alpha work", repo="alpha", title="Alpha card")
+    store.create_task("beta work", repo="beta", title="Beta card")
     client = _make_client()
+    narrowed = client.get("/api/tasks/list?repo=alpha").text
+    assert "Alpha card" in narrowed and "Beta card" not in narrowed
+    everything = client.get("/api/tasks/list").text
+    assert "Alpha card" in everything and "Beta card" in everything
+
+
+def test_task_box_creates_the_task_on_its_repo(db_path):
+    from core import store
     with patch("core.orchestrator.emit") as mock_emit:
-        response = client.post("/api/command/create-task", data={
-            "goal": "command-created task",
-            "repo": "sisyphus",
-            "title": "My Task",
-        })
-    assert response.status_code == 200
-    redirect = response.headers.get("HX-Redirect", "")
-    assert redirect.startswith("/tasks/")
-    task_id = redirect.split("/tasks/")[1]
-    task = store.get_task(task_id)
-    assert task is not None
-    assert task["goal"] == "command-created task"
-    assert task["title"] == "My Task"
+        r = _make_client().post("/api/tasks", data={"goal": "tidy the README", "repo": "alpha"})
+    assert r.status_code == 200 and r.headers.get("HX-Trigger") == "taskCreated"
+    [t] = [t for t in store.list_tasks() if t["goal"] == "tidy the README"]
+    assert t["repo"] == "alpha" and not t.get("agent")
     mock_emit.assert_called_once()
 
 
@@ -1022,10 +985,11 @@ class TestFlatNav:
     sidebar click from anywhere now, and the tabstrip is gone with the doors."""
 
     def test_every_section_is_one_click_from_anywhere(self, db_path):
-        html = _make_client().get("/dashboard").text
+        with patch("core.repos.load_repos", return_value=[]):
+            html = _make_client().get("/dashboard").text
         nav = html.split('<nav class="nav">')[1].split("</nav>")[0]
-        assert nav.count("<a ") == 10
-        for label in ("Home", "Tasks", "Planner", "Agents", "Runners", "Repos",
+        assert nav.count("<a ") == 9
+        for label in ("Home", "Tasks", "Agents", "Runners", "Repos",
                       "Autopilot", "Statistics", "Daemon", "Backups"):
             assert label in nav
 
@@ -1156,7 +1120,7 @@ class TestWatchRail:
         sessions.clear()
         html = _make_client().get("/api/board/watch").text
         assert "No agents running." in html
-        assert "not configured" in html        # the product owner does not exist yet
+        assert "Product owner" not in html and "What next" not in html
         assert "the daemon's loops have not started" in html
 
     def test_rail_lists_a_running_agent(self, db_path):
