@@ -407,7 +407,7 @@ def test_board_lists_done_task_with_open_mr_under_to_merge(db_path):
 
     r = _make_client().get("/api/tasks/list")
     assert r.status_code == 200
-    assert "board-col--to-merge" in r.text
+    assert "lane--to-merge" in r.text
     assert task["id"] in r.text
 
 
@@ -423,36 +423,27 @@ def test_board_hides_children_and_shows_parent_chip(db_path):
     assert "0/1" in r.text               # parent's subtask progress chip
 
 
-def _board_col_classes(html, key):
-    """The extra classes on a rendered column, e.g. "  board-col--collapsed"."""
-    marker = f'class="board-col board-col--{key}'
-    start = html.index(marker) + len(marker)
-    return html[start:].split('"', 1)[0]
-
-
-def test_empty_live_board_columns_collapse_while_populated_ones_expand(db_path):
-    """An empty live column must render with the collapsed class (a slim strip
-    that hands its width to the columns with cards) and grow back to full width
-    the moment it holds a card — so Shipped/Done never get pushed off-screen."""
+def test_every_live_lane_stays_on_the_board_and_says_what_it_means(db_path):
+    """An empty lane is an answer ("nothing needs you"), so it keeps its place
+    and says so in words. Finished work is not a fourth lane — it is the
+    history list underneath, which is where the room went."""
     from core import store
     client = _make_client()
-    # The board needs something to render at all; a lone done task leaves every
-    # live column empty while still drawing the board.
     done = store.create_task("already shipped", repo="test-repo")
     store.set_status(done["id"], "done")
 
     html = client.get("/api/tasks/list").text
     for key in ("in-progress", "needs-you", "to-merge"):
-        assert "board-col--collapsed" in _board_col_classes(html, key), key
-    # archive columns render only when they hold something, so Done is full-width
-    assert "board-col--collapsed" not in _board_col_classes(html, "done")
+        assert f"lane--{key}" in html, key
+    assert "Nothing waiting on you" in html
+    assert html.count("lane--empty") == 3
+    assert "already shipped" in html and 'class="hrows"' in html   # archive is a list
 
     working = store.create_task("working now", repo="test-repo")
     store.set_status(working["id"], "active")
     html = client.get("/api/tasks/list").text
-    assert "board-col--collapsed" not in _board_col_classes(html, "in-progress")
-    for key in ("needs-you", "to-merge"):
-        assert "board-col--collapsed" in _board_col_classes(html, key), key
+    assert html.count("lane--empty") == 2        # in-progress filled up
+    assert "working now" in html
 
 
 # ── Inbox (needs-you feed) ───────────────────────────────────────────────
@@ -1037,8 +1028,8 @@ class TestBoardCards:
             html = _make_client().get("/api/tasks/list").text
         finally:
             sessions.clear()
-        assert "task-card--live" in html
-        assert "engineer working" in html
+        assert "card--live" in html
+        assert "engineer" in html
 
     def test_waiting_card_shows_question(self, db_path):
         from core import store
@@ -1136,10 +1127,12 @@ class TestWatchRail:
             sessions.clear()
         assert "engineer" in html and "add the panel" in html and "deepseek/v4" in html
 
-    def test_board_page_carries_the_rail(self, db_path):
+    def test_the_rail_is_unhooked_from_the_board_for_now(self, db_path):
+        """Temporarily off the board (2026-09-20) while the page is reworked.
+        The route still answers, so putting it back is a template change."""
         html = _make_client().get("/tasks").text
-        assert 'id="watch"' in html
-        assert "/api/board/watch" in html
+        assert 'id="watch"' not in html
+        assert _make_client().get("/api/board/watch").status_code == 200
 
 
 def test_autopilot_runs_collapse_into_one_group_card(db_path):
@@ -1157,8 +1150,8 @@ def test_autopilot_runs_collapse_into_one_group_card(db_path):
     store.create_task("a real delivery", status="done", title="Fix the gate")
 
     html = client.get("/api/tasks/list").text
-    assert html.count("🤖 Nightly repo scan") == 1     # one group row, not three cards
-    assert "3 runs" in html
+    assert html.count("🤖 Nightly repo scan") == 1     # one history row, not three
+    assert "×3" in html
     latest = max(runs, key=lambda t: t["updated_at"])
     assert latest["id"] in html                        # the group opens the latest run
     assert sum(t["id"] in html for t in runs) == 1     # the other two are folded away
