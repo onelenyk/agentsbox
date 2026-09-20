@@ -1302,3 +1302,51 @@ def test_backup_status_red_state_unit():
     # An unparseable stamp is unknown — treat it like "none", i.e. stale.
     assert _backup_status([{"name": "a.db", "created_at": "garbage"}]) == \
         {"age_s": None, "stale": True}
+
+
+class TestATaskOpensOverTheBoard:
+    """Reading a task used to cost you the board: your scroll position, your
+    filters and every sprint you unfolded, rebuilt on the way back."""
+
+    def test_rows_open_the_panel_and_push_the_task_url(self, db_path):
+        from core import store
+        t = store.create_task("open me", repo="test-repo")
+        store.set_status(t["id"], "done")
+        html = _make_client().get("/api/tasks/list").text
+        row = html.split(t["id"], 1)[1]
+        assert f'hx-get="/api/tasks/{t["id"]}/panel"' in html
+        assert 'hx-target="#overlay-body"' in row
+        assert f'hx-push-url="/tasks/{t["id"]}"' in row
+        # the plain href survives for a middle click, a new tab and no JS
+        assert f'href="/tasks/{t["id"]}"' in html
+
+    def test_the_panel_is_the_same_shell_the_page_uses(self, db_path):
+        from core import store
+        t = store.create_task("panel me", repo="test-repo")
+        store.set_status(t["id"], "active")
+        panel = _make_client().get(f"/api/tasks/{t['id']}/panel").text
+        assert 'id="task-detail"' in panel                 # it polls itself
+        assert f'hx-get="/api/tasks/{t["id"]}/detail"' in panel
+        assert "every 3s" in panel                         # a live task refreshes
+        assert "panel me" in panel and "Goal" in panel
+
+    def test_a_finished_task_panel_does_not_poll(self, db_path):
+        from core import store
+        t = store.create_task("quiet", repo="test-repo")
+        store.set_status(t["id"], "done")
+        assert "every 3s" not in _make_client().get(f"/api/tasks/{t['id']}/panel").text
+
+    def test_an_unknown_task_panel_is_a_404(self, db_path):
+        assert _make_client().get("/api/tasks/task-nope/panel").status_code == 404
+
+    def test_the_deep_link_still_renders_the_whole_page(self, db_path):
+        from core import store
+        t = store.create_task("linked", repo="test-repo")
+        html = _make_client().get(f"/tasks/{t['id']}").text
+        assert "<nav class=\"nav\">" in html              # full chrome, not a fragment
+        assert 'id="task-detail"' in html and "linked" in html
+
+    def test_the_board_carries_the_overlay_and_its_escape(self, db_path):
+        html = _make_client().get("/tasks").text
+        assert 'id="task-overlay"' in html and 'id="overlay-body"' in html
+        assert "closeTaskPanel" in html
