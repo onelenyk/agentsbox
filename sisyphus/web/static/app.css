@@ -513,6 +513,10 @@ body::before {
   color: var(--text-2); background: var(--panel-2); white-space: nowrap;
 }
 .tag--repo { max-width: 100%; color: var(--muted); }
+/* what the automation behind a run is: its schedule, and whether it can fire */
+.tag--auto { color: var(--text-2); background: var(--panel-2); }
+.tag--auto.tag--idle { color: var(--muted); font-style: italic; }
+.tslot { gap: 4px; }
 .tag--who { display: inline-flex; align-items: center; gap: 5px; }
 .tag--who .live-dot { width: 6px; height: 6px; }
 .tag--state { letter-spacing: .05em; text-transform: uppercase; font-size: 10px; font-weight: 600; }

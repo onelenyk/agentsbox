@@ -416,3 +416,38 @@ class TestTheTitleAnAutomationGivesItsTask:
     def test_a_long_name_is_truncated_to_sixty(self, db_path):
         title = ap._make_title({"name": "N" * 80, "trigger_type": "schedule"})
         assert len(title) == 60 and title.endswith("…")
+
+
+class TestSayingWhenAnAutomationFires:
+    """`0 3 * * *` is a fact about cron, not an answer to "when does this
+    run" — and the board has room for the answer, not the fact."""
+
+    def _ap(self, **kw):
+        return {"trigger_type": "schedule", **kw}
+
+    def test_a_daily_cron_reads_as_a_time(self):
+        assert ap.describe_schedule(self._ap(cron="0 3 * * *")) == "daily 03:00"
+        assert ap.describe_schedule(self._ap(cron="7 6 * * *")) == "daily 06:07"
+
+    def test_a_weekday_cron_names_the_day(self):
+        assert ap.describe_schedule(self._ap(cron="0 9 * * 1")) == "Mon 09:00"
+
+    def test_step_and_hourly_crons(self):
+        assert ap.describe_schedule(self._ap(cron="*/15 * * * *")) == "every 15m"
+        assert ap.describe_schedule(self._ap(cron="30 * * * *")) == "hourly at :30"
+        assert ap.describe_schedule(self._ap(cron="0 */4 * * *")) == "every 4h at :00"
+
+    def test_an_interval_needs_no_cron(self):
+        assert ap.describe_schedule(self._ap(interval_seconds=1800)) == "every 30m"
+        assert ap.describe_schedule(self._ap(interval_seconds=7200)) == "every 2h"
+
+    def test_a_webhook_says_what_calls_it(self):
+        phrase = ap.describe_schedule(
+            {"trigger_type": "webhook", "webhook_platform": "jira", "webhook_event": "issue_created"})
+        assert phrase == "webhook · jira · issue_created"
+
+    def test_anything_unphraseable_falls_back_to_the_cron_itself(self):
+        """Better the raw field than a confident guess about when it fires."""
+        assert ap.describe_schedule(self._ap(cron="5 4 3 2 1")) == "5 4 3 2 1"
+        assert ap.describe_schedule(self._ap(cron="totally bogus")) == "totally bogus"
+        assert ap.describe_schedule(self._ap()) == "no schedule"

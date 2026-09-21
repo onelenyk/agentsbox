@@ -156,7 +156,16 @@
                         {# Every tag has a slot of its own, filled or not: a row
                            with one tag fewer must not shift the ones beside it. #}
                         <span class="trow__tags">
-                            <span class="tslot">{% if row.repo %}<span class="tag tag--repo">{{ row.repo }}</span>{% endif %}</span>
+                            {# An automation's row says what the automation is —
+                               when it fires, whether it still can — where a
+                               human task says which repo it touched. #}
+                            <span class="tslot">
+                                {%- if row.badges -%}
+                                {%- for b in row.badges %}<span class="tag tag--auto{{ ' tag--' ~ b.tone if b.tone }}"{% if b.title %} title="{{ b.title }}"{% endif %}>{{ b.text }}</span>{% endfor -%}
+                                {%- elif row.repo -%}
+                                <span class="tag tag--repo">{{ row.repo }}</span>
+                                {%- endif -%}
+                            </span>
                             <span class="tslot">{% if row.who %}<span class="tag tag--who">{{ icons.get(row.who, '•') }} {{ row.who }}{% if row.live %} <span class="live-dot"></span>{% endif %}</span>{% endif %}</span>
                             <span class="tslot">{% if row.review_status == 'changes_requested' %}<span class="tag tag--bad {{ 'is-settled' if not row.verdict_open }}"
                                   title="{% if row.verdict_open %}The reviewer asked for changes — the branch cannot land until that is answered{% else %}The reviewer asked for changes; this branch was merged anyway — the thread says by whom and why{% endif %}">changes requested</span>{% endif %}</span>

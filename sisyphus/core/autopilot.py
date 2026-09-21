@@ -124,6 +124,55 @@ def schedule_problem(ap: dict) -> Optional[str]:
     return "a schedule with neither a cron nor an interval — this automation can never fire"
 
 
+_WEEKDAYS = {"0": "Sun", "1": "Mon", "2": "Tue", "3": "Wed", "4": "Thu",
+             "5": "Fri", "6": "Sat", "7": "Sun",
+             "sun": "Sun", "mon": "Mon", "tue": "Tue", "wed": "Wed",
+             "thu": "Thu", "fri": "Fri", "sat": "Sat"}
+
+
+def describe_schedule(ap: dict) -> str:
+    """When this automation fires, in the words a person would use.
+
+    `0 3 * * *` is a fact about cron, not an answer to "when does this run" —
+    and it is the answer a board has room for. Anything this cannot phrase
+    falls back to the cron itself rather than guessing.
+    """
+    kind = (ap.get("trigger_type") or "").strip()
+    if kind == "webhook":
+        where = (ap.get("webhook_platform") or "").strip()
+        event = (ap.get("webhook_event") or "").strip()
+        return " · ".join(p for p in ("webhook", where, event) if p)
+
+    every = int(ap.get("interval_seconds") or 0)
+    if every > 0 and not (ap.get("cron") or "").strip():
+        if every % 3600 == 0:
+            return f"every {every // 3600}h"
+        if every % 60 == 0:
+            return f"every {every // 60}m"
+        return f"every {every}s"
+
+    cron = (ap.get("cron") or "").strip()
+    parts = cron.split()
+    if len(parts) != 5:
+        return cron or "no schedule"
+    minute, hour, dom, mon, dow = parts
+    if minute.startswith("*/") and hour == "*" and (dom, mon, dow) == ("*", "*", "*"):
+        return f"every {minute[2:]}m"
+    if hour.startswith("*/") and minute.isdigit() and (dom, mon, dow) == ("*", "*", "*"):
+        return f"every {hour[2:]}h at :{int(minute):02d}"
+    if minute.isdigit() and hour == "*" and (dom, mon, dow) == ("*", "*", "*"):
+        return f"hourly at :{int(minute):02d}"
+    if minute.isdigit() and hour.isdigit():
+        at = f"{int(hour):02d}:{int(minute):02d}"
+        if (dom, mon, dow) == ("*", "*", "*"):
+            return f"daily {at}"
+        if dom == "*" and mon == "*" and dow.lower() in _WEEKDAYS:
+            return f"{_WEEKDAYS[dow.lower()]} {at}"
+        if dom.isdigit() and mon == "*" and dow == "*":
+            return f"monthly on the {int(dom)}{'st' if dom == '1' else ('nd' if dom == '2' else ('rd' if dom == '3' else 'th'))} at {at}"
+    return cron
+
+
 def is_schedule(ap: dict) -> bool:
     return ap.get("trigger_type") == "schedule" and (
         bool((ap.get("cron") or "").strip()) or int(ap.get("interval_seconds") or 0) > 0

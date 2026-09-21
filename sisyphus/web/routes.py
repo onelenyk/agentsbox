@@ -1036,17 +1036,33 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = ""):
     # out from between them. In the archive columns (never the live ones — a
     # cron run that NEEDS you must stay a card) each autopilot's runs collapse
     # into one group row: count, the latest run, when. Signal stays, pile goes.
-    from core.autopilot import list_autopilots
-    ap_names = [a["name"] for a in list_autopilots() if a.get("name")]
+    from core import autopilot as _autopilot
+    automations = {a["name"]: a for a in _autopilot.list_autopilots() if a.get("name")}
 
     def _autopilot_of(t):
         title = t.get("title") or ""
-        for name in ap_names:
+        for name in automations:
             # _make_title shapes: "name · 2026-08-09" (schedule), "name: event"
             # (webhook), or the bare name.
             if title == name or title.startswith(f"{name} · ") or title.startswith(f"{name}: "):
                 return name
         return None
+
+    def _automation_badges(name):
+        """What a row should say about the automation behind it: when it fires,
+        and whether it still can. A run's own outcome is already on the row —
+        this is about the thing that produced it, which the board otherwise
+        never mentions at all."""
+        ap = automations.get(name)
+        if not ap:
+            return []
+        badges = [{"text": _autopilot.describe_schedule(ap), "tone": ""}]
+        if not ap.get("enabled"):
+            badges.append({"text": "paused", "tone": "idle"})
+        problem = _autopilot.schedule_problem(ap)
+        if problem:
+            badges.append({"text": "broken schedule", "tone": "bad", "title": problem})
+        return badges
 
     autopilot_of = {t["id"]: _autopilot_of(t)
                     for col in ("shipped", "done", "failed") for t in columns[col]}
@@ -1069,7 +1085,9 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = ""):
     rows, by_id = [], {}
     for col in ("shipped", "done", "failed", "in-progress", "needs-you", "to-merge"):
         for t in columns[col]:
-            rows.append(_row(t, col, who, auto_name=autopilot_of.get(t["id"])))
+            name = autopilot_of.get(t["id"])
+            rows.append(_row(t, col, who, auto_name=name,
+                             badges=_automation_badges(name) if name else None))
     for r in rows:
         by_id[r["id"]] = r
 
@@ -1137,7 +1155,8 @@ _KIND_WORD = {"in-progress": "in flight", "needs-you": "wants you",
               "done": "done", "failed": "failed"}
 
 
-def _row(t: dict, kind: str, who: dict, auto_name: Optional[str] = None) -> dict:
+def _row(t: dict, kind: str, who: dict, auto_name: Optional[str] = None,
+         badges: Optional[list] = None) -> dict:
     """One task as the backlog draws it: the tags a person filters by, and
     nothing that needs a second query per row. A run of an automation titles
     itself by the automation, so its repeats can fold together."""
@@ -1147,6 +1166,7 @@ def _row(t: dict, kind: str, who: dict, auto_name: Optional[str] = None) -> dict
         "title": auto_name or store.task_display_title(t),
         "kind": kind, "word": _KIND_WORD.get(kind, kind),
         "repo": t.get("repo") or "", "auto": bool(auto_name), "runs": 1,
+        "badges": badges or [],
         "who": t.get("live_role") or who.get(t["id"]) or t.get("agent") or "",
         "live": bool(t.get("live_role")),
         "review_status": t.get("review_status"),
