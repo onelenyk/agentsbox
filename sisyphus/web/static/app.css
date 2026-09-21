@@ -507,6 +507,36 @@ body::before {
 .tslot { display: flex; justify-content: flex-start; min-width: 0; }
 .tslot .tag { overflow: hidden; text-overflow: ellipsis; }
 
+/* ── An automation, and its runs ─────────────────────────────────────────
+   Machine work is a different kind of object from yours: a standing
+   instruction that fires on a clock, not a thing somebody decided to do. It
+   reads that way — violet instead of the board's amber, a dashed edge because
+   nothing here was chosen, its own line rather than a row among your tasks —
+   and its runs live inside it, one click away, where they cannot crowd the
+   week out. */
+.autogroup-wrap { list-style: none; }
+.autogroup { border-left: 2px dashed var(--violet); border-radius: var(--r-sm); margin: 2px 0; }
+.autogroup[open] { background: rgba(185, 140, 255, .04); }
+.autogroup__head {
+  display: flex; align-items: center; gap: 10px; cursor: pointer;
+  padding: 9px 12px; list-style: none;
+}
+.autogroup__head::-webkit-details-marker { display: none; }
+.autogroup__head:hover { background: rgba(185, 140, 255, .07); border-radius: var(--r-sm); }
+.autogroup__chev { color: var(--violet); font-size: 10px; transition: transform .12s; }
+.autogroup[open] .autogroup__chev { transform: rotate(90deg); }
+.autogroup__bot { font-size: 13px; opacity: .9; }
+.autogroup__name { font-size: 13px; font-weight: 600; color: var(--text-2); }
+.autogroup__head .tag--auto { color: var(--violet); background: var(--violet-bg); border-color: rgba(185, 140, 255, .28); }
+.autogroup__tally { margin-left: auto; font-size: 11.5px; color: var(--muted); }
+.autogroup__tally .is-bad { color: var(--bad); }
+.autogroup__when { width: 74px; text-align: right; font-size: 11.5px; color: var(--muted); }
+/* the runs: quieter than your own rows, and indented under their instruction */
+.trows--nested { padding: 0 0 6px 26px; }
+.trows--nested .trow a { font-size: 12.5px; padding: 6px 10px; min-height: 34px; }
+.trows--nested .trow:nth-child(odd) a { background: transparent; }
+.trows--nested .trow a:hover { background: var(--panel); border-left-color: var(--violet); }
+
 .tag {
   font-size: 11px; line-height: 1.8; padding: 0 8px;
   border-radius: var(--r-pill); border: 1px solid var(--border);

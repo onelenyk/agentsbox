@@ -1194,10 +1194,10 @@ class TestWatchRail:
         assert _make_client().get("/api/board/watch").status_code == 200
 
 
-def test_autopilot_runs_collapse_into_one_group_card(db_path):
-    """Two daily crons produce ~60 identical archive cards a month; the board
-    folds each autopilot's runs into one row so shipped human work stays
-    visible. Live columns never fold — a cron run that needs you is a card."""
+def test_an_automation_is_one_object_with_its_runs_inside(db_path):
+    """Two daily crons produce ~60 identical rows a month. An automation is a
+    standing instruction, not a task that happens to repeat, so the week shows
+    the automation — folded — and its runs live inside it."""
     from core import store
     from core.autopilot import create_autopilot
     client = _make_client()
@@ -1209,12 +1209,13 @@ def test_autopilot_runs_collapse_into_one_group_card(db_path):
     store.create_task("a real delivery", status="done", title="Fix the gate")
 
     html = client.get("/api/tasks/list").text
-    assert html.count("🤖 Nightly repo scan") == 1     # one history row, not three
-    assert "×3" in html
-    latest = max(runs, key=lambda t: t["updated_at"])
-    assert latest["id"] in html                        # the group opens the latest run
-    assert sum(t["id"] in html for t in runs) == 1     # the other two are folded away
-    assert "Fix the gate" in html                      # human work stays a card
+    assert html.count("autogroup__name") == 1          # one automation, one object
+    assert ">3</span> runs" in html and "daily 03:00" in html
+    for t in runs:
+        assert t["id"] in html                          # every run is still reachable
+        assert t["title"] in html                       # and names its own day
+    assert "Fix the gate" in html                       # human work stays a row of its own
+    assert "autogroup" not in html.split("Fix the gate", 1)[1].split("</li>", 1)[0]
 
 
 def test_a_cron_run_that_needs_you_stays_a_card(db_path):
@@ -1416,8 +1417,8 @@ class TestRepeatsFoldInsideAWeekNotAcrossWeeks:
         self._runs(["2026-09-15", "2026-09-16", "2026-09-17",     # week 38
                     "2026-09-08", "2026-09-09"])                   # week 37
         html = _make_client().get("/api/tasks/list").text
-        assert html.count("🤖 Nightly repo scan") == 2     # one row per week, not one in total
-        assert "×3" in html and "×2" in html
+        assert html.count("autogroup__name") == 2      # one automation object per week
+        assert ">3</span> runs" in html and ">2</span> runs" in html
 
     def test_a_weeks_total_counts_runs_not_rows(self, db_path):
         """Three runs folded into one row are still three tasks that week."""
@@ -1425,11 +1426,9 @@ class TestRepeatsFoldInsideAWeekNotAcrossWeeks:
         html = _make_client().get("/api/tasks/list").text
         # the week holding the runs, found by its dates rather than its label,
         # which reads "Last week" or "Week 38" depending on when this runs
-        week = html.split("🤖 Nightly repo scan", 1)[0].rsplit("<details", 1)[1] \
-            + html.split("🤖 Nightly repo scan", 1)[1]
-        assert ">3</span> tasks" in week      # three runs happened that week
-        assert "×3" in week                    # on one row
-        assert html.count("🤖 Nightly repo scan") == 1
+        assert ">3</span> tasks" in html      # three runs happened that week
+        assert ">3</span> runs" in html        # under one automation
+        assert html.count("autogroup__name") == 1
 
 
 class TestATaskTitleCanBeSelected:
