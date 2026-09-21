@@ -48,7 +48,7 @@ def test_every_token_used_is_defined():
 # Inline styles are one-off design decisions a restyle cannot reach. There are
 # still some from before the rule; the number may only go down. Lower it here
 # whenever a page is moved onto components.
-INLINE_STYLE_CEILING = 87
+INLINE_STYLE_CEILING = 77
 
 
 def test_inline_styles_only_ever_decrease():

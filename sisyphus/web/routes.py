@@ -50,7 +50,20 @@ def _tmpl():
     tmpl.env.globals["worker_agent_names"] = _worker_agent_names
     tmpl.env.globals["asset_v"] = _asset_v
     tmpl.env.filters["md"] = render_md
+    tmpl.env.filters["when"] = _when
     return tmpl
+
+
+def _when(iso: str) -> str:
+    """A stored UTC stamp as the reader's local "4 Sep 19:17". The page is read
+    in a week and a timezone, not in ISO."""
+    from datetime import datetime
+    try:
+        d = datetime.fromisoformat(iso)
+    except (TypeError, ValueError):
+        return ""
+    d = d.astimezone() if d.tzinfo else d
+    return f"{d.day} {d.strftime('%b')} {d.strftime('%H:%M')}"
 
 _started = False
 
@@ -1516,6 +1529,22 @@ def _classify_diff(text: str):
     return lines, adds, dels
 
 
+@router.get("/api/tasks/{task_id}/read/{filename}", response_class=HTMLResponse)
+async def task_read_modal(request: Request, task_id: str, filename: str):
+    """Open a task's attachment the way its kind reads: a report as a rendered
+    document, a patch in the diff viewer, anything else as plain text. Reports
+    used to open in the diff viewer, which showed markdown as grey context
+    lines."""
+    from core import attachments
+    if filename.endswith((".patch", ".diff")):
+        return await task_diff_modal(request, task_id, filename)
+    text = attachments.read(task_id, filename)
+    if text is None:
+        return HTMLResponse('<div class="modal-backdrop" onclick="this.remove()"><div class="modal" onclick="event.stopPropagation()"><div class="modal__body"><div class="empty">Attachment not found.</div></div></div></div>')
+    return _tmpl().TemplateResponse(request, "doc_modal.html", {
+        "filename": filename, "text": text, "markdown": filename.endswith(".md")})
+
+
 @router.get("/api/tasks/{task_id}/diff/{filename}", response_class=HTMLResponse)
 async def task_diff_modal(request: Request, task_id: str, filename: str):
     """Render a task attachment (a diff patch / any text) in a dialog, with diff
@@ -1758,16 +1787,74 @@ def _task_ctx(task_id: str) -> Optional[dict]:
                     finished = {"text": m["text"], "mins": mins}
                 break
 
+    from core import attachments, timeline
+
+    mr = mergerequests.latest_for_task(task_id)
+    live = _enrich_sessions(sessions.list_for_task(task_id))
+    steps = timeline.steps(messages)
+    live_by_role = {s["role"]: s for s in live}
+    for st in steps:
+        if st["type"] == "run" and st["how"] == "running":
+            st["live"] = live_by_role.get(st["role"])
+
+    change = None
+    if mr:
+        patch = attachments.read(task_id, "change.patch") or ""
+        _, adds, dels = _classify_diff(patch)
+        checks = [s_ for s_ in steps if s_["type"] == "check"]
+        verdicts = timeline.verdicts(messages)
+        change = {"adds": adds, "dels": dels,
+                  "files": sum(1 for ln in patch.splitlines() if ln.startswith("diff --git")),
+                  "check": checks[-1] if checks else None,
+                  "approvals": sum(1 for v in verdicts if v["approved"]),
+                  "gate": mergerequests.gate_state(mr) if mr["status"] == "open" else ""}
+
     return {
         "task": task, "messages": messages, "working": working, "finished": finished,
-        "live_sessions": _enrich_sessions(sessions.list_for_task(task_id)),
+        "live_sessions": live,
         "result": store.result_view(task_id),
         "children": store.list_children(task_id),
         "parent": store.get_task(task["parent_id"]) if task.get("parent_id") else None,
-        "mr": mergerequests.latest_for_task(task_id),
+        "mr": mr,
         "review_of": _review_of(task),
         "usage": usage.task_usage(task_id),
+        # the four reads the page is built from — see core/timeline.py
+        "outcome": timeline.outcome(task, messages),
+        "steps": steps,
+        "history": timeline.history(task, messages, mr, store.list_events(task_id)),
+        "files": timeline.files(task_id, messages),
+        "change": change,
+        # the patch a person would open: the one the worker posted with its
+        # change, or change.patch on disk — whether or not an MR row exists
+        "diff_file": next((m["attachment"] for m in reversed(messages)
+                           if m["kind"] in ("mr", "result") and (m.get("attachment") or "").endswith(".patch")),
+                          "change.patch" if attachments.read(task_id, "change.patch") is not None else ""),
+        "asked_by": _asked_by(task),
+        "trail": _trail(task_id),
     }
+
+
+def _asked_by(task: dict) -> dict:
+    """Who asked for the task: you, or the automation that fired it."""
+    origin = task.get("origin") or ""
+    if origin.startswith("autopilot:"):
+        from core import autopilot
+        ap = autopilot.get_autopilot(origin.split(":", 1)[1])
+        if ap:
+            return {"who": ap["name"], "auto": True, "about": autopilot.describe_schedule(ap)}
+    return {"who": "you", "auto": False, "about": ""}
+
+
+def _trail(task_id: str) -> list:
+    """Every role that worked the task, in the order it first did."""
+    from core.db import get_conn
+    conn = get_conn()
+    try:
+        rows = conn.execute("SELECT agent, MIN(id) AS first FROM usage WHERE task_id = ? "
+                            "GROUP BY agent ORDER BY first", (task_id,)).fetchall()
+    finally:
+        conn.close()
+    return [r["agent"] for r in rows]
 
 
 @router.get("/api/tasks/{task_id}/panel", response_class=HTMLResponse)
@@ -1798,9 +1885,16 @@ async def task_reply(task_id: str, text: str = Form(...)):
     text = text.strip()
     if not text:
         return Response(status_code=422)
-    if not store.get_task(task_id):
+    task = store.get_task(task_id)
+    if not task:
         return Response(status_code=404)
 
+    if task["status"] in ("done", "failed"):
+        # The orchestrator ignores every event on a finished task, so a reply
+        # typed into a done task used to post and then vanish: nothing ran,
+        # nothing said so. Replying IS reopening — do both, in that order.
+        store.set_status(task_id, "waiting", cause="reopened by your reply")
+        store.post_message(task_id, "system", kind="note", text="reopened by the human with a reply")
     store.post_message(task_id, "human", kind="answer", text=text)
     emit(task_id, "human_replied")
     resp = Response(status_code=200)
@@ -1841,7 +1935,7 @@ async def task_stop(task_id: str):
         signalled += cancellation.request(tid)
         t = store.get_task(tid)
         if t and t["status"] not in ("done", "failed"):
-            store.set_status(tid, "waiting")
+            store.set_status(tid, "waiting", cause="stopped by you")
             if tid != task_id:
                 store.post_message(
                     tid, "system", kind="note",
@@ -1876,7 +1970,7 @@ async def task_reopen(task_id: str):
     if task["status"] not in ("done", "failed"):
         return Response(status_code=409)
 
-    store.set_status(task_id, "waiting")
+    store.set_status(task_id, "waiting", cause="reopened by you")
     store.post_message(task_id, "system", kind="note",
                        text="reopened by the human — reply below to tell the orchestrator what to do next")
     resp = Response(status_code=200)

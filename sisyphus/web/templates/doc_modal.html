@@ -1,0 +1,20 @@
+{# A task's report or text attachment, read as what it is. The dialog shape is
+   the one the diff and the merge request use. #}
+<div class="modal-backdrop" onclick="if(event.target===this)this.remove()">
+    <div class="modal modal--wide modal--tall" onclick="event.stopPropagation()">
+        <div class="modal__head modal__head--row">
+            <div class="mr-title">
+                <h2>{{ 'Report' if markdown else 'File' }}</h2>
+                <code class="mono">{{ filename }}</code>
+            </div>
+            <button type="button" class="btn btn--ghost btn--sm" onclick="this.closest('.modal-backdrop').remove()">Close</button>
+        </div>
+        <div class="modal__body">
+            {% if markdown %}
+            <div class="docview msg__body--md">{{ text | md }}</div>
+            {% else %}
+            <pre class="logtext">{{ text }}</pre>
+            {% endif %}
+        </div>
+    </div>
+</div>

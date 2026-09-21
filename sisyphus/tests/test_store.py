@@ -409,3 +409,25 @@ class TestATaskKnowsWhoAskedForIt:
         assert origin["t-run"] == "autopilot:ap-1"
         # a person's task that merely starts with the same words is not claimed
         assert origin["t-mine"] is None
+
+
+class TestStatusChangesAreRecorded:
+    """The tasks row only ever held the current status; "when did it start
+    waiting, and why" had to be dug out of thread prose."""
+
+    def test_a_change_is_recorded_with_its_cause(self, db_path):
+        t = store.create_task("x")
+        store.set_status(t["id"], "waiting", cause="the orchestrator asked you")
+        (e,) = store.list_events(t["id"])
+        assert (e["from_status"], e["to_status"], e["cause"]) == ("active", "waiting", "the orchestrator asked you")
+
+    def test_restating_a_status_is_not_an_event(self, db_path):
+        t = store.create_task("x")
+        store.set_status(t["id"], "active")
+        assert store.list_events(t["id"]) == []
+
+    def test_events_come_back_in_order(self, db_path):
+        t = store.create_task("x")
+        for s in ("waiting", "active", "done"):
+            store.set_status(t["id"], s)
+        assert [e["to_status"] for e in store.list_events(t["id"])] == ["waiting", "active", "done"]

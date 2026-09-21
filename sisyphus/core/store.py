@@ -53,6 +53,20 @@ CREATE TABLE IF NOT EXISTS key_counters (
     prefix TEXT PRIMARY KEY,
     last   INTEGER NOT NULL
 );
+-- Every status change, as it happens. The tasks row only ever held the
+-- current status, so "when did this start waiting, and how long did it sit"
+-- had to be reconstructed from thread prose. Kept out of `messages` on
+-- purpose: the thread is the prompt, and history is not something an agent
+-- needs to read.
+CREATE TABLE IF NOT EXISTS task_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id     TEXT NOT NULL REFERENCES tasks(id),
+    at          TEXT NOT NULL,
+    from_status TEXT,
+    to_status   TEXT NOT NULL,
+    cause       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id, id);
 """
 
 
@@ -218,16 +232,32 @@ def list_children(parent_id: str) -> List[dict]:
     return [dict(r) for r in rows]
 
 
-def set_status(task_id: str, status: str) -> None:
+def set_status(task_id: str, status: str, cause: Optional[str] = None) -> None:
+    """Move a task to *status*, and record the move when it is one. Setting a
+    task to the status it already has is not an event and leaves no trace."""
     if status not in VALID_STATUSES:
         raise ValueError(f"invalid status {status!r}; must be one of {VALID_STATUSES}")
+    now = _now()
     conn = get_conn()
-    conn.execute(
-        "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?",
-        (status, _now(), task_id),
-    )
+    row = conn.execute("SELECT status FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    conn.execute("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?", (status, now, task_id))
+    if row is not None and row["status"] != status:
+        conn.execute(
+            "INSERT INTO task_events (task_id, at, from_status, to_status, cause) VALUES (?, ?, ?, ?, ?)",
+            (task_id, now, row["status"], status, cause))
     conn.commit()
     conn.close()
+
+
+def list_events(task_id: str) -> List[dict]:
+    """The recorded status changes of a task, oldest first. Empty for a task
+    whose changes all happened before events were recorded (2026-09-22)."""
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT at, from_status, to_status, cause FROM task_events WHERE task_id = ? ORDER BY id",
+        (task_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 def find_task_by_mr(url: str) -> Optional[dict]:
