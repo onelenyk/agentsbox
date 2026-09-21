@@ -4,7 +4,7 @@
    outside the swap would keep offering to stop a task that finished two
    minutes ago. #}
 <div id="task-detail" hx-get="/api/tasks/{{ task.id }}/detail"
-     hx-trigger="taskUpdated from:body{% if task.status in ('active', 'waiting') %}, every 3s{% endif %}"
-     hx-swap="innerHTML">
+     hx-trigger="taskUpdated from:body, dataChanged from:body{% if task.status in ('active', 'waiting') %}, every 60s{% endif %}"
+     hx-swap="innerHTML transition:true">
     {% include "task_detail_content.html" %}
 </div>

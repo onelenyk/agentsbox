@@ -1325,16 +1325,19 @@ class TestATaskOpensOverTheBoard:
         t = store.create_task("panel me", repo="test-repo")
         store.set_status(t["id"], "active")
         panel = _make_client().get(f"/api/tasks/{t['id']}/panel").text
-        assert 'id="task-detail"' in panel                 # it polls itself
+        assert 'id="task-detail"' in panel                 # it refreshes itself
         assert f'hx-get="/api/tasks/{t["id"]}/detail"' in panel
-        assert "every 3s" in panel                         # a live task refreshes
+        assert "dataChanged from:body" in panel            # driven by the pulse
+        assert "every 60s" in panel                        # safety net on a live task
         assert "panel me" in panel and "Goal" in panel
 
-    def test_a_finished_task_panel_does_not_poll(self, db_path):
+    def test_a_finished_task_panel_keeps_no_timer_at_all(self, db_path):
         from core import store
         t = store.create_task("quiet", repo="test-repo")
         store.set_status(t["id"], "done")
-        assert "every 3s" not in _make_client().get(f"/api/tasks/{t['id']}/panel").text
+        panel = _make_client().get(f"/api/tasks/{t['id']}/panel").text
+        assert "every " not in panel                        # nothing ticks on a finished task
+        assert "dataChanged from:body" in panel             # it still hears the daemon
 
     def test_an_unknown_task_panel_is_a_404(self, db_path):
         assert _make_client().get("/api/tasks/task-nope/panel").status_code == 404
