@@ -31,6 +31,34 @@
   --bad:  #f5544d; --bad-bg:  rgba(245, 84, 77, 0.12);
   --violet: #b98cff; --violet-bg: rgba(185, 140, 255, 0.12);
 
+  /* Borders for the semantic tints. --good-bd / --bad-bd / --warn-bd were
+     referenced for months without being defined, so every border that used
+     them silently fell back to nothing. */
+  --good-bd: rgba(70, 209, 127, 0.26);
+  --bad-bd: rgba(245, 84, 77, 0.30);
+  --warn-bd: rgba(224, 168, 58, 0.30);
+  --violet-bd: rgba(185, 140, 255, 0.26);
+  --bad-edge: rgba(245, 84, 77, 0.45);        /* a failed row's left edge */
+
+  /* Information that is neither good nor bad news: the request a task was
+     given — its INPUT, as opposed to the result it produced. */
+  --info: #97aefc; --info-bg: rgba(120, 150, 255, 0.08); --info-bd: rgba(120, 150, 255, 0.30);
+
+  /* Faint tints laid over a surface: banding, hover, the scanlines. */
+  --tint-1: rgba(255, 255, 255, 0.016);
+  --tint-2: rgba(255, 255, 255, 0.03);
+  --scanline: rgba(255, 255, 255, 0.010);
+
+  /* Text on a filled accent button, and the diff viewer's line colours. */
+  --on-accent: #071018;
+  --diff-add: #8ee6ad; --diff-del: #f6968f;
+
+  /* Elevation and dimming. */
+  --shadow-lift: 0 6px 20px rgba(0, 0, 0, 0.34);
+  --shadow-sheet: -20px 0 60px rgba(0, 0, 0, 0.5);
+  --scrim: rgba(1, 3, 6, 0.62);
+  --good-glow: rgba(70, 209, 127, 0.5); --good-glow-0: rgba(70, 209, 127, 0);
+
   /* radii */
   --r-sm: 6px; --r: 9px; --r-lg: 12px; --r-pill: 999px;
 
@@ -72,7 +100,7 @@ code { font-family: var(--mono); font-size: .92em; color: var(--text-2); }
 /* subtle scanline atmosphere (ops-console vibe) */
 body::before {
   content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 1;
-  background: repeating-linear-gradient(0deg, rgba(255,255,255,0.010) 0 1px, transparent 1px 3px);
+  background: repeating-linear-gradient(0deg, var(--scanline) 0 1px, transparent 1px 3px);
   opacity: .5;
 }
 
@@ -80,7 +108,7 @@ body::before {
 .app { display: grid; grid-template-columns: var(--sbw) 1fr; min-height: 100vh; }
 .sidebar {
   position: sticky; top: 0; height: 100vh;
-  background: #0c0d10; border-right: 1px solid var(--border);
+  background: var(--inset); border-right: 1px solid var(--border);
   display: flex; flex-direction: column; z-index: 40;
 }
 .brand {
@@ -198,7 +226,7 @@ body::before {
 .led.amber { background: var(--accent); }
 .led.idle { background: var(--muted); }
 .led.dead { background: var(--bad); animation: none; }
-@keyframes led-pulse { 0% { box-shadow: 0 0 0 0 rgba(70,209,127,.5); } 70% { box-shadow: 0 0 0 6px rgba(70,209,127,0); } 100% { box-shadow: 0 0 0 0 rgba(70,209,127,0); } }
+@keyframes led-pulse { 0% { box-shadow: 0 0 0 0 var(--good-glow); } 70% { box-shadow: 0 0 0 6px var(--good-glow-0); } 100% { box-shadow: 0 0 0 0 var(--good-glow-0); } }
 @media (prefers-reduced-motion: reduce) { .led.live { animation: none; } }
 .page-head {
   display: flex; align-items: center; justify-content: space-between;
@@ -221,7 +249,7 @@ body::before {
 }
 .btn:hover { background: var(--hover); border-color: var(--border-2); }
 .btn:active { transform: translateY(1px); }
-.btn--primary { background: var(--accent); border-color: var(--accent); color: #071018; }
+.btn--primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .btn--primary:hover { background: var(--accent-hi); border-color: var(--accent-hi); }
 .btn--ghost { background: transparent; border-color: var(--border); color: var(--text-2); }
 .btn--ghost:hover { color: var(--text); background: var(--hover); }
@@ -304,11 +332,11 @@ body::before {
 .asks { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 10px; }
 .ask {
   display: block; text-decoration: none; padding: 13px 15px;
-  background: var(--panel); border: 1px solid var(--warn-bd, rgba(224, 168, 58, .3));
+  background: var(--panel); border: 1px solid var(--warn-bd);
   border-left: 3px solid var(--warn); border-radius: var(--r);
   transition: background .12s, transform .06s, box-shadow .12s;
 }
-.ask:hover { background: var(--hover); transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,.32); }
+.ask:hover { background: var(--hover); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
 .ask__top { display: flex; align-items: baseline; gap: 8px; }
 .ask__title {
   font-size: 13.5px; font-weight: 650; color: var(--text); line-height: 1.45;
@@ -487,7 +515,7 @@ body::before {
   text-decoration: none; color: var(--text); font-size: 13.5px; line-height: 1.4;
   border-radius: var(--r-sm); border-left: 2px solid transparent;
 }
-.trow:nth-child(odd) a { background: rgba(255, 255, 255, .016); }
+.trow:nth-child(odd) a { background: var(--tint-1); }
 .trow a:hover {
   background: var(--hover); border-left-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--border);
@@ -499,7 +527,7 @@ body::before {
 .trow__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* work that ended badly is legible as such before you read a word of it */
 .trow--failed .trow__title { color: var(--text-2); }
-.trow--failed a { border-left-color: rgba(245, 84, 77, .45); }
+.trow--failed a { border-left-color: var(--bad-edge); }
 .trow__runs { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-left: 8px; }
 .trow__when { text-align: right; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
 .trow a:hover .trow__when { color: var(--text-2); }
@@ -561,7 +589,7 @@ body::before {
    without turning the row into a different kind of object — it is a task. */
 .tag--origin {
   max-width: 100%; overflow: hidden; text-overflow: ellipsis;
-  color: var(--violet); background: var(--violet-bg); border-color: rgba(185, 140, 255, .26);
+  color: var(--violet); background: var(--violet-bg); border-color: var(--violet-bd);
 }
 .tag--origin.tag--idle { color: var(--muted); background: var(--panel-2); border-color: var(--border); font-style: italic; }
 .tag--origin.tag--bad { color: var(--bad); background: var(--bad-bg); border-color: var(--bad-bd); }
@@ -730,11 +758,11 @@ body::before {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 14px; font-family: var(--mono); font-size: 12.5px;
   color: var(--good); border-left-color: var(--good); background: var(--good-bg);
-  border-color: rgba(70, 209, 127, .22);
+  border-color: var(--good-bd);
 }
 .msg--commit .msg__ic { opacity: .85; }
-.badge--ok   { color: var(--good); background: var(--good-bg); border-color: rgba(70,209,127,.25); }
-.badge--warn { color: var(--warn); background: var(--warn-bg); border-color: rgba(224,168,58,.3); }
+.badge--ok   { color: var(--good); background: var(--good-bg); border-color: var(--good-bd); }
+.badge--warn { color: var(--warn); background: var(--warn-bg); border-color: var(--warn-bd); }
 
 /* diffstat-shaped message bodies ("path | 5 +++++") as a compact table */
 .diffstat-table {
@@ -768,8 +796,7 @@ body::before {
   padding: 6px 13px; font-family: var(--mono); font-size: 12px;
   color: var(--good); border-left-color: var(--good);
 }
-.badge--ok   { color: var(--good); background: var(--good-bg); border-color: rgba(70,209,127,.25); }
-.badge--warn { color: var(--warn); background: var(--warn-bg); border-color: rgba(224,168,58,.3); }
+
 
 /* markdown-rendered dialogue bodies (render_md output) */
 .msg__body--md { white-space: normal; }
@@ -832,7 +859,7 @@ body::before {
 /* ── Forms / modal ───────────────────────────────────────────────────── */
 .modal-backdrop {
   position: fixed; inset: 0; z-index: 100;
-  background: rgba(1, 3, 6, 0.66); backdrop-filter: blur(2px);
+  background: var(--scrim); backdrop-filter: blur(2px);
   display: flex; align-items: flex-start; justify-content: center; padding: 8vh 16px;
 }
 .modal {
@@ -871,9 +898,9 @@ body::before {
   padding: 8px 0; overflow-x: auto; max-height: 62vh; overflow-y: auto;
 }
 .diff .dl { display: block; white-space: pre; padding: 0 14px; min-height: 1.45em; }
-.diff .dl:hover { background: rgba(255, 255, 255, .03); }
-.diff .add  { background: rgba(70,209,127,.10); color: #8ee6ad; }
-.diff .del  { background: rgba(245,84,77,.11);  color: #f6968f; }
+.diff .dl:hover { background: var(--tint-2); }
+.diff .add  { background: var(--good-bg); color: var(--diff-add); }
+.diff .del  { background: var(--bad-bg);  color: var(--diff-del); }
 .diff .hunk { color: var(--accent-hi); background: var(--accent-bg); }
 .diff .meta { color: var(--muted); }
 .diff .ctx  { color: var(--text-2); }
@@ -923,8 +950,8 @@ body::before {
 .mr-merge.bad { color: var(--bad);  background: var(--bad-bg); }
 .mr-merge.muted { color: var(--muted); background: var(--panel-2); }
 .mr-flash { font-size: 12px; padding: 9px 12px; border-radius: 7px; margin-bottom: 12px; }
-.mr-flash.ok  { color: var(--good); background: var(--good-bg); border: 1px solid rgba(70,209,127,.25); }
-.mr-flash.err { color: var(--bad);  background: var(--bad-bg);  border: 1px solid rgba(245,84,77,.3); }
+.mr-flash.ok  { color: var(--good); background: var(--good-bg); border: 1px solid var(--good-bd); }
+.mr-flash.err { color: var(--bad);  background: var(--bad-bg);  border: 1px solid var(--bad-bd); }
 
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field > label { font-size: 12px; font-weight: 600; color: var(--text-2); }
@@ -956,7 +983,7 @@ select { cursor: pointer; appearance: none;
 .liveflag {
   display: inline-flex; align-items: center; gap: 7px;
   font-family: var(--mono); font-size: 12px; color: var(--good);
-  background: var(--good-bg); border: 1px solid rgba(70,209,127,.25);
+  background: var(--good-bg); border: 1px solid var(--good-bd);
   padding: 6px 12px; border-radius: var(--r-pill);
 }
 .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 14px; }
@@ -1169,11 +1196,11 @@ select { cursor: pointer; appearance: none;
    down the left edge, so you never lose the sense of where you are. */
 .overlay { position: fixed; inset: 0; z-index: 70; display: flex; justify-content: flex-end; }
 .overlay[hidden] { display: none; }
-.overlay__scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, .55); animation: scrim-in .14s ease; }
+.overlay__scrim { position: absolute; inset: 0; background: var(--scrim); animation: scrim-in .14s ease; }
 .overlay__panel {
   position: relative; width: min(900px, 92vw); height: 100%;
   background: var(--bg); border-left: 1px solid var(--border);
-  box-shadow: -20px 0 60px rgba(0, 0, 0, .5);
+  box-shadow: var(--shadow-sheet);
   overflow-y: auto; padding: 20px 24px 40px;
   animation: panel-in .16s ease;
 }
@@ -1229,7 +1256,7 @@ body.has-overlay { overflow: hidden; }
   border-left: 3px solid var(--accent); border-radius: var(--r-lg);
   transition: border-color .12s, box-shadow .12s;
 }
-.taskbox:focus-within { border-color: var(--border-2); border-left-color: var(--accent-hi); box-shadow: 0 6px 22px rgba(0,0,0,.35); }
+.taskbox:focus-within { border-color: var(--border-2); border-left-color: var(--accent-hi); box-shadow: var(--shadow-lift); }
 .taskbox__row { display: flex; gap: 10px; align-items: flex-start; }
 .taskbox__row textarea {
   flex: 1 1 auto; min-width: 0; min-height: 42px; resize: none; overflow-y: auto;
@@ -1363,9 +1390,6 @@ body.has-overlay { overflow: hidden; }
 .toggle-chip.is-on { background: var(--good-bg); border-color: var(--good); color: var(--good); }
 .toggle-chip.is-on .dot { background: var(--good); }
 
-.cmd-badge--task       { color: var(--good);   background: var(--good-bg);   border-color: rgba(70,209,127,.25); }
-.cmd-badge--mission    { color: var(--violet);  background: var(--violet-bg); border-color: rgba(185,140,255,.25); }
-.cmd-badge--automation { color: var(--warn);    background: var(--warn-bg);   border-color: rgba(224,168,58,.25); }
 
 /* ── Inbox (needs-you feed) ─────────────────────────────────────────── */
 .inbox-group { margin-bottom: 14px; }
