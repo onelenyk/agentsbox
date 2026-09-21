@@ -9,31 +9,30 @@
    under them, and every row carrying the tags you filter by. A dropdown that
    showed one week at a time would hide the comparison the grouping is for. #}
 {% macro task_row(row) -%}
+{#- One row, eight fixed columns. Most rows leave "asked by" and "why" empty,
+    and that is the point: a row that says nothing there went the ordinary way,
+    so the ones that do say something are the ones worth reading. -#}
 <li class="trow trow--{{ row.kind }} {{ 'trow--child' if row.parent_id }}"
-    data-when="{{ row.when }}" data-repo="{{ row.repo }}" data-who="{{ row.who }}"
+    data-when="{{ row.when }}" data-repo="{{ row.repo }}" data-who="{{ row.trail|join(' ') }}"
     data-kind="{{ row.kind }}" data-origin="{{ 'auto' if row.origin else 'you' }}"
-    data-text="{{ (row.key ~ ' ' ~ row.title ~ ' ' ~ (row.origin.name if row.origin else ''))|lower }}">
+    data-text="{{ (row.key ~ ' ' ~ row.title ~ ' ' ~ (row.origin.name if row.origin else '') ~ ' ' ~ (row.why.text if row.why else ''))|lower }}">
     <a href="/tasks/{{ row.id }}" draggable="false" hx-get="/api/tasks/{{ row.id }}/panel" hx-target="#overlay-body" hx-swap="innerHTML" hx-push-url="/tasks/{{ row.id }}">
         <span class="trow__mark" title="new since your last visit"></span>
-        <span class="tkey">{{ row.key }}</span>
-        <span class="trow__title">{{ row.title }}{% if row.runs > 1 %}<span class="trow__runs tnum">×{{ row.runs }}</span>{% endif %}</span>
-        {# Who asked for it. A person's task shows the repo it touches; a task
-           an automation fired shows the automation, because that is the news —
-           and when it fires, or why it cannot, sits in the tooltip. #}
-        <span class="trow__tags">
-            <span class="tslot">
-                {%- if row.origin -%}
-                <span class="tag tag--origin{{ ' tag--bad' if row.origin.broken }}{{ ' tag--idle' if row.origin.paused }}"
-                      title="Created by the automation “{{ row.origin.name }}” — {{ row.origin.about }}">↻ {{ row.origin.short }}</span>
-                {%- elif row.repo -%}
-                <span class="tag tag--repo">{{ row.repo }}</span>
-                {%- endif -%}
-            </span>
-            <span class="tslot">{% if row.who %}<span class="tag tag--who">{{ icons.get(row.who, '•') }} {{ row.who }}{% if row.live %} <span class="live-dot"></span>{% endif %}</span>{% endif %}</span>
-            <span class="tslot">{% if row.review_status == 'changes_requested' %}<span class="tag tag--bad {{ 'is-settled' if not row.verdict_open }}"
-                                  title="{% if row.verdict_open %}The reviewer asked for changes — the branch cannot land until that is answered{% else %}The reviewer asked for changes; this branch was merged anyway — the thread says by whom and why{% endif %}">changes requested</span>{% endif %}</span>
-            <span class="tslot"><span class="tag tag--state tag--{{ row.kind }}">{{ row.word }}</span></span>
+        <span class="tkey"{% if row.repo %} title="{{ row.repo }}"{% endif %}>{{ row.key }}</span>
+        <span class="trow__title"{% if row.full %} title="{{ row.full }}"{% endif %}>{{ row.title }}{% if row.runs > 1 %}<span class="trow__runs tnum">×{{ row.runs }}</span>{% endif %}</span>
+        <span class="trow__asked">
+            {%- if row.origin -%}
+            <span class="tag tag--origin{{ ' tag--bad' if row.origin.broken }}{{ ' tag--idle' if row.origin.paused }}"
+                  title="Created by the automation “{{ row.origin.name }}” — {{ row.origin.about }}">↻ {{ row.origin.short }}</span>
+            {%- endif -%}
         </span>
+        <span class="trail">
+            {%- for agent in row.trail %}<span class="trail__who{{ ' is-now' if agent == row.live }}" title="{{ agent }}{{ ' — working now' if agent == row.live }}">{{ icons.get(agent, '•') }}</span>{% endfor -%}
+        </span>
+        <span class="trow__why{{ ' why--' ~ row.why.tone if row.why }}"{% if row.why and row.why.title %} title="{{ row.why.title }}"{% endif %}>
+            {%- if row.why %}{% if row.why.tone == 'live' %}<span class="live-dot"></span> {% endif %}{{ row.why.text }}{% endif -%}
+        </span>
+        <span class="trow__state trow__state--{{ row.kind }}">{{ row.word }}</span>
         <span class="trow__when"><span class="reltime" data-created="{{ row.when }}"></span></span>
     </a>
 </li>
@@ -157,6 +156,7 @@
                     <option value="to-merge">to merge</option>
                     <option value="shipped">shipped</option>
                     <option value="done">done</option>
+                    <option value="not-merged">not merged</option>
                     <option value="failed">failed</option>
                 </select>
                 <button type="button" class="f-clear" hidden>clear</button>
@@ -166,6 +166,19 @@
                 <button type="button" class="seen-btn">Mark seen</button>
             </span>
         </header>
+
+        {# One header for every week below it, on the same column bounds as
+           the rows, and pinned while the backlog scrolls under it. #}
+        <div class="thead" role="row">
+            <span></span>
+            <span role="columnheader">Key</span>
+            <span role="columnheader">Title</span>
+            <span role="columnheader" title="Who asked for the task — empty when it was you">Asked by</span>
+            <span role="columnheader" title="Every role that worked it, in order">Worked</span>
+            <span role="columnheader" title="The one thing worth knowing — empty when it went the ordinary way">Why</span>
+            <span role="columnheader" class="thead__right">Status</span>
+            <span role="columnheader" class="thead__right">When</span>
+        </div>
 
         {% for sp in sprints %}
         <details class="sprint" data-sprint="{{ sp.id }}" {{ 'open' if loop.first }}>
@@ -234,7 +247,11 @@
         var shown = 0;
         document.querySelectorAll('.trow').forEach(function (row) {
             var ok = true;
-            for (var f in want) { if (row.dataset[f] !== want[f]) ok = false; }
+            for (var f in want) {
+                // "who" is a trail of every role that worked the task
+                var have = row.dataset[f] || '';
+                if (f === 'who' ? (' ' + have + ' ').indexOf(' ' + want[f] + ' ') === -1 : have !== want[f]) ok = false;
+            }
             if (ok && q && (row.dataset.text || '').indexOf(q) === -1) ok = false;
             row.hidden = !ok;
             if (ok) shown++;

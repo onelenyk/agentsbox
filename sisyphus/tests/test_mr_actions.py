@@ -361,24 +361,26 @@ class TestAVerdictIsShownWhetherOrNotTheBranchLanded:
     — that is the record of a call made anyway. What must not happen is the
     two cases looking identical."""
 
-    def _row(self, db_path, tmp_path, merged=False):
+    def _why(self, db_path, tmp_path, merged=False):
         mr, real, bare = _mr(db_path, tmp_path, target="develop")
         mergerequests.set_review_status(mr["id"], "changes_requested")
         if merged:
             mergerequests.mark_merged(mr["id"], "abc1234")
         store.set_status(mr["task_id"], "done")
         html = TestClient(app).get("/api/tasks/list").text
-        return html.split("changes requested")[0].rsplit("<span", 1)[1]
+        row = html.split(mr["task_id"], 1)[1].split("</li>", 1)[0]
+        return row.split('class="trow__why', 1)[1].split("</span>", 1)[0]
 
     def test_an_open_verdict_blocks_and_says_so(self, db_path, tmp_path):
-        tag = self._row(db_path, tmp_path)
-        assert "is-settled" not in tag
-        assert "cannot land" in tag
+        why = self._why(db_path, tmp_path)
+        assert "why--bad" in why                       # red: it still blocks the merge
+        assert "changes requested" in why and "merged anyway" not in why
 
     def test_a_merged_one_is_shown_quieter_and_explains_itself(self, db_path, tmp_path):
-        tag = self._row(db_path, tmp_path, merged=True)
-        assert "is-settled" in tag
-        assert "merged anyway" in tag
+        why = self._why(db_path, tmp_path, merged=True)
+        assert "why--muted" in why                     # grey: the merge already answered it
+        assert "changes requested · merged anyway" in why
+        assert "the thread says by whom and why" in why
 
 
 class TestTheModalSaysWhatTheMergeRestsOn:

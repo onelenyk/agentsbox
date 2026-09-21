@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
 from typing import List, Optional
 from fastapi import APIRouter, Request, Form
@@ -956,6 +957,11 @@ def board_column(task, mr):
                 return "shipped"
             if mr.get("status") == "open":
                 return "to-merge"
+            if mr.get("status") == "closed":
+                # The work was proposed and then not taken. Calling that "done"
+                # put it beside everything that shipped — eight of those on
+                # this board, one of them approved before it was closed.
+                return "not-merged"
         return "done"
     if status == "failed":
         return "failed"
@@ -997,7 +1003,7 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = ""):
     # asks, and a snippet of the goal beyond the title line.
     live_by_task = {s["task_id"]: s for s in _enrich_sessions(sessions.list_active())}
 
-    cols = ("in-progress", "needs-you", "to-merge", "shipped", "done", "failed")
+    cols = ("in-progress", "needs-you", "to-merge", "shipped", "done", "not-merged", "failed")
     columns = {c: [] for c in cols}
     kids_by_parent = store.child_counts()
     for status in store.VALID_STATUSES:
@@ -1031,11 +1037,6 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = ""):
                 _enrich_now_card(t, mr, status)
             columns[col].append(t)
 
-    # Autopilot runs drown the archive: two daily crons produce ~60 identical
-    # cards a month, and the tasks a human actually shipped have to be picked
-    # out from between them. In the archive columns (never the live ones — a
-    # cron run that NEEDS you must stay a card) each autopilot's runs collapse
-    # into one group row: count, the latest run, when. Signal stays, pile goes.
     from core import autopilot as _autopilot
     automations = {f"autopilot:{a['id']}": a for a in _autopilot.list_autopilots()}
 
@@ -1078,23 +1079,39 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = ""):
     # Everything else is the backlog, and a backlog is read the way a sprint
     # board is read: grouped by week, parents with their subtasks under them,
     # every row carrying the tags you would filter by.
-    who = _assignees()
-    rows, by_id = [], {}
-    for col in ("shipped", "done", "failed", "in-progress", "needs-you", "to-merge"):
+    from core import reviews
+    facts = _row_facts()
+    rows, by_id, reviewing = [], {}, {}
+    for col in ("shipped", "done", "not-merged", "failed", "in-progress", "needs-you", "to-merge"):
         for t in columns[col]:
-            rows.append(_row(t, col, who, origin=_origin_of(t)))
+            marker = reviews.parse_review_marker(t.get("goal") or "")
+            row = _row(t, col, facts, mr=task_latest_mr.get(t["id"]),
+                       origin=_origin_of(t), review=bool(marker))
+            if marker and marker.get("origin_task"):
+                reviewing[row["id"]] = marker["origin_task"]
+            rows.append(row)
     for r in rows:
         by_id[r["id"]] = r
 
     # Subtasks hang under their parent instead of standing beside it: a plan's
     # steps are the plan, not four more items competing with it.
-    children = [_row(t, board_column(t, task_latest_mr.get(t["id"])), who)
+    children = [_row(t, board_column(t, task_latest_mr.get(t["id"])), facts,
+                     mr=task_latest_mr.get(t["id"]))
                 for t in store.list_tasks() if t.get("parent_id")
                 and (not repo or t.get("repo") == repo)]
     for c in children:
         parent = by_id.get(c["parent_id"])
         if parent is not None:
             parent.setdefault("children", []).append(c)
+    # So does a review, under the work it reviewed. The link is display-only —
+    # parent_id is not touched — and it holds only while the reviewed task is
+    # on the board; a review of something filtered away stands on its own.
+    for rid, origin_id in reviewing.items():
+        parent = by_id.get(origin_id)
+        if parent is not None and rid in by_id:
+            child = by_id[rid]
+            child["parent_id"] = origin_id
+            parent.setdefault("children", []).append(child)
     top = [r for r in rows if not r.get("parent_id")]
     top.sort(key=lambda r: r["when"] or "", reverse=True)
     for r in top:
@@ -1124,7 +1141,7 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = ""):
         last = sprint["entries"][-1] if sprint["entries"] else None
         prev = last if (last and not r["origin"] and not last["row"]["origin"]
                         and last["row"]["title"] == r["title"]
-                        and last["row"]["kind"] == r["kind"]
+                        and last["row"]["kind"] == r["kind"] and not last["row"].get("why")
                         and not last["row"].get("children") and not r.get("children")) else None
         if prev is not None:
             prev["row"]["runs"] += 1
@@ -1133,59 +1150,167 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = ""):
         sprint["tasks"] += 1
         if r["kind"] == "failed":
             sprint["failed"] += 1
-        elif r["kind"] in ("shipped", "done"):
+        elif r["kind"] in ("shipped", "done", "not-merged"):
             sprint["done"] += 1
 
     return _tmpl().TemplateResponse(request, "tasks_list.html", {
         "needs_you": needs_you, "running": running, "queued": queued,
         "sprints": sprints, "repo": repo,
-        "repos": sorted({r["repo"] for r in top if r["repo"]}),
-        "whos": sorted({r["who"] for r in top if r["who"]}),
+        "repos": sorted({r["repo"] for r in rows if r["repo"]}),
+        "whos": sorted({a for r in rows for a in r["trail"]}),
     })
 
 
-_KIND_WORD = {"in-progress": "in flight", "needs-you": "wants you",
+_KIND_WORD = {"in-progress": "in flight", "needs-you": "wants you", "not-merged": "not merged",
               "to-merge": "to merge", "shipped": "shipped",
               "done": "done", "failed": "failed"}
 
 
-def _row(t: dict, kind: str, who: dict, origin: Optional[dict] = None) -> dict:
-    """One task as the backlog draws it: the tags a person filters by, and
-    nothing that needs a second query per row. `origin` is who asked for it —
-    an automation, or None for a person."""
-    from core import store
-    return {
-        "id": t["id"], "key": t.get("key") or "", "parent_id": t.get("parent_id"),
-        "title": store.task_display_title(t),
-        "kind": kind, "word": _KIND_WORD.get(kind, kind),
-        "repo": t.get("repo") or "", "runs": 1, "origin": origin,
-        "who": t.get("live_role") or who.get(t["id"]) or t.get("agent") or "",
-        "live": bool(t.get("live_role")),
-        "review_status": t.get("review_status"),
-        # A verdict on a branch that has already landed is not a live
-        # complaint — it is the record of a call that was made anyway. Shown
-        # either way, because "somebody asked for changes here" is worth
-        # seeing; drawn quieter when the merge already answered it.
-        "verdict_open": bool(t.get("gate")),
-        "when": t.get("updated_at") or t.get("created_at"),
-    }
+_FAIL_NO_RESULT = re.compile(r"\[fail\]\s*(\S+) ended without a result(?:\s*\((\d+) attempts?\))?", re.I)
+_MR_COUNT = re.compile(r"(\d+) open MRs?", re.I)
 
 
-def _assignees() -> dict:
-    """Who last worked each task, from the usage ledger — one query for the
-    whole board rather than a thread read per row. A task nobody has run yet
-    is absent, which the row renders as unassigned."""
+def _row_facts() -> dict:
+    """Everything the backlog row says beyond the task table, read in four
+    queries for the whole board — never one per row:
+
+      trail   every agent that worked the task, in the order it first did
+      spend   (cost, runs) per task
+      fail    the orchestrator's last "[fail]" note per task
+      result  the last result message per task
+
+    plus the thresholds above which cost or run count is worth a mention.
+    """
     from core.db import get_conn
 
     conn = get_conn()
     try:
-        rows = conn.execute("""
-            SELECT task_id, agent FROM usage
-            WHERE id IN (SELECT MAX(id) FROM usage GROUP BY task_id)
-        """).fetchall()
+        trail, spend = {}, {}
+        for r in conn.execute(
+                "SELECT task_id, agent, MIN(id) AS first, SUM(cost) AS cost, COUNT(*) AS n "
+                "FROM usage GROUP BY task_id, agent ORDER BY task_id, first").fetchall():
+            trail.setdefault(r["task_id"], []).append(r["agent"])
+            c, n = spend.get(r["task_id"], (0.0, 0))
+            spend[r["task_id"]] = (c + (r["cost"] or 0.0), n + r["n"])
+        fail = {r["task_id"]: r["text"] for r in conn.execute(
+            "SELECT task_id, text FROM messages WHERE id IN ("
+            "SELECT MAX(id) FROM messages WHERE text LIKE '[fail]%' GROUP BY task_id)").fetchall()}
+        result = {r["task_id"]: r["text"] for r in conn.execute(
+            "SELECT task_id, text FROM messages WHERE id IN ("
+            "SELECT MAX(id) FROM messages WHERE kind = 'result' GROUP BY task_id)").fetchall()}
     finally:
         conn.close()
-    return {r["task_id"]: r["agent"] for r in rows}
+
+    def p90(values):
+        values = sorted(values)
+        return values[int(len(values) * 0.9)] if values else 0
+
+    return {"trail": trail, "spend": spend, "fail": fail, "result": result,
+            "dear": max(p90([c for c, _ in spend.values()]), 0.10),
+            "busy": max(p90([n for _, n in spend.values()]), 5)}
+
+
+def _result_head(text: str):
+    """The headline of a result, for a row that has room for one clause."""
+    t = (text or "").strip()
+    low = t.lower()
+    if low.startswith("changes requested"):
+        m = _MR_COUNT.search(t)
+        return (f"changes requested · {m.group(1)} MRs" if m else "changes requested"), "bad"
+    if "no open merge request" in low:
+        return "nothing to review — no open MRs", "good"
+    m = re.match(r"reviewed (?:all )?(\d+) open (?:mrs?|merge requests?)", low)
+    if m:
+        return f"reviewed {m.group(1)} open MRs", "muted"
+    if low.startswith("approved"):
+        rest = t.split(":", 1)[1].strip() if ":" in t[:20] else ""
+        head = re.split(r"(?<=[.;])\s|\(", rest, maxsplit=1)[0].strip(" .;") if rest else ""
+        return ((head[:58] + "…") if len(head) > 58 else head) or "approved", "good"
+    head = re.split(r"(?<=[.;])\s", t, maxsplit=1)[0].strip(" .;")
+    return ((head[:58] + "…") if len(head) > 58 else head), "muted"
+
+
+def _why(t: dict, kind: str, mr: Optional[dict], facts: dict, auto: bool,
+         review: bool) -> Optional[dict]:
+    """The one clause this row should say, or None when it has nothing to add.
+    Ranked: what is happening now, what blocks a merge, why it failed, why it
+    did not land, what a machine run found, and whether it cost unusually much.
+    A row that says nothing is saying "this went the ordinary way"."""
+    tid = t["id"]
+    if t.get("live_role"):
+        return {"text": f"{t['live_role']} · {t.get('live_mins', 0)}m", "tone": "live"}
+    if mr and mr.get("status") == "open":
+        if mr.get("review_status") == "changes_requested":
+            return {"text": "changes requested", "tone": "bad"}
+        gate = mergerequests.gate_state(mr)
+        words = {"check-failed": ("check failed", "bad"), "died": ("the review died", "bad"),
+                 "unreviewed": ("nobody has reviewed it", "warn"), "pending": ("in review", "muted"),
+                 "ready": ("reviewed and checked — ready", "good")}.get(gate)
+        if words:
+            return {"text": words[0], "tone": words[1]}
+    if kind == "failed":
+        note = facts["fail"].get(tid, "")
+        m = _FAIL_NO_RESULT.search(note)
+        if m:
+            n = int(m.group(2) or 1)
+            return {"text": f"no result from the {m.group(1)}" + (f" ×{n}" if n > 1 else ""),
+                    "tone": "bad", "title": note}
+        if note:
+            short = note.replace("[fail]", "").strip()
+            return {"text": (short[:56] + "…") if len(short) > 56 else short, "tone": "bad", "title": note}
+        return {"text": "failed without saying why", "tone": "bad"}
+    if kind == "not-merged":
+        approved = mr and mr.get("review_status") == "approved"
+        return {"text": "approved, closed unmerged" if approved else "closed unmerged", "tone": "muted"}
+    if mr and mr.get("status") == "merged" and mr.get("review_status") == "changes_requested":
+        return {"text": "changes requested · merged anyway", "tone": "muted",
+                "title": "The reviewer asked for changes; the branch was merged anyway — the thread says by whom and why"}
+    if review and facts["result"].get(tid):
+        # A review has exactly one thing to say, and it is a verdict — not the
+        # first clause of whatever prose the reviewer wrapped around it.
+        said = facts["result"][tid].strip().upper()
+        if said.startswith(("CHANGES REQUESTED", "REQUEST-CHANGES", "REQUEST CHANGES")):
+            return {"text": "verdict: changes requested", "tone": "bad", "title": facts["result"][tid][:400]}
+        if said.startswith("APPROVE"):
+            return {"text": "verdict: approved", "tone": "good", "title": facts["result"][tid][:400]}
+        return {"text": "verdict: see the thread", "tone": "muted", "title": facts["result"][tid][:400]}
+    if auto and facts["result"].get(tid):
+        text, tone = _result_head(facts["result"][tid])
+        return {"text": text, "tone": tone, "title": facts["result"][tid][:400]}
+    cost, runs = facts["spend"].get(tid, (0.0, 0))
+    if cost >= facts["dear"] or runs >= facts["busy"]:
+        return {"text": f"${cost:.2f} · {runs} runs", "tone": "warn",
+                "title": "Among the dearest tenth of tasks on this board"}
+    return None
+
+
+def _row(t: dict, kind: str, facts: dict, mr: Optional[dict] = None,
+         origin: Optional[dict] = None, review: bool = False) -> dict:
+    """One task as the backlog draws it. Everything comes from the task, its
+    latest MR and the board-wide `facts` — nothing here reads the database."""
+    from core import store
+    title = store.task_display_title(t)
+    if review:
+        m = re.match(r"Review (mr-[0-9a-f]+)", title)
+        title = f"Review of {m.group(1)}" if m else title
+    first_line = (t.get("goal") or "").split("\n", 1)[0].strip()
+    trail = list(facts["trail"].get(t["id"], []))
+    if t.get("live_role") and t["live_role"] not in trail:
+        trail.append(t["live_role"])
+    return {
+        "id": t["id"], "key": t.get("key") or "", "parent_id": t.get("parent_id"),
+        "title": title,
+        # the whole thing, for the tooltip: a title cut at 80 characters and
+        # then again by the column was unreadable with no way to read it
+        "full": first_line if len(first_line) > len(title) else "",
+        "kind": kind, "word": _KIND_WORD.get(kind, kind),
+        "repo": t.get("repo") or "", "runs": 1, "origin": origin,
+        # every role that worked it, in order — the last one alone was almost
+        # always the reviewer, which hid who did the work
+        "trail": trail, "live": t.get("live_role"),
+        "why": _why(t, kind, mr, facts, auto=bool(origin), review=review),
+        "when": t.get("updated_at") or t.get("created_at"),
+    }
 
 
 def _sprint_of(when: str) -> dict:
