@@ -1385,3 +1385,47 @@ class TestASprintIsAWeekWhereTheReaderLives:
         from web.routes import _sprint_of
         year, week, _ = date.today().isocalendar()
         assert _sprint_of("not a date")["id"] == f"{year}-W{week:02d}"
+
+
+class TestRepeatsFoldInsideAWeekNotAcrossWeeks:
+    """An automation's runs collapse into one row so thirty identical cron
+    tasks don't bury a week's real work — but folding them globally put all of
+    them on one row in the week of the LATEST run, took them out of every
+    earlier week, and left a "×34" on a row dated today counting runs from six
+    weeks ago."""
+
+    def _runs(self, when_by_day):
+        from core import store
+        from core.db import get_conn
+        from core.autopilot import create_autopilot
+        create_autopilot(name="Nightly repo scan", trigger_type="schedule",
+                         cron="0 3 * * *", goal_template="scan")
+        made = [(day, store.create_task("scan", status="done",
+                                        title=f"Nightly repo scan · {day}")["id"])
+                for day in when_by_day]
+        # dated afterwards, on one connection: creating a task opens its own,
+        # and holding a write open across that deadlocks SQLite
+        conn = get_conn()
+        for day, task_id in made:
+            conn.execute("UPDATE tasks SET updated_at = ? WHERE id = ?",
+                         (f"{day}T12:00:00+00:00", task_id))
+        conn.commit(); conn.close()
+
+    def test_each_week_keeps_its_own_runs(self, db_path):
+        self._runs(["2026-09-15", "2026-09-16", "2026-09-17",     # week 38
+                    "2026-09-08", "2026-09-09"])                   # week 37
+        html = _make_client().get("/api/tasks/list").text
+        assert html.count("🤖 Nightly repo scan") == 2     # one row per week, not one in total
+        assert "×3" in html and "×2" in html
+
+    def test_a_weeks_total_counts_runs_not_rows(self, db_path):
+        """Three runs folded into one row are still three tasks that week."""
+        self._runs(["2026-09-15", "2026-09-16", "2026-09-17"])
+        html = _make_client().get("/api/tasks/list").text
+        # the week holding the runs, found by its dates rather than its label,
+        # which reads "Last week" or "Week 38" depending on when this runs
+        week = html.split("🤖 Nightly repo scan", 1)[0].rsplit("<details", 1)[1] \
+            + html.split("🤖 Nightly repo scan", 1)[1]
+        assert ">3</span> tasks" in week      # three runs happened that week
+        assert "×3" in week                    # on one row
+        assert html.count("🤖 Nightly repo scan") == 1

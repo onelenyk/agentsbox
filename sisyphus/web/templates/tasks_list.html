@@ -138,7 +138,7 @@
                 <span class="sprint__name">{{ sp.label }}</span>
                 <span class="sprint__span">{{ sp.span }}</span>
                 <span class="sprint__stats">
-                    <span class="tnum">{{ sp.rows|length }}</span> tasks
+                    <span class="tnum">{{ sp.tasks }}</span> tasks
                     {% if sp.done %}· <span class="is-good tnum">{{ sp.done }}</span> finished{% endif %}
                     {% if sp.failed %}· <span class="is-bad tnum">{{ sp.failed }}</span> failed{% endif %}
                 </span>

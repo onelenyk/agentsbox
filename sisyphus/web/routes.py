@@ -1048,21 +1048,8 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = ""):
                 return name
         return None
 
-    auto_groups = {}
-    for col in ("shipped", "done", "failed"):
-        groups = {}
-        keep = []
-        for t in columns[col]:
-            name = _autopilot_of(t)
-            if not name:
-                keep.append(t)
-                continue
-            g = groups.setdefault(name, {"name": name, "count": 0, "latest": t})
-            g["count"] += 1
-            if (t.get("updated_at") or "") > (g["latest"].get("updated_at") or ""):
-                g["latest"] = t
-        columns[col] = keep
-        auto_groups[col] = sorted(groups.values(), key=lambda g: g["name"])
+    autopilot_of = {t["id"]: _autopilot_of(t)
+                    for col in ("shipped", "done", "failed") for t in columns[col]}
 
     # A status here is not a column a card sits in — it is what the task is
     # doing to you right now, and the three that ask something of you get
@@ -1080,15 +1067,9 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = ""):
     # every row carrying the tags you would filter by.
     who = _assignees()
     rows, by_id = [], {}
-    for col in ("shipped", "done", "failed"):
-        for g in auto_groups[col]:
-            rows.append(_row(g["latest"], col, who, runs=g["count"], auto=True,
-                             title=g["name"]))
+    for col in ("shipped", "done", "failed", "in-progress", "needs-you", "to-merge"):
         for t in columns[col]:
-            rows.append(_row(t, col, who))
-    for col in ("in-progress", "needs-you", "to-merge"):
-        for t in columns[col]:
-            rows.append(_row(t, col, who))
+            rows.append(_row(t, col, who, auto_name=autopilot_of.get(t["id"])))
     for r in rows:
         by_id[r["id"]] = r
 
@@ -1103,36 +1084,51 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = ""):
             parent.setdefault("children", []).append(c)
     top = [r for r in rows if not r.get("parent_id")]
     top.sort(key=lambda r: r["when"] or "", reverse=True)
-    # Two review runs of the same MR read as a duplicate row, and the board had
-    # pairs of them. Same title, same outcome, adjacent in time → one row, ×2.
-    folded = []
     for r in top:
-        prev = folded[-1] if folded else None
-        if prev and not prev["auto"] and not r["auto"] and prev["title"] == r["title"] \
-                and prev["kind"] == r["kind"] and not r.get("children"):
-            prev["runs"] += 1
-            continue
-        folded.append(r)
+        r["sprint"] = _sprint_of(r["when"])
 
     # A week is a sprint. Every one of them is on the page, newest open and the
     # rest collapsed — a dropdown that shows one week at a time hides the very
     # comparison ("more failed this week than last") the grouping exists for.
+    #
+    # Repeats fold INSIDE a week, never across weeks. Folding globally put all
+    # 34 of an autopilot's runs on one row in the week of the latest one, and
+    # took them out of every earlier week — so "Week 33 · 26 tasks" was missing
+    # that week's cron runs entirely, and a ×34 on a row dated today counted
+    # runs from six weeks ago.
     sprints = []
-    for r in folded:
-        sp = _sprint_of(r["when"])
-        if not sprints or sprints[-1]["id"] != sp["id"]:
-            sprints.append({**sp, "rows": [], "done": 0, "failed": 0})
-        sprints[-1]["rows"].append(r)
+    for r in top:
+        if not sprints or sprints[-1]["id"] != r["sprint"]["id"]:
+            sprints.append({**r["sprint"], "rows": [], "tasks": 0, "done": 0, "failed": 0})
+        sprint = sprints[-1]
+        if r["auto"]:
+            # An automation's runs fold anywhere in its week: they are the same
+            # thing happening on a schedule, and thirty of them are one fact.
+            prev = next((c for c in sprint["rows"]
+                         if c["auto"] and c["title"] == r["title"] and c["kind"] == r["kind"]), None)
+        else:
+            # A human task folds only into the row right above it — the same
+            # title, the same outcome, back to back, which is what two review
+            # runs of one MR look like. Anything further apart is its own row.
+            last = sprint["rows"][-1] if sprint["rows"] else None
+            prev = last if (last and not last["auto"] and last["title"] == r["title"]
+                            and last["kind"] == r["kind"]
+                            and not last.get("children") and not r.get("children")) else None
+        if prev is not None:
+            prev["runs"] += 1
+        else:
+            sprint["rows"].append(r)
+        sprint["tasks"] += 1
         if r["kind"] == "failed":
-            sprints[-1]["failed"] += 1
+            sprint["failed"] += 1
         elif r["kind"] in ("shipped", "done"):
-            sprints[-1]["done"] += 1
+            sprint["done"] += 1
 
     return _tmpl().TemplateResponse(request, "tasks_list.html", {
         "needs_you": needs_you, "running": running, "queued": queued,
         "sprints": sprints, "repo": repo,
-        "repos": sorted({r["repo"] for r in folded if r["repo"]}),
-        "whos": sorted({r["who"] for r in folded if r["who"]}),
+        "repos": sorted({r["repo"] for r in top if r["repo"]}),
+        "whos": sorted({r["who"] for r in top if r["who"]}),
     })
 
 
@@ -1141,16 +1137,16 @@ _KIND_WORD = {"in-progress": "in flight", "needs-you": "wants you",
               "done": "done", "failed": "failed"}
 
 
-def _row(t: dict, kind: str, who: dict, runs: int = 1, auto: bool = False,
-         title: str = "") -> dict:
+def _row(t: dict, kind: str, who: dict, auto_name: Optional[str] = None) -> dict:
     """One task as the backlog draws it: the tags a person filters by, and
-    nothing that needs a second query per row."""
+    nothing that needs a second query per row. A run of an automation titles
+    itself by the automation, so its repeats can fold together."""
     from core import store
     return {
         "id": t["id"], "key": t.get("key") or "", "parent_id": t.get("parent_id"),
-        "title": title or store.task_display_title(t),
+        "title": auto_name or store.task_display_title(t),
         "kind": kind, "word": _KIND_WORD.get(kind, kind),
-        "repo": t.get("repo") or "", "auto": auto, "runs": runs,
+        "repo": t.get("repo") or "", "auto": bool(auto_name), "runs": 1,
         "who": t.get("live_role") or who.get(t["id"]) or t.get("agent") or "",
         "live": bool(t.get("live_role")),
         "review_status": t.get("review_status"),
