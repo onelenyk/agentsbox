@@ -14,7 +14,7 @@
                     </form>
                 </span>
             </div>
-            <div class="row" style="gap:8px">
+            <div class="row mr__actions">
                 <span class="status status--{{ 'done' if mr.status=='merged' else ('failed' if mr.status=='closed' else 'active') }}">{{ mr.status }}</span>
                 <button type="button" class="btn btn--ghost btn--sm" onclick="this.closest('.modal-backdrop').remove()">Close</button>
             </div>

@@ -1,12 +1,12 @@
 <div class="modal-backdrop" onclick="if(event.target===this)this.remove()">
     <div class="modal modal--wide" onclick="event.stopPropagation()">
-        <div class="modal__head" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
-            <h2 class="mono" style="font-size:14px">📄 {{ path }}</h2>
+        <div class="repo-resource__head">
+            <h2 class="mono">📄 {{ path }}</h2>
             <button class="btn btn--ghost btn--sm" onclick="this.closest('.modal-backdrop').remove()">Close</button>
         </div>
         <div class="modal__body">
             {% if content is not none %}
-            <pre class="term" style="white-space:pre-wrap;word-break:break-word;max-height:62vh;overflow:auto;margin:0">{{ content }}</pre>
+            <pre class="term repo-resource__pre">{{ content }}</pre>
             {% else %}
             <div class="empty">Could not read this file (missing, binary, or too large).</div>
             {% endif %}

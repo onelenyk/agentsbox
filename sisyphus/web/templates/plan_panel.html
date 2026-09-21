@@ -12,9 +12,9 @@
         {% endfor %}
         <button class="chip-btn chip-btn--ghost" hx-post="/api/plans/new" hx-target="#plan-body" hx-swap="innerHTML">+ new</button>
     </div>
-    <div class="row" style="flex-shrink:0;gap:8px">
-        <form hx-post="/api/plans/{{ plan.id }}/repo" hx-target="#plan-body" hx-swap="innerHTML" hx-trigger="change" style="display:inline">
-            <select name="repo" style="width:auto;min-width:140px">
+    <div class="row plan__controls">
+        <form class="plan__form" hx-post="/api/plans/{{ plan.id }}/repo" hx-target="#plan-body" hx-swap="innerHTML" hx-trigger="change">
+            <select name="repo" class="plan__repo-select">
                 <option value="">— no project —</option>
                 {% for r in repos %}<option value="{{ r.name }}" {{ 'selected' if plan.repo == r.name else '' }}>{{ r.name }}</option>{% endfor %}
             </select>
@@ -25,7 +25,7 @@
 </div>
 
 {% if generating %}
-<div hx-get="/api/plans/{{ plan.id }}" hx-trigger="every 2s" hx-target="#plan-body" hx-swap="innerHTML" style="display:none"></div>
+<div hx-get="/api/plans/{{ plan.id }}" hx-trigger="every 2s" hx-target="#plan-body" hx-swap="innerHTML" hidden></div>
 {% endif %}
 
 <div class="coplan">
@@ -89,7 +89,7 @@
             {% if brief.steps %}
             <div class="brief-sec">
                 <div class="rail-h">Steps ({{ brief.steps|length }})</div>
-                <button class="btn btn--primary btn--sm" style="margin-top:8px" hx-post="/api/plans/{{ plan.id }}/convert"
+                <button class="btn btn--primary btn--sm plan__convert-btn" hx-post="/api/plans/{{ plan.id }}/convert"
                         hx-target="#plan-body" hx-swap="innerHTML"
                         hx-confirm="{% if items %}Re-convert? This replaces the current draft tasks.{% else %}Create {{ brief.steps|length }} draft tasks from this plan?{% endif %}">Convert to draft tasks ▸</button>
             </div>
@@ -97,11 +97,11 @@
         </div>
         {% elif generating %}
         <div class="cp-skeleton">
-            <div class="sk-line" style="width:40%"></div>
+            <div class="sk-line sk-line--40"></div>
             <div class="sk-block"></div>
-            <div class="sk-line" style="width:70%"></div>
-            <div class="sk-line" style="width:55%"></div>
-            <div class="muted" style="margin-top:14px;font-size:12.5px">🛰 Planning against {{ plan.repo or 'the project' }}… reading its files &amp; conventions.</div>
+            <div class="sk-line sk-line--70"></div>
+            <div class="sk-line sk-line--55"></div>
+            <div class="muted cp-skeleton__note">🛰 Planning against {{ plan.repo or 'the project' }}… reading its files &amp; conventions.</div>
         </div>
         {% else %}
         <div class="cp-canvas-empty">

@@ -5,7 +5,7 @@
 <form class="taskbox" hx-post="/api/tasks" hx-swap="none"
       hx-on::after-request="if (event.detail.successful) taskboxDone(this)">
     <div class="taskbox__row">
-        <textarea name="goal" rows="1" required autocomplete="off"
+        <textarea class="taskbox__textarea" name="goal" rows="1" required autocomplete="off"
                   placeholder="{% if fixed_repo %}What should get done in {{ fixed_repo }}?{% else %}What should get done?{% endif %}"
                   onkeydown="taskboxKey(event, this.form)" oninput="taskboxGrow(this)"></textarea>
         {% if fixed_repo %}
@@ -43,7 +43,10 @@
             if (e.target.value.trim() && !form.classList.contains('htmx-request')) htmx.trigger(form, 'submit');
         }
     }
-    function taskboxGrow(ta) { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 240) + 'px'; }
+    function taskboxGrow(ta) {
+        ta.style.setProperty('--ta-height', 'auto');   // collapse first, or it can never shrink
+        ta.style.setProperty('--ta-height', Math.min(ta.scrollHeight, 240) + 'px');
+    }
     function taskboxRemember(sel) { try { localStorage.setItem('taskboxRepo', sel.value); } catch (e) { } }
     function taskboxDone(form) {
         const ta = form.querySelector('textarea');

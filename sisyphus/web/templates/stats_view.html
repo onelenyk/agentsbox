@@ -2,29 +2,29 @@
 <div class="stat-grid">
     <div class="stat"><div class="label">Tasks</div><div class="value">{{ t.total }}</div><div class="sub">{{ t.done }} done · {{ t.failed }} failed</div></div>
     <div class="stat"><div class="label">Success rate</div><div class="value good">{{ t.completion_rate if t.completion_rate is not none else '—' }}{{ '%' if t.completion_rate is not none else '' }}</div><div class="sub">{{ t.done }} done · {{ t.failed }} failed</div></div>
-    <div class="stat"><div class="label">Avg time to done</div><div class="value">{{ (t.avg_seconds_to_done // 60) }}<span style="font-size:15px">m</span></div><div class="sub">wall-clock</div></div>
+    <div class="stat"><div class="label">Avg time to done</div><div class="value">{{ (t.avg_seconds_to_done // 60) }}<span class="stats__unit">m</span></div><div class="sub">wall-clock</div></div>
     <div class="stat"><div class="label">Total cost</div><div class="value accent">${{ '%.4f'|format(u.totals.cost) }}</div><div class="sub">{{ u.totals.runs }} agent run(s)</div></div>
     <div class="stat"><div class="label">Tokens</div><div class="value">{{ '{:,}'.format(u.totals.tokens) }}</div><div class="sub">{{ '{:,}'.format(u.totals.cache_read) }} cached</div></div>
     <div class="stat"><div class="label">Commits · MRs</div><div class="value">{{ a.commits }} · {{ a.merge_requests }}</div><div class="sub">{{ a.worker_runs }} worker runs</div></div>
 </div>
 
-<div class="cols-2" style="margin-top:14px">
+<div class="cols-2 stats__section-top">
     <div class="panel">
         <div class="result__label">Tasks by status</div>
         {% set statuses = [('active','var(--accent)'),('waiting','var(--warn)'),('done','var(--good)'),('failed','var(--bad)')] %}
         {% set tmax = (t.by_status.values()|list|max) or 1 %}
-        <div class="bars" style="margin-top:10px">
+        <div class="bars stats__bars-top">
             {% for name, col in statuses %}
             {% set n = t.by_status.get(name, 0) %}
             <div class="bar-row">
                 <span class="cap">{{ name }}</span>
-                <span class="bar-track"><span class="bar-fill" style="width:{{ (100*n/tmax)|round }}%;background:{{ col }}"></span></span>
+                <span class="bar-track"><span class="bar-fill bar-fill--tone stats__bar-fill" style="--w:{{ (100*n/tmax)|round }}%;--c:{{ col }}"></span></span>
                 <span class="val">{{ n }}</span>
             </div>
             {% endfor %}
         </div>
-        <div class="result__label" style="margin-top:20px">Activity</div>
-        <div class="bars" style="margin-top:10px">
+        <div class="result__label stats__section-top">Activity</div>
+        <div class="bars stats__bars-top">
             {% for cap, val in [('Orchestrator passes', a.orchestrator_passes), ('Approvals', a.approvals), ('Changes requested', a.changes_requested), ('Human replies', a.human_replies)] %}
             <div class="statline"><span class="cap">{{ cap }}</span><span class="val">{{ val }}</span></div>
             {% endfor %}
@@ -35,11 +35,11 @@
         <div class="result__label">Cost by agent</div>
         {% if u.by_agent %}
         {% set amax = (u.by_agent|map(attribute='cost')|list|max) or 0.0001 %}
-        <div class="bars" style="margin-top:10px">
+        <div class="bars stats__bars-top">
             {% for r in u.by_agent %}
             <div class="bar-row">
                 <span class="cap">{{ r.agent or '—' }}</span>
-                <span class="bar-track"><span class="bar-fill" style="width:{{ (100*r.cost/amax)|round }}%"></span></span>
+                <span class="bar-track"><span class="bar-fill stats__bar-fill" style="--w:{{ (100*r.cost/amax)|round }}%"></span></span>
                 <span class="val">${{ '%.4f'|format(r.cost) }} · {{ r.runs }}×</span>
             </div>
             {% endfor %}
@@ -49,13 +49,13 @@
         {% endif %}
 
         {% if s.per_repo %}
-        <div class="result__label" style="margin-top:20px">Tasks by repo</div>
+        <div class="result__label stats__section-top">Tasks by repo</div>
         {% set rmax = (s.per_repo|map(attribute='n')|list|max) or 1 %}
-        <div class="bars" style="margin-top:10px">
+        <div class="bars stats__bars-top">
             {% for r in s.per_repo %}
             <div class="bar-row">
                 <span class="cap">{{ r.repo }}</span>
-                <span class="bar-track"><span class="bar-fill good" style="width:{{ (100*r.n/rmax)|round }}%"></span></span>
+                <span class="bar-track"><span class="bar-fill good stats__bar-fill" style="--w:{{ (100*r.n/rmax)|round }}%"></span></span>
                 <span class="val">{{ r.n }}</span>
             </div>
             {% endfor %}
@@ -65,10 +65,10 @@
 </div>
 
 {% if s.created_by_day %}
-<div class="panel" style="margin-top:14px">
+<div class="panel stats__section-top">
     <div class="result__label">Tasks created — last {{ s.created_by_day|length }} day(s)</div>
     {% set dmax = (s.created_by_day|map(attribute='n')|list|max) or 1 %}
-    <div class="spark" style="margin-top:12px">
+    <div class="spark stats__spark-top">
         {% for d in s.created_by_day %}
         <div class="col" title="{{ d.day }}: {{ d.n }}"><span style="--h:{{ (100*d.n/dmax)|round }}%"></span></div>
         {% endfor %}

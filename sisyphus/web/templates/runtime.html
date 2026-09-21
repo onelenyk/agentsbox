@@ -2,17 +2,17 @@
 {% block title %}Runtime — Sisyphus{% endblock %}
 {% block content %}
 <div class="page-head"><div><h1>Daemon</h1><div class="sub">Live process state and configuration (read-only).</div></div></div>
-<div class="panel" style="margin-bottom:14px">
+<div class="panel runtime__panel-margin">
     <div class="result__label">Process</div>
-    <div class="kpis" style="margin-top:10px">
+    <div class="kpis runtime__kpis-top">
         <div class="kpi kpi--live"><div class="l">Uptime</div><div class="v">{{ process.uptime }}</div><div class="d">since {{ process.started }} UTC</div></div>
-        <div class="kpi"><div class="l">Running code</div><div class="v mono" style="font-size:20px">{{ process.git_commit }}</div><div class="d">pid {{ process.pid }}</div></div>
+        <div class="kpi"><div class="l">Running code</div><div class="v mono runtime__kpi-value">{{ process.git_commit }}</div><div class="d">pid {{ process.pid }}</div></div>
         <div class="kpi kpi--violet"><div class="l">Workers in flight</div><div class="v">{{ process.workers_in_flight }}</div><div class="d">restart kills these</div></div>
     </div>
 </div>
 <div class="panel">
     <div class="result__label">Configuration</div>
-    <pre class="mono" style="font-size:12px;white-space:pre-wrap;color:var(--text-2);line-height:1.7;margin-top:6px">workspace_root:   {{ workspace_root }}
+    <pre class="mono runtime__config">workspace_root:   {{ workspace_root }}
 default_runtime:  {% if default_runner %}{{ default_runner.name }}{% if default_runner.model %} · {{ default_runner.model }}{% endif %}{% else %}(none configured){% endif %}
 worker_timeout:   {{ limits.worker_timeout }}s total · {{ limits.worker_idle_timeout }}s idle
 max_review_loops: {{ config.max_review_loops or 3 }}

@@ -5,7 +5,7 @@
     {% if working %}
     <span class="toolbar__note mono">⚙ {{ working.role }} {{ working.label }} · {{ working.mins }}m</span>
     {% elif finished %}
-    <span class="toolbar__note mono" style="color:var(--good)">✓ {{ finished.text|truncate(40) }} · {{ finished.mins }}m ago</span>
+    <span class="toolbar__note toolbar__note--good mono">✓ {{ finished.text|truncate(40) }} · {{ finished.mins }}m ago</span>
     {% endif %}
     {% if task.status in ("done", "failed") %}
     <button class="btn btn--sm" hx-post="/api/tasks/{{ task.id }}/reopen" hx-swap="none">Reopen</button>

@@ -1598,7 +1598,7 @@ async def plans_delete(request: Request, pid: str):
 async def task_page(request: Request, task_id: str):
     ctx = _task_ctx(task_id)
     if ctx is None:
-        return HTMLResponse('<div class="detail-panel"><p style="color:#f85149">Task not found</p></div>',
+        return HTMLResponse('<div class="detail-panel"><p class="tone-bad">Task not found</p></div>',
                             status_code=404)
     ctx["active_page"] = "tasks"
     return _tmpl().TemplateResponse(request, "task_detail.html", ctx)
@@ -1985,7 +1985,7 @@ async def task_panel(request: Request, task_id: str):
 async def task_detail_view(request: Request, task_id: str):
     ctx = _task_ctx(task_id)
     if ctx is None:
-        return HTMLResponse('<div class="detail-panel"><p style="color:#f85149">Task not found</p></div>')
+        return HTMLResponse('<div class="detail-panel"><p class="tone-bad">Task not found</p></div>')
     return _tmpl().TemplateResponse(request, "task_detail_content.html", ctx)
 
 @router.post("/api/tasks/{task_id}/messages")

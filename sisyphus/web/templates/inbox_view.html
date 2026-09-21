@@ -25,7 +25,7 @@
         <div class="inbox-row">
             <a class="inbox-row__title" href="/tasks/{{ x.task.id }}">{{ task_display_title(x.task) }}</a>
             <span class="badge badge--mono">{{ x.mr.source_branch }}</span>
-            {% if x.mr.review_status == 'pending' %}<span class="badge badge--mono">⏳ review</span>{% elif x.mr.review_status == 'approved' %}<span class="badge" style="color:var(--good);background:var(--good-bg);border-color:var(--good-bd)">✓ reviewed</span>{% elif x.mr.review_status == 'changes_requested' %}<span class="badge" style="color:var(--bad);background:var(--bad-bg);border-color:var(--bad-bd)">✗ changes requested</span>{% elif x.mr.review_status == 'died' %}<span class="badge" style="color:var(--bad);background:var(--bad-bg);border-color:var(--bad-bd)">✗ review died</span>{% endif %}
+            {% if x.mr.review_status == 'pending' %}<span class="badge badge--mono">⏳ review</span>{% elif x.mr.review_status == 'approved' %}<span class="badge badge--ok">✓ reviewed</span>{% elif x.mr.review_status == 'changes_requested' %}<span class="badge badge--bad">✗ changes requested</span>{% elif x.mr.review_status == 'died' %}<span class="badge badge--bad">✗ review died</span>{% endif %}
             <a class="btn btn--ghost btn--sm" href="/tasks/{{ x.task.id }}">View</a>
             <button type="button" class="btn btn--primary btn--sm"
                     hx-post="/api/mr/{{ x.mr.id }}/merge" hx-target="#modal-container" hx-swap="innerHTML"
