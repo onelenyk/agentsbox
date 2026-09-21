@@ -1453,3 +1453,43 @@ class TestATaskTitleCanBeSelected:
         css = (Path(__file__).parent.parent / "web" / "static" / "app.css").read_text()
         head = css.split(".sprint__head {", 1)[1].split("}", 1)[0]
         assert "user-select: none" not in head
+
+
+class TestAnAutomationsRowSaysWhatTheAutomationIs:
+    """A cron run's row used to say only the automation's name. The thing that
+    produced it — when it fires, whether it still can — was nowhere on the
+    board, so a paused or broken automation looked exactly like a healthy one
+    that simply had not run today."""
+
+    def _run(self, **ap_kw):
+        from core import store
+        from core.autopilot import create_autopilot
+        create_autopilot(name="Nightly repo scan", trigger_type="schedule",
+                         cron="0 3 * * *", goal_template="scan", **ap_kw)
+        store.create_task("scan", status="done", title="Nightly repo scan · 2026-09-21")
+        return _make_client().get("/api/tasks/list").text
+
+    def test_the_row_carries_the_schedule_in_words(self, db_path):
+        html = self._run()
+        assert "daily 03:00" in html
+        assert "0 3 * * *" not in html        # the cron itself stays off the board
+
+    def test_a_paused_automation_says_so(self, db_path):
+        html = self._run(enabled=0)
+        assert "paused" in html
+
+    def test_a_cron_that_can_never_fire_says_so(self, db_path):
+        html = self._run()
+        from core.autopilot import list_autopilots, update_autopilot
+        ap = list_autopilots()[0]
+        update_autopilot(ap["id"], cron="not a cron")
+        html = _make_client().get("/api/tasks/list").text
+        assert "broken schedule" in html
+
+    def test_a_human_task_keeps_its_repo_tag(self, db_path):
+        from core import store
+        t = store.create_task("real work", repo="test-repo")
+        store.set_status(t["id"], "done")
+        html = _make_client().get("/api/tasks/list").text
+        row = html.split(t["id"], 1)[1].split("</li>", 1)[0]
+        assert "tag--repo" in row and "tag--auto" not in row
