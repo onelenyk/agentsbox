@@ -157,3 +157,19 @@ class TestRecordAndAggregate:
         assert rows["engineer"]["runs"] == 2
         assert round(rows["engineer"]["cost"], 3) == 0.03
         assert rows["reviewer"]["runs"] == 1
+
+
+def test_a_claude_run_is_labelled_with_the_model_that_did_the_work():
+    """Claude Code reports every model it touched; the side model that titles
+    a session comes first. A run Opus did for $0.448 was recorded as Haiku,
+    which spent $0.002 of it."""
+    import json
+    from core.usage import parse_usage
+    result = {"type": "result", "num_turns": 17, "total_cost_usd": 0.4503,
+              "usage": {"input_tokens": 24, "output_tokens": 5048},
+              "modelUsage": {
+                  "claude-haiku-4-5-20251001": {"outputTokens": 16, "costUSD": 0.0021},
+                  "claude-opus-5[1m]": {"outputTokens": 5048, "costUSD": 0.4482}}}
+    u = parse_usage(json.dumps(result))
+    assert u["model"] == "claude-opus-5[1m]"
+    assert u["cost"] == 0.4503                      # the total stays the run's total

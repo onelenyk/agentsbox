@@ -180,3 +180,17 @@ class TestProgressReporting:
         stream.feed_eof()
         await launcher._read_stream(stream, buf, {"ts": 0.0}, 1000)
         assert bytes(buf) == b"hello"
+
+
+def test_a_worker_does_not_inherit_the_operators_terminal_session():
+    """A daemon started from a Superset terminal inherited its session
+    variables, and the `claude` wrapper on that PATH acts on them — pinging
+    Superset per launch and, with a default account set, swapping the worker's
+    CLAUDE_CONFIG_DIR. Under launchd they never exist; by hand they must not
+    leak either."""
+    from core.launcher import _without_host_session
+    env = {"PATH": "/usr/bin", "HOME": "/h", "SUPERSET_TERMINAL_ID": "t1",
+           "SUPERSET_HOME_DIR": "/s", "ANTHROPIC_API_KEY": "k"}
+    out = _without_host_session(env)
+    assert "SUPERSET_TERMINAL_ID" not in out and "SUPERSET_HOME_DIR" not in out
+    assert out["PATH"] == "/usr/bin" and out["ANTHROPIC_API_KEY"] == "k"   # nothing else touched
