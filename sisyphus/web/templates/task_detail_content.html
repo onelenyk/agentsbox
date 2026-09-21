@@ -61,96 +61,208 @@
   {%- endif -%}
   {%- endmacro %}
 
-  <div class="panel task-main">
+  {% set icons = {'orchestrator':'🧭','engineer':'🔧','reviewer':'🔍','mr-reviewer':'🔍','explorer':'🔭','planner':'🗺️','human':'🧑','worker':'⚙️'} %}
+  <div class="task-main">
     {% if parent %}
     <div class="breadcrumb">↑ Part of <a href="/tasks/{{ parent.id }}">{{ task_display_title(parent) }}</a></div>
     {% endif %}
-    {# The title is in the toolbar above; repeating it here pushed the one
-       thing this block is for — what was actually asked — below the fold. #}
-    <div class="panel__head">
-        <div style="flex:1 1 auto; min-width:0">
-            <div class="rail-h">Goal</div>
-            {# A short goal shows in full; a long spec collapses behind a
-               toggle so the page leads with the result, not a wall of text.
-               hx-preserve keeps the open state across the 3s poll. #}
-            {% if task.goal|length <= 300 %}
-            <div class="task-goal-full msg__body--md">{{ task.goal | md }}</div>
-            {% else %}
-            <details class="goal-fold" hx-preserve="true" id="goal-fold">
-                <summary><span class="goal-fold__preview">{{ task.goal[:220] }}… </span><span class="goal-fold__more">show full goal</span><span class="goal-fold__less">hide full goal</span></summary>
-                <div class="task-goal-full msg__body--md">{{ task.goal | md }}</div>
-            </details>
-            {% endif %}
-        </div>
-    </div>
 
-    {% if result and (result.summary or result.change or result.commits) %}
-    {# On a failed task this block holds the reason it failed, which is the
-       opposite kind of news — the card says so rather than presenting it in
-       the colour of success. #}
-    <div class="result{{ ' result--failed' if task.status == 'failed' }}">
-        <div class="result__label">{{ '✗ How it ended' if task.status == 'failed' else '✓ Result' }}</div>
-        {% if result.summary %}{% set ds = diffstat_table(result.summary) %}{% if ds %}<div style="margin-bottom:10px">{{ ds }}</div>{% else %}<div class="result__summary msg__body--md">{{ result.summary | md }}</div>{% endif %}{% endif %}
-        {% if result.change %}
-        <div style="margin-bottom:10px">
-            {% if result.change.url %}
-            <a href="{{ result.change.url }}" target="_blank" class="btn btn--primary btn--sm">View change ↗</a>
-            {% elif result.change.attachment %}
-            {% if mr %}
-            <button type="button" class="btn btn--primary btn--sm" hx-get="/api/mr/{{ mr.id }}/view" hx-target="#modal-container" hx-swap="innerHTML">⇄ Merge request{% if mr.status != 'open' %} ({{ mr.status }}){% endif %}</button>
-            {% endif %}
-            <button type="button" class="btn btn--ghost btn--sm" hx-get="/api/tasks/{{ task.id }}/diff/{{ result.change.attachment }}" hx-target="#modal-container" hx-swap="innerHTML">📎 View diff</button>
-            {% endif %}
-            <div class="result__commits" style="margin-top:8px">{{ result.change.text }}</div>
-        </div>
+    {# ── IN: what was asked ─────────────────────────────────────────────── #}
+    {% call ui.dsec('in', 'Request', 'asked by ' ~ asked_by.who ~ ' · ' ~ (task.created_at|when)) %}
+    <div class="doc">
+        {% if task.goal|length <= 400 %}
+        <div class="msg__body--md">{{ task.goal | md }}</div>
+        {% else %}
+        {# hx-preserve keeps it open across the refresh #}
+        <details class="goal-fold" hx-preserve="true" id="goal-fold">
+            <summary><span class="goal-fold__preview">{{ task.goal[:320] }}… </span><span class="goal-fold__more">show all</span><span class="goal-fold__less">show less</span></summary>
+            <div class="msg__body--md">{{ task.goal | md }}</div>
+        </details>
         {% endif %}
-        {% if result.commits %}
-        <div class="result__commits">
-            {% for c in result.commits %}<div>✓ {{ c }}</div>{% endfor %}
+    </div>
+    {% endcall %}
+
+    {# ── OUT: what came back ────────────────────────────────────────────── #}
+    {% set o = outcome %}
+    {% call ui.dsec('out', 'Outcome',
+        ('from ' ~ o.author ~ ' · ' ~ (o.at|when)) if o.kind in ('answer', 'question') else
+        ('ended ' ~ (o.at|when)) if o.kind == 'failure' else '') %}
+    <div class="outcome outcome--{{ o.kind }}">
+        {% if o.kind == 'answer' %}
+        {% set ds = diffstat_table(o.text) %}
+        {% if ds %}<div class="outcome__body">{{ ds }}</div>
+        {% elif o.text|length > 900 %}
+        {# a long report folds: the first part says what was done, the rest is
+           the working a person opens when they want it #}
+        <details class="outcome__fold" hx-preserve="true" id="outcome-fold">
+            <summary><div class="outcome__body msg__body--md">{{ o.text[:600] | md }}</div><span class="outcome__more">read the whole report</span></summary>
+            <div class="outcome__body msg__body--md">{{ o.text | md }}</div>
+        </details>
+        {% else %}<div class="outcome__body msg__body--md">{{ o.text | md }}</div>{% endif %}
+        {% elif o.kind == 'failure' %}
+        <div class="outcome__head">✗ How it ended</div>
+        <div class="outcome__body">{{ o.text }}</div>
+        {% if o.detail %}<div class="outcome__detail">{{ o.detail }}</div>{% endif %}
+        {% elif o.kind == 'question' %}
+        <div class="outcome__head">✋ It is asking you</div>
+        <div class="outcome__body msg__body--md">{{ o.text | md }}</div>
+        <div class="outcome__hint">Answer below — your reply resumes the task.</div>
+        {% else %}
+        <div class="outcome__empty">Nothing yet — {{ 'it is being worked on' if task.status == 'active' else task.status }}.</div>
+        {% endif %}
+
+        {% if change or diff_file %}
+        <div class="facts">
+            {% if not mr %}{% elif mr.status == 'merged' %}{{ ui.fact('⇄ merged into ' ~ mr.target_branch ~ ' · ' ~ (mr.merge_sha or '')[:8], 'good') }}
+            {% elif mr.status == 'closed' %}{{ ui.fact('closed without merging', 'muted') }}
+            {% else %}{{ ui.fact('⇄ open against ' ~ mr.target_branch, 'accent') }}{% endif %}
+            {% if change and change.check %}{{ ui.fact(('✓ check passed' ~ (' · ' ~ change.check.tests if change.check.tests else '')) if change.check.passed else '✗ check failed', 'good' if change.check.passed else 'bad') }}{% endif %}
+            {% if mr and mr.review_status == 'approved' %}{{ ui.fact('✓ reviewer approved' ~ (' ×' ~ change.approvals if change.approvals > 1 else ''), 'good') }}
+            {% elif mr and mr.review_status == 'changes_requested' %}{{ ui.fact('✗ changes requested', 'bad') }}
+            {% elif mr and mr.status == 'open' %}{{ ui.fact('○ not reviewed yet') }}{% endif %}
+            {% if change and change.files %}{{ ui.fact('+' ~ change.adds ~ ' −' ~ change.dels ~ ' · ' ~ change.files ~ ' file' ~ ('' if change.files == 1 else 's')) }}{% endif %}
+            <span class="facts__act">
+                {% if diff_file %}<button type="button" class="btn btn--ghost btn--sm" hx-get="/api/tasks/{{ task.id }}/diff/{{ diff_file }}" hx-target="#modal-container" hx-swap="innerHTML">View diff</button>{% endif %}
+                {% if mr %}<button type="button" class="btn btn--ghost btn--sm" hx-get="/api/mr/{{ mr.id }}/view" hx-target="#modal-container" hx-swap="innerHTML">Merge request</button>{% endif %}
+            </span>
         </div>
         {% endif %}
     </div>
-    {% endif %}
+    {% endcall %}
 
     {% if children %}
-    <div class="section-title">Subtasks <span class="chip">{{ children|selectattr('status','equalto','done')|list|length }}/{{ children|length }} done</span></div>
+    {% call ui.dsec('', 'Subtasks', children|selectattr('status','equalto','done')|list|length ~ '/' ~ children|length ~ ' done') %}
     {% for c in children %}
     <a class="subtask" href="/tasks/{{ c.id }}">
         <span class="goal">{{ task_display_title(c) }} <span class="muted">({{ c.repo or 'no repo' }})</span></span>
         <span class="status status--{{ c.status }}">{{ c.status }}</span>
     </a>
     {% endfor %}
+    {% endcall %}
     {% endif %}
 
-    <div class="section-title">Thread <span class="chip">{{ messages|length }}</span></div>
-    {% if live_sessions %}
-    <div class="section-title" style="margin-bottom:8px">Working now</div>
-    {% set icons = {'orchestrator':'🧭','engineer':'🔧','reviewer':'🔍','explorer':'🔭','planner':'🗺️'} %}
-    {% for s in live_sessions %}
-    <div class="result" style="margin-bottom:10px">
-        <div class="prop"><span class="k">Role</span><span class="v mono">{{ icons.get(s.role, '⚙️') }} {{ s.role }}{% if s.kind == 'decider' %} <span class="badge badge--accent">decider</span>{% endif %}</span></div>
-        <div class="prop"><span class="k">Instruction</span><span class="v">{{ s.instruction }}</span></div>
-        <div class="prop"><span class="k">Elapsed</span><span class="v mono">{{ s.elapsed_mins }}m{% if s.model %} · {{ s.model }}{% endif %}{% if s.runner %} · {{ s.runner }}{% endif %}</span></div>
-        {# An agent posts to the thread only when it chooses to, so a long
-           silence there looks the same whether it is working carefully or has
-           died. This line is the difference, and the daemon knew it all along —
-           it stamps the same activity to enforce the idle timeout. #}
-        <div class="prop"><span class="k">Runner</span><span class="v mono">{% if s.quiet_s is none %}no output yet{% elif s.quiet_s < 60 %}last output {{ s.quiet_s }}s ago{% else %}last output {{ (s.quiet_s // 60)|int }}m ago{% endif %}</span></div>
+    {# ── WORK: how it got there ─────────────────────────────────────────── #}
+    {% if steps %}
+    {% set runs = steps|selectattr('type', 'in', ['run', 'dead-runs'])|list %}
+    {% call ui.dsec('work', 'How it got there', steps|length ~ ' step' ~ ('' if steps|length == 1 else 's')) %}
+    <ol class="steps">
+        {% for st in steps %}
+        {% if st.type == 'run' %}
+        <li class="step step--{{ 'live' if st.how == 'running' else ('ok' if st.how == 'ok' else 'bad') }}">
+            <div class="step__head">
+                <span class="step__who"><span class="step__icon">{{ icons.get(st.role, '⚙️') }}</span>{{ st.role }}</span>
+                <span class="step__what">
+                    {%- if st.how == 'running' %}working{% if st.live %} · last output {{ st.live.quiet_s ~ 's' if st.live.quiet_s is not none and st.live.quiet_s < 60 else ((st.live.quiet_s // 60)|int ~ 'm' if st.live.quiet_s is not none else 'none yet') }} ago{% endif %}
+                    {%- elif st.how == 'ok' %}{{ 'committed' if st.commits else 'finished' }}
+                    {%- else %}{{ st.how }}{% endif %}
+                    {%- if st.mins is not none %} · {{ st.mins }}m{% endif -%}
+                </span>
+                <span class="step__when">{{ (st.started or st.ended)|when }}</span>
+            </div>
+            {% if st.why %}<div class="step__why">{{ st.why|truncate(160) }}</div>{% endif %}
+            {% for c in st.commits %}<div class="step__commit">{{ c }}</div>{% endfor %}
+            {% if st.instruction or st.notes or st.detail %}
+            <details class="step__more"><summary>details</summary>
+                {% if st.detail %}<p class="step__detail">{{ st.detail }}</p>{% endif %}
+                {% if st.instruction %}<div class="step__label">Instruction</div><div class="step__text">{{ st.instruction|truncate(1600) }}</div>{% endif %}
+                {% for n in st.notes %}<div class="step__label">Note</div><div class="step__text msg__body--md">{{ n | md }}</div>{% endfor %}
+            </details>
+            {% endif %}
+        </li>
+        {% elif st.type == 'dead-runs' %}
+        <li class="step step--bad">
+            <div class="step__head">
+                <span class="step__who"><span class="step__icon">{{ icons.get(st.role, '⚙️') }}</span>{{ st.role }}</span>
+                <span class="step__what">{{ st.runs|length }} attempt{{ '' if st.runs|length == 1 else 's' }} ended without a result</span>
+                <span class="step__when">{{ (st.started or st.ended)|when }}</span>
+            </div>
+            <div class="step__why">
+                {%- for how, n in st.hows.items() %}{{ n }} {{ 'timed out' if how == 'timeout' else how }}{{ ' · ' if not loop.last }}{% endfor -%}
+            </div>
+            <details class="step__more"><summary>each attempt</summary>
+                {% for r in st.runs %}<p class="step__detail">{{ r.how }}{% if r.mins is not none %} after {{ r.mins }}m{% endif %}{% if r.detail %} — {{ r.detail|truncate(220) }}{% endif %}</p>{% endfor %}
+            </details>
+        </li>
+        {% elif st.type == 'question' %}
+        <li class="step step--ask">
+            <div class="step__head"><span class="step__who"><span class="step__icon">{{ icons.get(st.role, '⚙️') }}</span>{{ st.role }}</span><span class="step__what">asked you</span><span class="step__when">{{ st.at|when }}</span></div>
+            <div class="step__quote step__quote--ask">{{ st.text }}</div>
+        </li>
+        {% elif st.type == 'you' %}
+        <li class="step step--you">
+            <div class="step__head"><span class="step__who">You</span><span class="step__what">replied</span><span class="step__when">{{ st.at|when }}</span></div>
+            <div class="step__quote step__quote--you">{{ st.text }}</div>
+        </li>
+        {% elif st.type == 'external' %}
+        <li class="step">
+            <div class="step__head"><span class="step__who">🔔 external</span><span class="step__what">an event arrived</span><span class="step__when">{{ st.at|when }}</span></div>
+            <div class="step__quote">{{ st.text|truncate(400) }}</div>
+        </li>
+        {% elif st.type == 'check' %}
+        <li class="step step--{{ 'ok' if st.passed else 'bad' }}">
+            <div class="step__head"><span class="step__who">⚙ check</span>
+                <span class="step__what">{{ 'passed' if st.passed else 'failed' }}{% if st.passed and st.tests %} · {{ st.tests }} tests{% endif %} · {{ (st.secs // 60)|int }}m{{ '%02d'|format(st.secs % 60) }}s{% if st.broke %} — {{ st.broke.split('::')[-1] }}{% endif %}</span>
+                <span class="step__when">{{ st.at|when }}</span></div>
+        </li>
+        {% elif st.type == 'verdict' %}
+        <li class="step step--{{ 'ok' if st.approved else 'bad' }}">
+            <div class="step__head"><span class="step__who">🔍 review</span><span class="step__what">{{ 'approved' if st.approved else 'changes requested' }} · {{ st.mr }}</span><span class="step__when">{{ st.at|when }}</span></div>
+            <details class="step__more"><summary>read the verdict</summary><div class="step__text">{{ st.text|truncate(1200) }}</div></details>
+        </li>
+        {% elif st.type == 'decision' %}
+        <li class="step step--{{ 'ok' if st.done else 'bad' }}">
+            <div class="step__head"><span class="step__who">🧭 orchestrator</span><span class="step__what">{{ 'closed it' if st.done else 'gave up' }} — {{ st.text|truncate(110) }}</span><span class="step__when">{{ st.at|when }}</span></div>
+        </li>
+        {% elif st.type == 'merge' %}
+        <li class="step step--ship">
+            <div class="step__head"><span class="step__who">⇄ merge</span><span class="step__what">into {{ st.target }} as <code>{{ st.sha[:8] }}</code></span><span class="step__when">{{ st.at|when }}</span></div>
+        </li>
+        {% elif st.type == 'control' %}
+        <li class="step step--you">
+            <div class="step__head"><span class="step__who">You</span><span class="step__what">{{ st.text.split(' — ')[0].replace('the human', 'you') }}</span><span class="step__when">{{ st.at|when }}</span></div>
+        </li>
+        {% elif st.type == 'commit' %}
+        <li class="step step--ok"><div class="step__commit">{{ st.text }}</div></li>
+        {% endif %}
+        {% endfor %}
+    </ol>
+    {% endcall %}
+    {% endif %}
+
+    {# ── what it left behind ────────────────────────────────────────────── #}
+    {% if files.count %}
+    {% call ui.dsec('', 'Attachments', files.count ~ ' file' ~ ('' if files.count == 1 else 's')) %}
+    <div class="files">
+        {% for f in files.produced %}{{ ui.file_row(task.id, f, '📄' if f.kind == 'report' else '📎') }}{% endfor %}
+        {% if files.logs %}<div class="files__group">Run logs</div>{% for f in files.logs %}{{ ui.file_row(task.id, f, '▤') }}{% endfor %}{% endif %}
+        {% if files.recovered %}<div class="files__group">Recovered uncommitted work</div>{% for f in files.recovered %}{{ ui.file_row(task.id, f, '⤺') }}{% endfor %}{% endif %}
     </div>
-    {% endfor %}
+    {% endcall %}
     {% endif %}
-    {% set icons = {'orchestrator':'🧭','engineer':'🔧','reviewer':'🔍','explorer':'🔭','planner':'🗺️','human':'🧑'} %}
 
-    {# ── Two-lane thread ─────────────────────────────────────────────────
-       DIALOGUE messages render as styled bubbles; consecutive MACHINERY
-       messages (lifecycle noise — lane split lives in store.message_lane)
-       collapse into one thin <details> run, closed by default. hx-preserve
-       keeps a run's open/closed state across the 3s poll swap — its id is
-       keyed off the run's first message seq, stable across re-renders. #}
-    {# preserve=false for the TRAILING run of a live thread: hx-preserve keeps
-       the old element across poll swaps, which would freeze the one run that
-       is still growing. Completed runs (a dialogue message follows them) are
-       content-stable, so preserving their open/closed state is safe. #}
+    {# A reply is how a parked task resumes — and, on a finished one, how it
+       reopens: the reply route does both, so the box says so. #}
+    {% if task.status in ('done', 'failed') %}
+    <details class="reopen" hx-preserve="true" id="reopen-fold">
+        <summary>This task is {{ task.status }}. <span class="reopen__cta">Reopen and reply</span> — your note wakes the orchestrator on the same thread.</summary>
+    {% endif %}
+    <form id="reply-composer" hx-preserve="true" class="composer{{ ' composer--wanted' if task.status == 'waiting' }}"
+          hx-post="/api/tasks/{{ task.id }}/messages" hx-swap="none"
+          onsubmit="setTimeout(() => this.reset(), 0)">
+        <textarea name="text" required rows="2"
+                  placeholder="{% if task.status == 'waiting' %}Answer — this resumes the task{% elif task.status in ('done', 'failed') %}What should happen next? Sending reopens the task{% else %}Add a note, or steer the work…{% endif %}"
+                  onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter'){event.preventDefault();this.form.requestSubmit();}"></textarea>
+        <div class="composer__foot">
+            <span class="taskbox__hint"><kbd>⌘↵</kbd> sends · the orchestrator reads it on the next pass</span>
+            <button type="submit" class="btn btn--primary btn--sm">{{ 'Reopen and send' if task.status in ('done', 'failed') else 'Reply' }}</button>
+        </div>
+    </form>
+    {% if task.status in ('done', 'failed') %}</details>{% endif %}
+
+    {# Everything above is read from the thread; the thread itself stays one
+       fold away, so nothing the page does not recognise is ever lost. #}
+    <details class="rawthread" hx-preserve="true" id="raw-thread">
+        <summary>Full thread <span class="chip">{{ messages|length }}</span></summary>
     {% macro machinery_run(run, preserve=true) %}
     <details class="msg-run" {% if preserve %}hx-preserve="true" {% endif %}id="run-{{ run[0].seq }}">
         <summary><span class="msg-run__ic">⚙</span>{{ run|length }} service message{{ '' if run|length == 1 else 's' }}<span class="msg-run__hint">show</span></summary>
@@ -235,58 +347,64 @@
         {% if ns.run %}{{ machinery_run(ns.run, preserve=(task.status not in ('active', 'waiting'))) }}{% endif %}
     </div>
 
-    {# The composer is how a parked task gets unparked, so it reads as an
-       invitation rather than as a form at the bottom of a log. #}
-    <form id="reply-composer" hx-preserve="true" class="composer{{ ' composer--wanted' if task.status == 'waiting' }}"
-          hx-post="/api/tasks/{{ task.id }}/messages" hx-swap="none"
-          onsubmit="setTimeout(() => this.reset(), 0)">
-        <textarea name="text" required rows="2"
-                  placeholder="{% if task.status == 'waiting' %}Answer the question — this resumes the task{% else %}Add a note, or steer the work…{% endif %}"
-                  onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter'){event.preventDefault();this.form.requestSubmit();}"></textarea>
-        <div class="composer__foot">
-            <span class="taskbox__hint"><kbd>⌘↵</kbd> sends · the orchestrator reads it on the next pass</span>
-            <button type="submit" class="btn btn--primary btn--sm">Reply</button>
-        </div>
-    </form>
+    </details>
   </div>
 
+  {# ── rail: facts about the task, its change and its history ──────────── #}
   <aside class="task-rail">
     <div class="rail-sec">
         <div class="rail-h">Properties</div>
-        <div class="prop"><span class="k">Status</span><span class="status status--{{ task.status }}">{{ task.status }}</span></div>
         <div class="prop"><span class="k">Repo</span><span class="v">{{ task.repo or '—' }}</span></div>
+        <div class="prop"><span class="k">Asked by</span><span class="v"{% if asked_by.about %} title="{{ asked_by.about }}"{% endif %}>{{ ('↻ ' ~ asked_by.who) if asked_by.auto else asked_by.who }}</span></div>
         <div class="prop"><span class="k">Handled by</span><span class="v">{{ task.agent ~ ' (solo)' if task.agent else 'orchestrator' }}</span></div>
-        <div class="prop"><span class="k">Created</span><span class="v mono">{{ task.created_at[:16] }}</span></div>
-        {% if parent %}<div class="prop"><span class="k">Parent</span><a class="v" href="/tasks/{{ parent.id }}">{{ parent.id }}</a></div>{% endif %}
+        {% if trail %}<div class="prop"><span class="k">Worked</span><span class="v trail">{% for a in trail %}<span class="trail__who" title="{{ a }}">{{ icons.get(a, '•') }}</span>{% endfor %}</span></div>{% endif %}
+        {% if parent %}<div class="prop"><span class="k">Parent</span><a class="v" href="/tasks/{{ parent.id }}">{{ parent.key or parent.id }}</a></div>{% endif %}
     </div>
 
     {% if mr %}
     <div class="rail-sec">
-        <div class="rail-h">Merge request</div>
-        <button type="button" class="btn btn--ghost btn--sm" style="width:100%;justify-content:center"
-                hx-get="/api/mr/{{ mr.id }}/view" hx-target="#modal-container" hx-swap="innerHTML">⇄ {{ mr.source_branch }} → {{ mr.target_branch }} ({{ mr.status }})</button>
+        <div class="rail-h">Change</div>
+        <div class="prop"><span class="k">Branch</span><span class="v mono">{{ mr.source_branch }}</span></div>
+        <div class="prop"><span class="k">Merge request</span>
+            <a class="v" href="#" hx-get="/api/mr/{{ mr.id }}/view" hx-target="#modal-container" hx-swap="innerHTML" onclick="return false">{{ mr.status }}{% if mr.merge_sha %} · {{ mr.merge_sha[:8] }}{% endif %}</a></div>
+        {% if change and change.check %}<div class="prop"><span class="k">Check</span><span class="v {{ 'is-good' if change.check.passed else 'is-bad' }}">{{ 'passed' if change.check.passed else 'failed' }}{% if change.check.tests %} · {{ change.check.tests }}{% endif %}</span></div>{% endif %}
+        <div class="prop"><span class="k">Review</span><span class="v {{ 'is-good' if mr.review_status == 'approved' else ('is-bad' if mr.review_status == 'changes_requested' else '') }}">{{ (mr.review_status or 'none').replace('_', ' ') }}{% if change and change.approvals > 1 %} ×{{ change.approvals }}{% endif %}</span></div>
     </div>
     {% endif %}
 
-    {# a review task is entirely about someone else's MR — reach it from here #}
     {% if review_of and review_of.mr %}
     <div class="rail-sec">
         <div class="rail-h">Reviewing</div>
-        <button type="button" class="btn btn--ghost btn--sm" style="width:100%;justify-content:center"
-                hx-get="/api/mr/{{ review_of.mr.id }}/view" hx-target="#modal-container" hx-swap="innerHTML">⇄ {{ review_of.mr.source_branch }} → {{ review_of.mr.target_branch }} ({{ review_of.mr.status }})</button>
-        <div class="prop" style="margin-top:8px"><span class="k">Verdict</span><span class="v">{{ review_of.mr.review_status or 'pending' }}</span></div>
-        {% if review_of.origin %}<div class="prop"><span class="k">Opened by</span><a class="v" href="/tasks/{{ review_of.origin.id }}">{{ task_display_title(review_of.origin)[:34] }}</a></div>{% endif %}
+        <div class="prop"><span class="k">Merge request</span>
+            <a class="v" href="#" hx-get="/api/mr/{{ review_of.mr.id }}/view" hx-target="#modal-container" hx-swap="innerHTML" onclick="return false">{{ review_of.mr.id }}</a></div>
+        {% if review_of.origin %}<div class="prop"><span class="k">Work under review</span><a class="v" href="/tasks/{{ review_of.origin.id }}">{{ review_of.origin.key or review_of.origin.id }}</a></div>{% endif %}
     </div>
     {% endif %}
 
     <div class="rail-sec">
-        <div class="rail-h">Usage</div>
-        <div class="prop"><span class="k">Cost</span><span class="v mono" style="color:var(--accent-hi)">${{ '%.4f'|format(usage.cost) }}</span></div>
-        <div class="prop"><span class="k">Tokens</span><span class="v mono">{{ '{:,}'.format(usage.tokens) }}</span></div>
-        <div class="prop"><span class="k">Runs</span><span class="v mono">{{ usage.runs }}</span></div>
-        {% if usage.cache_read %}<div class="prop"><span class="k">Cached</span><span class="v mono">{{ '{:,}'.format(usage.cache_read) }}</span></div>{% endif %}
+        <div class="rail-h">History</div>
+        <ol class="timeline">
+            {% for e in history %}
+            <li class="timeline__item timeline__item--{{ e.status.replace(' ', '-') }}"{% if e.inferred %} title="Rebuilt from the thread — this task predates recorded history"{% endif %}>
+                <span class="timeline__st">{{ e.status }}</span><span class="timeline__at">{{ e.at|when }}</span>
+                {% if e.why or e.after %}<span class="timeline__why">{{ e.why }}{% if e.why and e.after %} · {% endif %}{% if e.after %}<span class="{{ 'timeline__gap' if e.from == 'waiting' or e.status == 'shipped' else '' }}">after {{ e.after }}</span>{% endif %}</span>{% endif %}
+            </li>
+            {% endfor %}
+        </ol>
     </div>
+
+    {# Usage is a fact about the run, not the news about the task — one quiet
+       line, and nothing at all when there was no spend. #}
+    {% if usage.runs %}
+    <details class="usage-line">
+        <summary>${{ '%.2f'|format(usage.cost) }} · {{ '{:,}'.format(usage.tokens) }} tokens · {{ usage.runs }} run{{ '' if usage.runs == 1 else 's' }}</summary>
+        <div class="prop"><span class="k">Cost</span><span class="v mono">${{ '%.4f'|format(usage.cost) }}</span></div>
+        <div class="prop"><span class="k">Tokens</span><span class="v mono">{{ '{:,}'.format(usage.tokens) }}</span></div>
+        {% if usage.cache_read %}<div class="prop"><span class="k">Cached</span><span class="v mono">{{ '{:,}'.format(usage.cache_read) }}</span></div>{% endif %}
+    </details>
+    {% endif %}
   </aside>
+
 </div>
 <script>
 (function reltimeDetail() {

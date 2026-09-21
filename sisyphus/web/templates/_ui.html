@@ -17,3 +17,45 @@
     <div class="toolbar__actions">{{ caller() }}</div>
 </div>
 {% endmacro %}
+
+
+{# ── Detail components ───────────────────────────────────────────────────────
+   A task's detail page is assembled from these, so each kind of block has one
+   shape everywhere it appears — and a restyle touches app.css, not the page. #}
+
+{# A section that says what KIND of thing it holds before you read it:
+   in (what was asked), out (what came back), work (how it got there), or
+   none for supporting material. #}
+{% macro dsec(dir, label, meta='') %}
+<section class="dsec">
+    <div class="dsec__label">
+        {%- if dir %}<span class="dirmark dirmark--{{ dir }}">{{ dir }}</span>{% endif %}
+        <span>{{ label }}</span>
+        {%- if meta %}<span class="dsec__meta">{{ meta }}</span>{% endif %}
+    </div>
+    {{ caller() }}
+</section>
+{% endmacro %}
+
+{# A single fact about a change: merged, checked, reviewed, how big. #}
+{% macro fact(text, tone='') -%}
+<span class="fact{{ ' fact--' ~ tone if tone }}">{{ text }}</span>
+{%- endmacro %}
+
+{# One file a task left behind, opened the way its kind reads. #}
+{% macro file_row(task_id, f, icon='📎') -%}
+<div class="file">
+    <span class="file__icon">{{ icon }}</span>
+    <span class="file__name">{{ f.name }}</span>
+    <span class="file__kind">{{ f.kind }}</span>
+    <span class="file__size">{{ f.size_h }}</span>
+    <span class="file__by">{{ f.by or '—' }}</span>
+    <span class="file__open">
+        {%- if f.kind == 'log' %}
+        <button type="button" class="btn btn--ghost btn--sm" hx-get="/api/tasks/{{ task_id }}/logs?name={{ f.name|urlencode }}" hx-target="#modal-container" hx-swap="innerHTML">Open</button>
+        {%- else %}
+        <button type="button" class="btn btn--ghost btn--sm" hx-get="/api/tasks/{{ task_id }}/read/{{ f.name|urlencode }}" hx-target="#modal-container" hx-swap="innerHTML">Open</button>
+        {%- endif %}
+    </span>
+</div>
+{%- endmacro %}

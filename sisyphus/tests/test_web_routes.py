@@ -762,7 +762,7 @@ def test_task_detail_shows_result_card_with_diff_link(db_path):
     store.post_message(task["id"], "engineer", kind="result", text="done and dusted")
     client = _make_client()
     response = client.get(f"/api/tasks/{task['id']}/detail")
-    assert "Result" in response.text
+    assert "Outcome" in response.text                    # the output, labelled as one
     assert "done and dusted" in response.text
     # the diff opens in an in-app dialog (htmx), not a separate tab
     assert f"/api/tasks/{task['id']}/diff/change.patch" in response.text
@@ -1315,7 +1315,7 @@ class TestATaskOpensOverTheBoard:
         assert f'hx-get="/api/tasks/{t["id"]}/detail"' in panel
         assert "dataChanged from:body" in panel            # driven by the pulse
         assert "every 60s" in panel                        # safety net on a live task
-        assert "panel me" in panel and "Goal" in panel
+        assert "panel me" in panel and "Request" in panel
 
     def test_a_finished_task_panel_keeps_no_timer_at_all(self, db_path):
         from core import store
@@ -1556,3 +1556,30 @@ def test_the_backlog_names_its_columns_once_on_the_rows_grid(db_path):
         assert f">{name}<" in head, name
     css = (Path(__file__).parent.parent / "web" / "static" / "app.css").read_text()
     assert css.count("grid-template-columns: var(--c-grid)") >= 2   # header and rows alike
+
+
+class TestReplyingToAFinishedTaskReopensIt:
+    """The orchestrator ignores every event on a done or failed task, so a
+    reply typed into one posted and then vanished — nothing ran, nothing said
+    so."""
+
+    def test_the_reply_reopens_and_is_heard(self, db_path):
+        from core import store
+        t = store.create_task("finished", repo="test-repo")
+        store.set_status(t["id"], "done")
+        with patch("core.orchestrator.emit") as emit:
+            r = _make_client().post(f"/api/tasks/{t['id']}/messages", data={"text": "one more thing"})
+        assert r.status_code == 200
+        assert store.get_task(t["id"])["status"] == "waiting"     # the state a reply resumes
+        emit.assert_called_once_with(t["id"], "human_replied")
+        assert store.list_events(t["id"])[-1]["cause"] == "reopened by your reply"
+        kinds = [(m["author"], m["kind"]) for m in store.get_thread(t["id"])]
+        assert kinds[-2:] == [("system", "note"), ("human", "answer")]
+
+    def test_a_reply_to_a_live_task_changes_nothing_about_its_status(self, db_path):
+        from core import store
+        t = store.create_task("live", repo="test-repo")
+        with patch("core.orchestrator.emit"):
+            _make_client().post(f"/api/tasks/{t['id']}/messages", data={"text": "note"})
+        assert store.get_task(t["id"])["status"] == "active"
+        assert store.list_events(t["id"]) == []

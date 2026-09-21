@@ -437,7 +437,7 @@ async def _terminate(task_id: str, status: str, reason: str = "") -> None:
     """Set a terminal status AND reclaim the task's disk (worktrees, bare
     clones, run logs). Best-effort cleanup — never let it block termination."""
     task = store.get_task(task_id)
-    store.set_status(task_id, status)
+    store.set_status(task_id, status, cause=reason or None)
     if status == "failed":
         # Every failed transition passes through here — the one choke point.
         # 8 of this daemon's 9 historical failures were silent; not anymore.
@@ -480,7 +480,7 @@ def _park_on_error(task_id: str) -> None:
                        text="[error] an internal error interrupted this pass — parked for review")
     store.post_message(task_id, "orchestrator", kind="question",
                        text="Something went wrong on my side. Reply here to resume, or check the daemon logs.")
-    store.set_status(task_id, "waiting")
+    store.set_status(task_id, "waiting", cause="an internal error interrupted a pass")
     notify.send("task_parked", task_id=task_id, title=store.task_display_title(task),
                 reason="an internal error interrupted a pass — parked for review")
 
@@ -714,7 +714,7 @@ async def _execute(task_id: str, decision: Decision):
         return None
     if decision.action == "ask_human":
         store.post_message(task_id, "orchestrator", kind="question", text=decision.question or "")
-        store.set_status(task_id, "waiting")
+        store.set_status(task_id, "waiting", cause="the orchestrator asked you")
         return None
     if decision.action == "done":
         await _terminate(task_id, "done")

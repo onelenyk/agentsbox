@@ -1179,6 +1179,169 @@ select { cursor: pointer; appearance: none;
 .rail-sec a.v:hover { text-decoration: underline; }
 @media (max-width: 900px) { .task-detail { grid-template-columns: 1fr; } .task-rail { position: static; } }
 
+/* ── Task detail: in / out / work ────────────────────────────────────────
+   A task page answers three questions in order — what was asked, what came
+   back, how it got there — and each block carries a mark that names its kind
+   before a word of it is read. Input is quiet (a document), output is the one
+   lit block, work is a sequence of steps. Built only from tokens so a restyle
+   of the app restyles this page with it. */
+.dsec { margin-bottom: 20px; }
+.dsec__label {
+  display: flex; align-items: center; gap: 8px; margin: 0 0 8px;
+  font-size: 10.5px; font-weight: 650; letter-spacing: .09em; text-transform: uppercase; color: var(--muted);
+}
+.dsec__meta { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--muted); }
+.dirmark {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .04em; text-transform: uppercase;
+  padding: 1px 7px; border-radius: var(--r-pill); border: 1px solid var(--border);
+  color: var(--text-2); background: var(--panel-2);
+}
+.dirmark--in   { color: var(--info);   background: var(--info-bg);   border-color: var(--info-bd); }
+.dirmark--out  { color: var(--good);   background: var(--good-bg);   border-color: var(--good-bd); }
+.dirmark--work { color: var(--violet); background: var(--violet-bg); border-color: var(--violet-bd); }
+
+/* IN — the request, as a document */
+.doc {
+  border: 1px solid var(--border); border-radius: var(--r); padding: 14px 16px;
+  font-size: 13.5px; line-height: 1.65; color: var(--text-2);
+}
+
+/* OUT — the answer; or, honestly, why there is none */
+.outcome {
+  background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--good);
+  border-radius: var(--r); padding: 15px 17px;
+}
+.outcome--failure { border-left-color: var(--bad); }
+.outcome--question { border-left-color: var(--warn); }
+.outcome--none { border-left-color: var(--border-2); }
+.outcome__head { font-size: 12px; font-weight: 650; margin-bottom: 7px; }
+.outcome--failure .outcome__head { color: var(--bad); }
+.outcome--question .outcome__head { color: var(--warn); }
+.outcome__body { font-size: 13.5px; line-height: 1.65; color: var(--text-2); }
+.outcome__detail {
+  margin-top: 8px; font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.outcome__hint { margin-top: 8px; font-size: 12px; color: var(--warn); }
+.outcome__empty { font-size: 13px; color: var(--muted); }
+
+/* facts about the change the answer made */
+.facts {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin-top: 13px; padding-top: 12px; border-top: 1px solid var(--border);
+}
+.facts__act { margin-left: auto; display: flex; gap: 6px; }
+.fact {
+  font-size: 11.5px; line-height: 1.8; padding: 0 9px; white-space: nowrap;
+  border-radius: var(--r-pill); border: 1px solid var(--border);
+  color: var(--text-2); background: var(--panel-2);
+}
+.fact--good   { color: var(--good);      background: var(--good-bg);   border-color: var(--good-bd); }
+.fact--bad    { color: var(--bad);       background: var(--bad-bg);    border-color: var(--bad-bd); }
+.fact--accent { color: var(--accent-hi); background: var(--accent-bg); border-color: var(--accent-bd); }
+.fact--muted  { color: var(--muted); }
+
+/* WORK — how it got there, as a line of steps */
+.steps { list-style: none; margin: 0 0 0 9px; padding: 0; border-left: 1px solid var(--border); }
+.step { position: relative; padding: 0 0 13px 20px; }
+.step::before {
+  content: ""; position: absolute; left: -5px; top: 6px; width: 9px; height: 9px; border-radius: 50%;
+  background: var(--panel-2); border: 1.5px solid var(--border-2);
+}
+.step--ok::before   { background: var(--good);   border-color: var(--good); }
+.step--bad::before  { background: var(--bad);    border-color: var(--bad); }
+.step--you::before  { background: var(--accent); border-color: var(--accent); }
+.step--ask::before  { background: var(--warn);   border-color: var(--warn); }
+.step--live::before { background: var(--good);   border-color: var(--good); animation: live-pulse 1.6s ease-in-out infinite; }
+.step--ship::before { background: var(--good);   border-color: var(--good); box-shadow: 0 0 0 3px var(--good-bg); }
+.step__head { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+.step__who { font-weight: 600; color: var(--text); white-space: nowrap; }
+.step__icon { margin-right: 6px; }
+.outcome__fold > summary { cursor: pointer; list-style: none; }
+.outcome__fold > summary::-webkit-details-marker { display: none; }
+.outcome__fold[open] > summary { display: none; }
+.outcome__more { display: inline-block; margin-top: 6px; font-size: 12px; color: var(--accent-hi); }
+.step__what { color: var(--text-2); min-width: 0; }
+.step--bad .step__what { color: var(--bad); }
+.step__when { margin-left: auto; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.step__why { margin-top: 3px; font-size: 12px; color: var(--muted); font-style: italic; line-height: 1.5; }
+.step__commit { margin-top: 4px; font-family: var(--mono); font-size: 11.5px; color: var(--good); }
+.step__quote {
+  margin-top: 6px; padding: 8px 11px; border-radius: var(--r-sm);
+  font-size: 12.5px; line-height: 1.5; color: var(--text-2);
+  border: 1px solid var(--border); background: var(--panel-2); white-space: pre-wrap;
+}
+.step__quote--you { color: var(--text); background: var(--accent-bg); border-color: var(--accent-bd); }
+.step__quote--ask { background: var(--warn-bg); border-color: var(--warn-bd); }
+.step__more { margin-top: 4px; }
+.step__more > summary { cursor: pointer; font-size: 11.5px; color: var(--accent-hi); width: max-content; }
+.step__label { margin-top: 8px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.step__text { font-size: 12.5px; line-height: 1.55; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.step__detail { margin: 5px 0 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+
+/* what it left behind */
+.files { border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
+.file {
+  display: grid; grid-template-columns: 22px minmax(0, 1fr) 72px 70px 110px auto;
+  gap: 12px; align-items: center; padding: 8px 13px; font-size: 12.5px;
+  border-top: 1px solid var(--border);
+}
+.file:first-child { border-top: none; }
+.file:hover { background: var(--panel); }
+.file__name { font-family: var(--mono); font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file__kind, .file__by { color: var(--muted); font-size: 11.5px; }
+.file__size { color: var(--muted); font-size: 11.5px; font-family: var(--mono); text-align: right; }
+.files__group {
+  padding: 7px 13px; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--muted); background: var(--inset); border-top: 1px solid var(--border);
+}
+.docview { font-size: 13.5px; line-height: 1.65; color: var(--text-2); }
+
+/* the reply on a finished task says what it will do */
+.reopen { margin-top: 16px; }
+.reopen > summary {
+  cursor: pointer; list-style: none; font-size: 12.5px; color: var(--muted);
+  border: 1px dashed var(--border); border-radius: var(--r); padding: 11px 14px;
+}
+.reopen > summary::-webkit-details-marker { display: none; }
+.reopen__cta { color: var(--accent-hi); }
+.reopen[open] > summary { border-style: solid; }
+
+/* the raw thread, one fold away */
+.rawthread { margin-top: 22px; }
+.rawthread > summary {
+  cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px;
+  font-size: 10.5px; font-weight: 650; letter-spacing: .09em; text-transform: uppercase; color: var(--muted);
+}
+.rawthread > summary::-webkit-details-marker { display: none; }
+.rawthread[open] > summary { margin-bottom: 10px; }
+
+/* rail: history as a line, usage as a footnote */
+.timeline { list-style: none; margin: 0; padding: 0; }
+.timeline__item { position: relative; padding: 0 0 11px 16px; font-size: 12px; }
+.timeline__item::before {
+  content: ""; position: absolute; left: 0; top: 5px; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--border-2);
+}
+.timeline__item:not(:last-child)::after {
+  content: ""; position: absolute; left: 3px; top: 13px; bottom: 0; width: 1px; background: var(--border);
+}
+.timeline__item--active::before  { background: var(--accent); }
+.timeline__item--waiting::before { background: var(--warn); }
+.timeline__item--done::before    { background: var(--good); }
+.timeline__item--failed::before  { background: var(--bad); }
+.timeline__item--shipped::before { background: var(--good); box-shadow: 0 0 0 3px var(--good-bg); }
+.timeline__st { font-weight: 600; color: var(--text); }
+.timeline__at { margin-left: 5px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.timeline__why { display: block; margin-top: 1px; color: var(--muted); line-height: 1.45; }
+.timeline__gap { color: var(--warn); }
+.usage-line { padding: 2px 2px 0; }
+.usage-line > summary { cursor: pointer; list-style: none; font-size: 11.5px; color: var(--muted); }
+.usage-line > summary::-webkit-details-marker { display: none; }
+.usage-line[open] > summary { margin-bottom: 6px; }
+.rail-sec .prop .v.is-good { color: var(--good); }
+.rail-sec .prop .v.is-bad { color: var(--bad); }
+
 /* ── Repo detail: agent-context resource list ────────────────────────── */
 .reslist { display: flex; flex-direction: column; gap: 8px; }
 .resitem { display: flex; align-items: center; gap: 11px; padding: 10px 13px; background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--r); transition: border-color .12s; }
