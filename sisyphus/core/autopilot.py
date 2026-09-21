@@ -347,7 +347,7 @@ def fire(ap: dict, context: Optional[dict] = None) -> Optional[str]:
     goal = render_template(ap.get("goal_template", ""), context).strip() or ap["name"]
     title = _make_title(ap, context)
     task = store.create_task(goal, ap.get("repo") or "", agent=ap.get("agent") or None,
-                             title=title)
+                             title=title, origin=f"autopilot:{ap['id']}")
     emit(task["id"], "created")
     record_fire(ap["id"], task["id"])
     logger.info("autopilot %s fired -> task %s", ap["name"], task["id"])

@@ -94,6 +94,22 @@ def _migrate(conn) -> None:
                          "ON CONFLICT(prefix) DO UPDATE SET last = max(last, excluded.last)",
                          (prefix, last))
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_key ON tasks(key)")
+    if "origin" not in cols:
+        # Who asked for this task: NULL for a person, "autopilot:<id>" for an
+        # automation. fire() never recorded it, so the board inferred it by
+        # matching titles against automation names — which broke the moment an
+        # automation was renamed and could never tell a person's task that
+        # happened to share a name. Existing rows are matched ONCE, here, and
+        # no title is parsed for this again.
+        conn.execute("ALTER TABLE tasks ADD COLUMN origin TEXT")
+        has_autopilots = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='autopilots'").fetchone()
+        if has_autopilots:
+            for ap in conn.execute("SELECT id, name FROM autopilots").fetchall():
+                conn.execute(
+                    "UPDATE tasks SET origin = ? WHERE origin IS NULL AND "
+                    "(title = ? OR title LIKE ? OR title LIKE ?)",
+                    (f"autopilot:{ap['id']}", ap["name"], f"{ap['name']} · %", f"{ap['name']}: %"))
 
 
 def _now() -> str:
@@ -142,16 +158,16 @@ def task_display_title(task: dict) -> str:
 def create_task(goal: str, repo: str = "", status: str = "active",
                 parent_id: Optional[str] = None, agent: Optional[str] = None,
                 base_branch: Optional[str] = None,
-                title: Optional[str] = None) -> dict:
+                title: Optional[str] = None, origin: Optional[str] = None) -> dict:
     task_id = f"task-{uuid4().hex[:8]}"
     now = _now()
     conn = get_conn()
     key = _next_key(conn, repo)
     conn.execute(
-        "INSERT INTO tasks (id, goal, repo, status, parent_id, agent, base_branch, title, key, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tasks (id, goal, repo, status, parent_id, agent, base_branch, title, key, "
+        "origin, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (task_id, goal, repo, status, parent_id, agent or None, base_branch or None, title or None,
-         key, now, now),
+         key, origin or None, now, now),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()

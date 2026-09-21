@@ -1037,35 +1037,32 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = ""):
     # cron run that NEEDS you must stay a card) each autopilot's runs collapse
     # into one group row: count, the latest run, when. Signal stays, pile goes.
     from core import autopilot as _autopilot
-    automations = {a["name"]: a for a in _autopilot.list_autopilots() if a.get("name")}
+    automations = {f"autopilot:{a['id']}": a for a in _autopilot.list_autopilots()}
 
-    def _autopilot_of(t):
-        title = t.get("title") or ""
-        for name in automations:
-            # _make_title shapes: "name · 2026-08-09" (schedule), "name: event"
-            # (webhook), or the bare name.
-            if title == name or title.startswith(f"{name} · ") or title.startswith(f"{name}: "):
-                return name
-        return None
-
-    def _automation_badges(name):
-        """What a row should say about the automation behind it: when it fires,
-        and whether it still can. A run's own outcome is already on the row —
-        this is about the thing that produced it, which the board otherwise
-        never mentions at all."""
-        ap = automations.get(name)
+    def _origin_of(t):
+        """Who asked for this task, as the board shows it: None for a person,
+        or the automation that fired it — with when it fires and whether it
+        still can, which is what a person wants to know about it."""
+        ap = automations.get(t.get("origin") or "")
         if not ap:
-            return []
-        badges = [{"text": _autopilot.describe_schedule(ap), "tone": ""}]
+            return None
+        notes = [_autopilot.describe_schedule(ap)]
         if not ap.get("enabled"):
-            badges.append({"text": "paused", "tone": "idle"})
+            notes.append("paused")
         problem = _autopilot.schedule_problem(ap)
         if problem:
-            badges.append({"text": "broken schedule", "tone": "bad", "title": problem})
-        return badges
-
-    autopilot_of = {t["id"]: _autopilot_of(t)
-                    for col in ("shipped", "done", "failed") for t in columns[col]}
+            notes.append(problem)
+        # The run's own title already names its automation ("Nightly repo
+        # scan · 2026-09-06"), so the tag says what the title cannot: when the
+        # automation fires — or that it no longer can.
+        if problem:
+            short = "broken schedule"
+        elif not ap.get("enabled"):
+            short = "paused"
+        else:
+            short = notes[0]
+        return {"name": ap["name"], "id": ap["id"], "about": " · ".join(notes),
+                "short": short, "broken": bool(problem), "paused": not ap.get("enabled")}
 
     # A status here is not a column a card sits in — it is what the task is
     # doing to you right now, and the three that ask something of you get
@@ -1085,9 +1082,7 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = ""):
     rows, by_id = [], {}
     for col in ("shipped", "done", "failed", "in-progress", "needs-you", "to-merge"):
         for t in columns[col]:
-            name = autopilot_of.get(t["id"])
-            rows.append(_row(t, col, who, auto_name=name,
-                             badges=_automation_badges(name) if name else None))
+            rows.append(_row(t, col, who, origin=_origin_of(t)))
     for r in rows:
         by_id[r["id"]] = r
 
@@ -1119,38 +1114,22 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = ""):
         if not sprints or sprints[-1]["id"] != r["sprint"]["id"]:
             sprints.append({**r["sprint"], "entries": [], "tasks": 0, "done": 0, "failed": 0})
         sprint = sprints[-1]
-        if r["auto"]:
-            # An automation is not a task that happens to repeat — it is a
-            # standing instruction, and its runs are what it did. So the week
-            # shows the AUTOMATION, folded, with its runs inside it: one line
-            # that says what it is, when it fires and how it went, instead of
-            # seven identical rows of machine work sitting among your own.
-            group = next((i for i in sprint["entries"]
-                          if i["type"] == "auto" and i["name"] == r["title"]), None)
-            if group is None:
-                group = {"type": "auto", "name": r["title"], "badges": r["badges"],
-                         "runs": [], "done": 0, "failed": 0, "when": r["when"]}
-                sprint["entries"].append(group)
-            group["runs"].append(r)
-            group["when"] = max(group["when"] or "", r["when"] or "")
-            if r["kind"] == "failed":
-                group["failed"] += 1
-            else:
-                group["done"] += 1
+        # A task folds only into the row right above it — same title, same
+        # outcome, back to back, which is what two review runs of one merge
+        # request look like. An automation's runs never fold: each is a task
+        # it made, and two on the same day share a title by construction (an
+        # hourly one would have folded 24 runs into "×24"). They stand as the
+        # tasks they are — among yours, marked with who asked for them, one
+        # filter away from hidden.
+        last = sprint["entries"][-1] if sprint["entries"] else None
+        prev = last if (last and not r["origin"] and not last["row"]["origin"]
+                        and last["row"]["title"] == r["title"]
+                        and last["row"]["kind"] == r["kind"]
+                        and not last["row"].get("children") and not r.get("children")) else None
+        if prev is not None:
+            prev["row"]["runs"] += 1
         else:
-            # A human task folds only into the row right above it — the same
-            # title, the same outcome, back to back, which is what two review
-            # runs of one merge request look like. Anything further apart is
-            # its own row.
-            last = sprint["entries"][-1] if sprint["entries"] else None
-            prev = last if (last and last["type"] == "row"
-                            and last["row"]["title"] == r["title"]
-                            and last["row"]["kind"] == r["kind"]
-                            and not last["row"].get("children") and not r.get("children")) else None
-            if prev is not None:
-                prev["row"]["runs"] += 1
-            else:
-                sprint["entries"].append({"type": "row", "row": r})
+            sprint["entries"].append({"type": "row", "row": r})
         sprint["tasks"] += 1
         if r["kind"] == "failed":
             sprint["failed"] += 1
@@ -1170,21 +1149,16 @@ _KIND_WORD = {"in-progress": "in flight", "needs-you": "wants you",
               "done": "done", "failed": "failed"}
 
 
-def _row(t: dict, kind: str, who: dict, auto_name: Optional[str] = None,
-         badges: Optional[list] = None) -> dict:
+def _row(t: dict, kind: str, who: dict, origin: Optional[dict] = None) -> dict:
     """One task as the backlog draws it: the tags a person filters by, and
-    nothing that needs a second query per row. A run of an automation titles
-    itself by the automation, so its repeats can fold together."""
+    nothing that needs a second query per row. `origin` is who asked for it —
+    an automation, or None for a person."""
     from core import store
     return {
         "id": t["id"], "key": t.get("key") or "", "parent_id": t.get("parent_id"),
-        # `title` is what the row is grouped BY (an automation's runs share
-        # one), `label` is what a run calls itself once it is inside its group.
-        "title": auto_name or store.task_display_title(t),
-        "label": store.task_display_title(t),
+        "title": store.task_display_title(t),
         "kind": kind, "word": _KIND_WORD.get(kind, kind),
-        "repo": t.get("repo") or "", "auto": bool(auto_name), "runs": 1,
-        "badges": badges or [],
+        "repo": t.get("repo") or "", "runs": 1, "origin": origin,
         "who": t.get("live_role") or who.get(t["id"]) or t.get("agent") or "",
         "live": bool(t.get("live_role")),
         "review_status": t.get("review_status"),

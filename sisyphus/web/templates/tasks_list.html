@@ -8,20 +8,23 @@
    week on the page (newest open, the rest folded), parents with their subtasks
    under them, and every row carrying the tags you filter by. A dropdown that
    showed one week at a time would hide the comparison the grouping is for. #}
-{% macro task_row(row, in_group=false) -%}
+{% macro task_row(row) -%}
 <li class="trow trow--{{ row.kind }} {{ 'trow--child' if row.parent_id }}"
     data-when="{{ row.when }}" data-repo="{{ row.repo }}" data-who="{{ row.who }}"
-    data-kind="{{ row.kind }}" data-text="{{ (row.key ~ ' ' ~ row.title)|lower }}">
+    data-kind="{{ row.kind }}" data-origin="{{ 'auto' if row.origin else 'you' }}"
+    data-text="{{ (row.key ~ ' ' ~ row.title ~ ' ' ~ (row.origin.name if row.origin else ''))|lower }}">
     <a href="/tasks/{{ row.id }}" draggable="false" hx-get="/api/tasks/{{ row.id }}/panel" hx-target="#overlay-body" hx-swap="innerHTML" hx-push-url="/tasks/{{ row.id }}">
         <span class="trow__mark" title="new since your last visit"></span>
         <span class="tkey">{{ row.key }}</span>
-        <span class="trow__title">{% if row.auto and not in_group %}🤖 {% endif %}{{ row.label if in_group else row.title }}{% if row.runs > 1 %}<span class="trow__runs tnum">×{{ row.runs }}</span>{% endif %}</span>
-        {# An automation's row says what the automation is — when it fires,
-           whether it still can — where a human task says which repo it touched. #}
+        <span class="trow__title">{{ row.title }}{% if row.runs > 1 %}<span class="trow__runs tnum">×{{ row.runs }}</span>{% endif %}</span>
+        {# Who asked for it. A person's task shows the repo it touches; a task
+           an automation fired shows the automation, because that is the news —
+           and when it fires, or why it cannot, sits in the tooltip. #}
         <span class="trow__tags">
             <span class="tslot">
-                {%- if row.badges and not in_group -%}
-                {%- for b in row.badges %}<span class="tag tag--auto{{ ' tag--' ~ b.tone if b.tone }}"{% if b.title %} title="{{ b.title }}"{% endif %}>{{ b.text }}</span>{% endfor -%}
+                {%- if row.origin -%}
+                <span class="tag tag--origin{{ ' tag--bad' if row.origin.broken }}{{ ' tag--idle' if row.origin.paused }}"
+                      title="Created by the automation “{{ row.origin.name }}” — {{ row.origin.about }}">↻ {{ row.origin.short }}</span>
                 {%- elif row.repo -%}
                 <span class="tag tag--repo">{{ row.repo }}</span>
                 {%- endif -%}
@@ -142,6 +145,11 @@
                     {% for w in whos %}<option value="{{ w }}">{{ w }}</option>{% endfor %}
                 </select>
                 {% endif %}
+                <select class="f-pick" data-field="origin" title="Who asked for the task">
+                    <option value="">from anyone</option>
+                    <option value="you">from you</option>
+                    <option value="auto">from automations</option>
+                </select>
                 <select class="f-pick" data-field="kind">
                     <option value="">any status</option>
                     <option value="in-progress">in flight</option>
@@ -174,37 +182,9 @@
             <ol class="trows">
                 {# `items` would resolve to dict.items in Jinja — hence `entries` #}
                 {% for item in sp.entries %}
-                {% if item.type == 'auto' %}
-                {# An automation is a standing instruction, not a task that
-                   happens to repeat. It gets its own object: one line saying
-                   what it is, when it fires and how its week went, with the
-                   runs themselves folded inside where they can be opened but
-                   cannot crowd out your own work. #}
-                <li class="autogroup-wrap">
-                    <details class="autogroup">
-                        <summary class="autogroup__head">
-                            <span class="autogroup__chev">▸</span>
-                            <span class="autogroup__bot">🤖</span>
-                            <span class="autogroup__name">{{ item.name }}</span>
-                            {% for b in item.badges %}<span class="tag tag--auto{{ ' tag--' ~ b.tone if b.tone }}"{% if b.title %} title="{{ b.title }}"{% endif %}>{{ b.text }}</span>{% endfor %}
-                            <span class="autogroup__tally">
-                                <span class="tnum">{{ item.runs|length }}</span> run{{ '' if item.runs|length == 1 else 's' }}
-                                {%- if item.failed %} · <span class="is-bad tnum">{{ item.failed }}</span> failed{% endif %}
-                            </span>
-                            <span class="autogroup__when"><span class="reltime" data-created="{{ item.when }}"></span></span>
-                        </summary>
-                        <ol class="trows trows--nested">
-                            {% for row in item.runs %}
-                            {{ task_row(row, in_group=true) }}
-                            {% endfor %}
-                        </ol>
-                    </details>
-                </li>
-                {% else %}
                 {% for row in [item.row] + (item.row.children or []) %}
                 {{ task_row(row) }}
                 {% endfor %}
-                {% endif %}
                 {% endfor %}
             </ol>
         </details>
@@ -259,14 +239,8 @@
             row.hidden = !ok;
             if (ok) shown++;
         });
-        // A filter that leaves its matches inside a folded automation — or a
-        // folded week — looks like no matches at all, so filtering opens
-        // whatever still holds one and hides what holds none.
-        document.querySelectorAll('.autogroup').forEach(function (g) {
-            var hits = g.querySelectorAll('.trow:not([hidden])').length;
-            g.parentElement.hidden = active && hits === 0;
-            if (active && hits) g.open = true;
-        });
+        // A filter that leaves its matches inside a folded week looks like no
+        // matches at all, so filtering opens every sprint that still has one.
         document.querySelectorAll('.sprint').forEach(function (sp) {
             var hits = sp.querySelectorAll('.trow:not([hidden])').length;
             sp.hidden = active && hits === 0;
