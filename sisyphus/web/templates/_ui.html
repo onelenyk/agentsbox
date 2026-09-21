@@ -59,3 +59,55 @@
     </span>
 </div>
 {%- endmacro %}
+
+
+{# ── Form components ─────────────────────────────────────────────────────── #}
+
+{# One option of a choice the form asks you to weigh. Whatever the caller
+   renders appears only while this option is picked. #}
+{% macro choice(name, value, checked, title, sub='', attrs='') -%}
+<label class="choice">
+    <input type="radio" name="{{ name }}" value="{{ value }}"{{ ' checked' if checked }} {{ attrs | safe }}>
+    <span class="choice__title">{{ title }}</span>
+    {%- if sub %}<span class="choice__sub">{{ sub }}</span>{% endif %}
+    {%- if caller %}<span class="choice__more">{{ caller() }}</span>{% endif %}
+</label>
+{%- endmacro %}
+
+{# Something the form checked for you, as a verdict: ok, bad, or unknown. #}
+{% macro probe(ok, text, detail='') -%}
+<span class="probe{{ ' probe--ok' if ok is sameas true else (' probe--bad' if ok is sameas false) }}">
+    <span>{{ text }}</span>{% if detail %}<span class="probe__detail">{{ detail }}</span>{% endif %}
+</span>
+{%- endmacro %}
+
+{# Pick one model from groups of {id, label, models:[{id, name, ctx, price}]}.
+   The first option is always "the runner's own default" (an empty value). A
+   group longer than `fold` starts closed unless it holds the current pick. #}
+{% macro model_picker(groups, current, default_label, fold=40) -%}
+<div class="mpick">
+    <input type="search" placeholder="Filter models…" data-mpick-filter autocomplete="off">
+    <div class="mpick__list">
+        <label class="mpick__opt">
+            <input type="radio" name="model" value=""{{ ' checked' if not current }}>
+            <span class="mpick__name">Runner default<span class="mpick__id">{{ default_label }}</span></span>
+            <span class="mpick__ctx"></span><span class="mpick__price"></span>
+        </label>
+        {%- for g in groups %}
+        {%- set holds = current and (g.models | selectattr('id', 'equalto', current) | list) %}
+        <details class="mpick__group"{{ ' open' if holds or g.models | length <= fold }}>
+            <summary>{{ g.label }} <span class="mpick__count">{{ g.models | length }}</span></summary>
+            {%- for m in g.models %}
+            <label class="mpick__opt">
+                <input type="radio" name="model" value="{{ m.id }}"{{ ' checked' if m.id == current }}>
+                <span class="mpick__name">{{ m.name }}<span class="mpick__id">{{ m.id }}</span></span>
+                <span class="mpick__ctx">{{ m.ctx }}</span>
+                <span class="mpick__price">{{ m.price }}</span>
+            </label>
+            {%- endfor %}
+        </details>
+        {%- endfor %}
+        <div class="mpick__none" hidden>No model matches.</div>
+    </div>
+</div>
+{%- endmacro %}

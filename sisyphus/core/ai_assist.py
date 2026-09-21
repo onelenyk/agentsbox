@@ -40,12 +40,9 @@ def run_prompt(prompt: str, timeout: int = 60) -> str:
         raise RuntimeError("no default runner configured")
     binary = resolve(runner["binary"]) or runner["binary"]
 
+    from core import runner_profiles
     env = dict(os.environ)
-    api_env = runner.get("api_key_env", "")
-    if api_env and os.environ.get(api_env):
-        env["OPENROUTER_API_KEY"] = os.environ[api_env]
-    if runner.get("base_url"):
-        env["OPENROUTER_BASE_URL"] = runner["base_url"]
+    env.update(runner_profiles.build_env("opencode", runner))
 
     # Force the runner's model — opencode's default agent otherwise picks a slower
     # model and the call takes ~5x longer.

@@ -576,6 +576,21 @@ def _claude_argv(binary, extra_args, prompt, *, model, mcp_config):
 
 # ── environment ─────────────────────────────────────────────────────────
 
+# Variables that would override a CLI's own sign-in. Claude Code prefers an
+# ANTHROPIC_API_KEY in its environment over the OAuth login in the keychain, so
+# a daemon started from a shell that happens to export one would bill that key
+# for a runner the owner set to "use its own login".
+_LOGIN_OVERRIDES = {
+    "claude-cli": ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
+}
+
+
+def env_to_drop(rtype: str, runner: dict) -> tuple:
+    """Inherited variables to remove before build_env's overlay is applied."""
+    from .runners import auth_mode
+    return _LOGIN_OVERRIDES.get(rtype, ()) if auth_mode(runner) == "login" else ()
+
+
 def build_env(rtype: str, runner: dict) -> dict:
     """Credential/model variables to overlay onto the worker's environment.
 
@@ -584,10 +599,25 @@ def build_env(rtype: str, runner: dict) -> dict:
     talks to Anthropic directly and would silently mislead anyone debugging a
     failed run by its environment.
     """
+    from .runners import auth_mode
     overlay: dict = {}
+    mode = auth_mode(runner)
     api_env = (runner.get("api_key_env") or "").strip()
-    key = os.environ.get(api_env, "") if api_env else ""
     base_url = (runner.get("base_url") or "").strip()
+    if mode == "login":
+        api_env, key = "", ""
+    elif mode == "key":
+        from . import keychain
+        pasted = keychain.read(runner.get("id") or "") or ""
+        if pasted and api_env:
+            # A pasted key goes to exactly the variable its provider reads,
+            # chosen when it was saved (core.runner_catalog.provider_env) —
+            # not also to OPENROUTER_API_KEY, as a variable from the
+            # environment is below.
+            overlay[api_env] = pasted
+        key = ""
+    else:
+        key = os.environ.get(api_env, "") if api_env else ""
 
     if rtype == "claude-cli":
         # No key configured is a valid, common setup: Claude Code also

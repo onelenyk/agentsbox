@@ -305,6 +305,8 @@ async def launch_agent(
 
     # Credential variables are per-CLI: what OpenRouter reads is meaningless to
     # a CLI talking to Anthropic directly (see core.runner_profiles.build_env).
+    for var in runner_profiles.env_to_drop(rtype, runner):
+        env.pop(var, None)
     env.update(runner_profiles.build_env(rtype, runner))
 
     agent_env = agent_def.get("opencode_config", {}).get("env", {})

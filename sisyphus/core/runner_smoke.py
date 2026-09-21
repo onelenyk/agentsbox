@@ -119,6 +119,8 @@ async def smoke_test(runner: dict, timeout: int = DEFAULT_TIMEOUT) -> dict:
         from .config import worker_env
         env.update(worker_env() or {})
         env["PATH"] = path_with_install_dirs(env.get("PATH", ""))
+        for var in runner_profiles.env_to_drop(rtype, runner):
+            env.pop(var, None)
         env.update(runner_profiles.build_env(rtype, runner))
 
         if sandbox.enabled():
