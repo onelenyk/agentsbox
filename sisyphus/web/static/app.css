@@ -452,7 +452,7 @@ body::before {
    in the same place on line 40 as on line 1 — and a subtask indents without
    moving the columns it shares with its parent. */
 .trows {
-  --c-mark: 8px; --c-key: 64px; --c-repo: 92px; --c-who: 112px;
+  --c-mark: 8px; --c-key: 64px; --c-repo: 118px; --c-who: 112px;
   --c-note: 136px; --c-state: 96px; --c-when: 74px;
   list-style: none; display: flex; flex-direction: column; padding-bottom: 10px;
 }
@@ -507,45 +507,21 @@ body::before {
 .tslot { display: flex; justify-content: flex-start; min-width: 0; }
 .tslot .tag { overflow: hidden; text-overflow: ellipsis; }
 
-/* ── An automation, and its runs ─────────────────────────────────────────
-   Machine work is a different kind of object from yours: a standing
-   instruction that fires on a clock, not a thing somebody decided to do. It
-   reads that way — violet instead of the board's amber, a dashed edge because
-   nothing here was chosen, its own line rather than a row among your tasks —
-   and its runs live inside it, one click away, where they cannot crowd the
-   week out. */
-.autogroup-wrap { list-style: none; }
-.autogroup { border-left: 2px dashed var(--violet); border-radius: var(--r-sm); margin: 2px 0; }
-.autogroup[open] { background: rgba(185, 140, 255, .04); }
-.autogroup__head {
-  display: flex; align-items: center; gap: 10px; cursor: pointer;
-  padding: 9px 12px; list-style: none;
-}
-.autogroup__head::-webkit-details-marker { display: none; }
-.autogroup__head:hover { background: rgba(185, 140, 255, .07); border-radius: var(--r-sm); }
-.autogroup__chev { color: var(--violet); font-size: 10px; transition: transform .12s; }
-.autogroup[open] .autogroup__chev { transform: rotate(90deg); }
-.autogroup__bot { font-size: 13px; opacity: .9; }
-.autogroup__name { font-size: 13px; font-weight: 600; color: var(--text-2); }
-.autogroup__head .tag--auto { color: var(--violet); background: var(--violet-bg); border-color: rgba(185, 140, 255, .28); }
-.autogroup__tally { margin-left: auto; font-size: 11.5px; color: var(--muted); }
-.autogroup__tally .is-bad { color: var(--bad); }
-.autogroup__when { width: 74px; text-align: right; font-size: 11.5px; color: var(--muted); }
-/* the runs: quieter than your own rows, and indented under their instruction */
-.trows--nested { padding: 0 0 6px 26px; }
-.trows--nested .trow a { font-size: 12.5px; padding: 6px 10px; min-height: 34px; }
-.trows--nested .trow:nth-child(odd) a { background: transparent; }
-.trows--nested .trow a:hover { background: var(--panel); border-left-color: var(--violet); }
-
 .tag {
   font-size: 11px; line-height: 1.8; padding: 0 8px;
   border-radius: var(--r-pill); border: 1px solid var(--border);
   color: var(--text-2); background: var(--panel-2); white-space: nowrap;
 }
 .tag--repo { max-width: 100%; color: var(--muted); }
-/* what the automation behind a run is: its schedule, and whether it can fire */
-.tag--auto { color: var(--text-2); background: var(--panel-2); }
-.tag--auto.tag--idle { color: var(--muted); font-style: italic; }
+/* Who asked for a task an automation fired. Violet, the one colour the board
+   uses for nothing else, so "a machine asked for this" reads at a glance
+   without turning the row into a different kind of object — it is a task. */
+.tag--origin {
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+  color: var(--violet); background: var(--violet-bg); border-color: rgba(185, 140, 255, .26);
+}
+.tag--origin.tag--idle { color: var(--muted); background: var(--panel-2); border-color: var(--border); font-style: italic; }
+.tag--origin.tag--bad { color: var(--bad); background: var(--bad-bg); border-color: var(--bad-bd); }
 .tslot { gap: 4px; }
 .tag--who { display: inline-flex; align-items: center; gap: 5px; }
 .tag--who .live-dot { width: 6px; height: 6px; }

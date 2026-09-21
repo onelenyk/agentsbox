@@ -1194,30 +1194,6 @@ class TestWatchRail:
         assert _make_client().get("/api/board/watch").status_code == 200
 
 
-def test_an_automation_is_one_object_with_its_runs_inside(db_path):
-    """Two daily crons produce ~60 identical rows a month. An automation is a
-    standing instruction, not a task that happens to repeat, so the week shows
-    the automation — folded — and its runs live inside it."""
-    from core import store
-    from core.autopilot import create_autopilot
-    client = _make_client()
-    create_autopilot(name="Nightly repo scan", trigger_type="schedule",
-                     cron="0 3 * * *", goal_template="scan")
-    runs = [store.create_task("scan all repos", status="done",
-                              title=f"Nightly repo scan · 2026-09-{day}")
-            for day in ("01", "02", "03")]
-    store.create_task("a real delivery", status="done", title="Fix the gate")
-
-    html = client.get("/api/tasks/list").text
-    assert html.count("autogroup__name") == 1          # one automation, one object
-    assert ">3</span> runs" in html and "daily 03:00" in html
-    for t in runs:
-        assert t["id"] in html                          # every run is still reachable
-        assert t["title"] in html                       # and names its own day
-    assert "Fix the gate" in html                       # human work stays a row of its own
-    assert "autogroup" not in html.split("Fix the gate", 1)[1].split("</li>", 1)[0]
-
-
 def test_a_cron_run_that_needs_you_stays_a_card(db_path):
     from core import store
     from core.autopilot import create_autopilot
@@ -1389,48 +1365,6 @@ class TestASprintIsAWeekWhereTheReaderLives:
         assert _sprint_of("not a date")["id"] == f"{year}-W{week:02d}"
 
 
-class TestRepeatsFoldInsideAWeekNotAcrossWeeks:
-    """An automation's runs collapse into one row so thirty identical cron
-    tasks don't bury a week's real work — but folding them globally put all of
-    them on one row in the week of the LATEST run, took them out of every
-    earlier week, and left a "×34" on a row dated today counting runs from six
-    weeks ago."""
-
-    def _runs(self, when_by_day):
-        from core import store
-        from core.db import get_conn
-        from core.autopilot import create_autopilot
-        create_autopilot(name="Nightly repo scan", trigger_type="schedule",
-                         cron="0 3 * * *", goal_template="scan")
-        made = [(day, store.create_task("scan", status="done",
-                                        title=f"Nightly repo scan · {day}")["id"])
-                for day in when_by_day]
-        # dated afterwards, on one connection: creating a task opens its own,
-        # and holding a write open across that deadlocks SQLite
-        conn = get_conn()
-        for day, task_id in made:
-            conn.execute("UPDATE tasks SET updated_at = ? WHERE id = ?",
-                         (f"{day}T12:00:00+00:00", task_id))
-        conn.commit(); conn.close()
-
-    def test_each_week_keeps_its_own_runs(self, db_path):
-        self._runs(["2026-09-15", "2026-09-16", "2026-09-17",     # week 38
-                    "2026-09-08", "2026-09-09"])                   # week 37
-        html = _make_client().get("/api/tasks/list").text
-        assert html.count("autogroup__name") == 2      # one automation object per week
-        assert ">3</span> runs" in html and ">2</span> runs" in html
-
-    def test_a_weeks_total_counts_runs_not_rows(self, db_path):
-        """Three runs folded into one row are still three tasks that week."""
-        self._runs(["2026-09-15", "2026-09-16", "2026-09-17"])
-        html = _make_client().get("/api/tasks/list").text
-        # the week holding the runs, found by its dates rather than its label,
-        # which reads "Last week" or "Week 38" depending on when this runs
-        assert ">3</span> tasks" in html      # three runs happened that week
-        assert ">3</span> runs" in html        # under one automation
-        assert html.count("autogroup__name") == 1
-
-
 class TestATaskTitleCanBeSelected:
     """Rows, cards and asks are links wrapping their own text. A link claims
     the drag, so a title could be opened but never selected or copied — and
@@ -1454,41 +1388,78 @@ class TestATaskTitleCanBeSelected:
         assert "user-select: none" not in head
 
 
-class TestAnAutomationsRowSaysWhatTheAutomationIs:
-    """A cron run's row used to say only the automation's name. The thing that
-    produced it — when it fires, whether it still can — was nowhere on the
-    board, so a paused or broken automation looked exactly like a healthy one
-    that simply had not run today."""
+class TestAutomationRunsAreTasksAmongTasks:
+    """An automation does not produce a different kind of work — fire() makes
+    an ordinary task, with the same lifecycle as yours. What differs is who
+    asked for it, so that is what the row says; and one filter hides them."""
 
-    def _run(self, **ap_kw):
+    def _fire(self, days=("2026-09-15",), **ap_kw):
         from core import store
-        from core.autopilot import create_autopilot
-        create_autopilot(name="Nightly repo scan", trigger_type="schedule",
-                         cron="0 3 * * *", goal_template="scan", **ap_kw)
-        store.create_task("scan", status="done", title="Nightly repo scan · 2026-09-21")
-        return _make_client().get("/api/tasks/list").text
+        from core.autopilot import create_autopilot, fire
+        from core.db import get_conn
+        ap = create_autopilot(name="Nightly repo scan", trigger_type="schedule",
+                              cron="0 3 * * *", goal_template="scan", **ap_kw)
+        made = []
+        with patch("core.orchestrator.emit"):
+            for day in days:
+                tid = fire(ap)
+                store.set_status(tid, "done")
+                made.append((day, tid))
+        conn = get_conn()
+        for day, tid in made:
+            conn.execute("UPDATE tasks SET updated_at = ? WHERE id = ?", (f"{day}T12:00:00+00:00", tid))
+        conn.commit(); conn.close()
+        return ap, [tid for _, tid in made]
 
-    def test_the_row_carries_the_schedule_in_words(self, db_path):
-        html = self._run()
-        assert "daily 03:00" in html
-        assert "0 3 * * *" not in html        # the cron itself stays off the board
+    def test_fire_records_who_asked(self, db_path):
+        from core import store
+        ap, (tid,) = self._fire()
+        assert store.get_task(tid)["origin"] == f"autopilot:{ap['id']}"
 
-    def test_a_paused_automation_says_so(self, db_path):
-        html = self._run(enabled=0)
-        assert "paused" in html
+    def test_each_run_is_its_own_row_marked_with_its_automation(self, db_path):
+        ap, tids = self._fire(days=("2026-09-15", "2026-09-16", "2026-09-17"))
+        html = _make_client().get("/api/tasks/list").text
+        for tid in tids:
+            row = html.split(tid, 1)[1].split("</li>", 1)[0]
+            assert "↻ daily 03:00" in row            # the tag says when it fires
+            assert "Nightly repo scan" in row          # the title says which automation
+            assert 'data-origin="auto"' in html.split(tid, 1)[0].rsplit("<li", 1)[1]
+        assert "autogroup" not in html                  # no separate object any more
 
-    def test_a_cron_that_can_never_fire_says_so(self, db_path):
-        html = self._run()
-        from core.autopilot import list_autopilots, update_autopilot
-        ap = list_autopilots()[0]
+    def test_the_tooltip_says_when_it_fires(self, db_path):
+        self._fire()
+        html = _make_client().get("/api/tasks/list").text
+        assert "daily 03:00" in html and "0 3 * * *" not in html
+
+    def test_a_paused_automation_is_said_and_quieted(self, db_path):
+        self._fire(enabled=0)
+        html = _make_client().get("/api/tasks/list").text
+        assert "↻ paused" in html and "tag--idle" in html
+
+    def test_a_cron_that_can_never_fire_is_said(self, db_path):
+        from core.autopilot import update_autopilot
+        ap, _ = self._fire()
         update_autopilot(ap["id"], cron="not a cron")
         html = _make_client().get("/api/tasks/list").text
-        assert "broken schedule" in html
+        assert "↻ broken schedule" in html and "can never fire" in html
 
-    def test_a_human_task_keeps_its_repo_tag(self, db_path):
+    def test_a_persons_task_says_you_and_keeps_its_repo(self, db_path):
         from core import store
         t = store.create_task("real work", repo="test-repo")
         store.set_status(t["id"], "done")
         html = _make_client().get("/api/tasks/list").text
+        assert 'data-origin="you"' in html
         row = html.split(t["id"], 1)[1].split("</li>", 1)[0]
-        assert "tag--repo" in row and "tag--auto" not in row
+        assert "tag--repo" in row and "tag--origin" not in row
+
+    def test_the_filter_offers_who_asked(self, db_path):
+        self._fire()
+        html = _make_client().get("/api/tasks/list").text
+        assert 'data-field="origin"' in html
+        assert '<option value="auto">from automations</option>' in html
+
+    def test_each_week_keeps_its_own_runs_and_counts_them(self, db_path):
+        self._fire(days=("2026-09-15", "2026-09-16", "2026-09-08"))
+        html = _make_client().get("/api/tasks/list").text
+        assert html.count("↻ daily 03:00") == 3         # every run, in its own week
+        assert ">2</span> tasks" in html and ">1</span> tasks" in html

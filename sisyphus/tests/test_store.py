@@ -374,3 +374,38 @@ class TestTasksHaveAKeyAHumanCanSay:
         conn.close()
         assert keys["task-a"] == "SIS-1"    # older task, lower number
         assert keys["task-b"] == "SIS-2"
+
+
+class TestATaskKnowsWhoAskedForIt:
+    """fire() never recorded that an automation made a task; the board guessed
+    from the title, which breaks the moment an automation is renamed."""
+
+    def test_a_person_s_task_has_no_origin(self, db_path):
+        assert store.create_task("mine")["origin"] is None
+
+    def test_existing_runs_are_matched_once_on_upgrade(self, tmp_path, monkeypatch):
+        import sqlite3
+        from core import db as core_db
+
+        path = str(tmp_path / "old.db")
+        old = sqlite3.connect(path)
+        old.executescript("""
+            CREATE TABLE tasks (id TEXT PRIMARY KEY, goal TEXT NOT NULL, repo TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'active', parent_id TEXT, agent TEXT, base_branch TEXT,
+                title TEXT, key TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+            CREATE TABLE autopilots (id TEXT PRIMARY KEY, name TEXT);
+            INSERT INTO autopilots VALUES ('ap-1', 'Nightly repo scan');
+            INSERT INTO tasks VALUES ('t-run','g','','done',NULL,NULL,NULL,'Nightly repo scan · 2026-09-01','TSK-1','2026-09-01','2026-09-01');
+            INSERT INTO tasks VALUES ('t-mine','g','','done',NULL,NULL,NULL,'Nightly repo scanner rewrite','TSK-2','2026-09-01','2026-09-01');
+        """)
+        old.commit(); old.close()
+
+        monkeypatch.setattr(core_db, "DB_PATH", path)
+        conn = core_db.get_conn()
+        store.init_store(conn)
+        conn.commit()
+        origin = dict(conn.execute("SELECT id, origin FROM tasks").fetchall())
+        conn.close()
+        assert origin["t-run"] == "autopilot:ap-1"
+        # a person's task that merely starts with the same words is not claimed
+        assert origin["t-mine"] is None
