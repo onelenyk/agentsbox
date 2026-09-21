@@ -1117,25 +1117,40 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = ""):
     sprints = []
     for r in top:
         if not sprints or sprints[-1]["id"] != r["sprint"]["id"]:
-            sprints.append({**r["sprint"], "rows": [], "tasks": 0, "done": 0, "failed": 0})
+            sprints.append({**r["sprint"], "entries": [], "tasks": 0, "done": 0, "failed": 0})
         sprint = sprints[-1]
         if r["auto"]:
-            # An automation's runs fold anywhere in its week: they are the same
-            # thing happening on a schedule, and thirty of them are one fact.
-            prev = next((c for c in sprint["rows"]
-                         if c["auto"] and c["title"] == r["title"] and c["kind"] == r["kind"]), None)
+            # An automation is not a task that happens to repeat — it is a
+            # standing instruction, and its runs are what it did. So the week
+            # shows the AUTOMATION, folded, with its runs inside it: one line
+            # that says what it is, when it fires and how it went, instead of
+            # seven identical rows of machine work sitting among your own.
+            group = next((i for i in sprint["entries"]
+                          if i["type"] == "auto" and i["name"] == r["title"]), None)
+            if group is None:
+                group = {"type": "auto", "name": r["title"], "badges": r["badges"],
+                         "runs": [], "done": 0, "failed": 0, "when": r["when"]}
+                sprint["entries"].append(group)
+            group["runs"].append(r)
+            group["when"] = max(group["when"] or "", r["when"] or "")
+            if r["kind"] == "failed":
+                group["failed"] += 1
+            else:
+                group["done"] += 1
         else:
             # A human task folds only into the row right above it — the same
             # title, the same outcome, back to back, which is what two review
-            # runs of one MR look like. Anything further apart is its own row.
-            last = sprint["rows"][-1] if sprint["rows"] else None
-            prev = last if (last and not last["auto"] and last["title"] == r["title"]
-                            and last["kind"] == r["kind"]
-                            and not last.get("children") and not r.get("children")) else None
-        if prev is not None:
-            prev["runs"] += 1
-        else:
-            sprint["rows"].append(r)
+            # runs of one merge request look like. Anything further apart is
+            # its own row.
+            last = sprint["entries"][-1] if sprint["entries"] else None
+            prev = last if (last and last["type"] == "row"
+                            and last["row"]["title"] == r["title"]
+                            and last["row"]["kind"] == r["kind"]
+                            and not last["row"].get("children") and not r.get("children")) else None
+            if prev is not None:
+                prev["row"]["runs"] += 1
+            else:
+                sprint["entries"].append({"type": "row", "row": r})
         sprint["tasks"] += 1
         if r["kind"] == "failed":
             sprint["failed"] += 1
@@ -1163,7 +1178,10 @@ def _row(t: dict, kind: str, who: dict, auto_name: Optional[str] = None,
     from core import store
     return {
         "id": t["id"], "key": t.get("key") or "", "parent_id": t.get("parent_id"),
+        # `title` is what the row is grouped BY (an automation's runs share
+        # one), `label` is what a run calls itself once it is inside its group.
         "title": auto_name or store.task_display_title(t),
+        "label": store.task_display_title(t),
         "kind": kind, "word": _KIND_WORD.get(kind, kind),
         "repo": t.get("repo") or "", "auto": bool(auto_name), "runs": 1,
         "badges": badges or [],
