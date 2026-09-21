@@ -120,6 +120,55 @@
             }, true);
         })();
 
+        // ── The backlog from the keyboard ───────────────────────────────
+        // j/k move a focus ring over the visible rows, Enter opens the one
+        // under it, / jumps to the filter — what Linear, GitHub and Jira all
+        // do, so a hand that knows one of them already knows this. The focus
+        // is remembered by task id, so a seven-second refresh that rebuilds
+        // the list does not lose your place.
+        (function backlogKeys() {
+            var focusedId = null;
+            function rows() {
+                return [].slice.call(document.querySelectorAll(".trow:not([hidden]) > a"))
+                    .filter(function (a) { return a.offsetParent !== null; });
+            }
+            function paint(scroll) {
+                var list = rows(), hit = null;
+                list.forEach(function (a) {
+                    var on = focusedId && a.getAttribute("href") === "/tasks/" + focusedId;
+                    a.parentElement.classList.toggle("is-focus", !!on);
+                    if (on) hit = a;
+                });
+                if (hit && scroll) hit.scrollIntoView({ block: "nearest" });
+                return hit;
+            }
+            document.addEventListener("keydown", function (e) {
+                if (e.metaKey || e.ctrlKey || e.altKey) return;
+                var t = e.target;
+                if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+                var o = document.getElementById("task-overlay");
+                if (o && !o.hidden) return;                    // the panel owns the keys
+                if (e.key === "/") {
+                    var f = document.querySelector(".f-search");
+                    if (f) { e.preventDefault(); f.focus(); }
+                    return;
+                }
+                if (e.key !== "j" && e.key !== "k" && e.key !== "Enter") return;
+                var list = rows();
+                if (!list.length) return;
+                var i = list.findIndex(function (a) { return a.getAttribute("href") === "/tasks/" + focusedId; });
+                if (e.key === "Enter") {
+                    if (i >= 0) { e.preventDefault(); list[i].click(); }
+                    return;
+                }
+                e.preventDefault();
+                i = e.key === "j" ? Math.min(list.length - 1, i + 1) : Math.max(0, i - 1);
+                focusedId = list[i].getAttribute("href").split("/").pop();
+                paint(true);
+            });
+            document.body.addEventListener("htmx:afterSwap", function () { paint(false); });
+        })();
+
         // ── One poll for the whole app ──────────────────────────────────
         // Surfaces used to re-fetch themselves on their own timers whether or
         // not anything had happened — the board every 7s at ~135 KB a time.

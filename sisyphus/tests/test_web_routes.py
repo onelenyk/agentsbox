@@ -487,18 +487,26 @@ def test_every_sprint_is_on_the_page_newest_open(db_path):
     assert html.count("open>") == 1                            # only the newest unfolded
 
 
-def test_a_row_carries_the_tags_you_filter_by(db_path):
+def test_a_row_carries_what_you_filter_by(db_path):
+    """Repo, the roles that worked it, status, who asked — as data the filter
+    reads, whether or not the row prints them."""
     from core import store
-    t = store.create_task("tagged work", repo="test-repo", agent="engineer")
+    from core.usage import record_run
+    t = store.create_task("tagged work", repo="test-repo")
     store.set_status(t["id"], "done")
+    run = {"input_tokens": 1, "output_tokens": 1, "reasoning_tokens": 0, "cache_read": 0,
+           "cache_write": 0, "total_tokens": 2, "cost": 0.01, "steps": 1}
+    record_run(t["id"], "engineer", "m", run, 1000)
+    record_run(t["id"], "reviewer", "m", run, 1000)
     html = _make_client().get("/api/tasks/list").text
-    row = html.split('data-when', 1)[1].split("</li>", 1)[0]
+    row = html.split(t["id"], 1)[0].rsplit("<li", 1)[1] + html.split(t["id"], 1)[1].split("</li>", 1)[0]
     assert 'data-repo="test-repo"' in row
-    assert 'data-who="engineer"' in row
+    assert 'data-who="engineer reviewer"' in row          # every role, in order
     assert 'data-kind="done"' in row
-    assert "tagged work" in row.lower() and t["key"].lower() in row.lower()
+    assert 'title="test-repo"' in row                     # the repo lives on the key
     # and the filters offer those values
-    assert '<option value="test-repo">' in html and '<option value="engineer">' in html
+    assert '<option value="test-repo">' in html
+    assert '<option value="engineer">' in html and '<option value="reviewer">' in html
 
 
 # ── Inbox (needs-you feed) ───────────────────────────────────────────────
@@ -1443,14 +1451,16 @@ class TestAutomationRunsAreTasksAmongTasks:
         html = _make_client().get("/api/tasks/list").text
         assert "↻ broken schedule" in html and "can never fire" in html
 
-    def test_a_persons_task_says_you_and_keeps_its_repo(self, db_path):
+    def test_a_persons_task_leaves_asked_by_empty(self, db_path):
+        """Only a machine asking is news; the repo is on the key already."""
         from core import store
         t = store.create_task("real work", repo="test-repo")
         store.set_status(t["id"], "done")
         html = _make_client().get("/api/tasks/list").text
         assert 'data-origin="you"' in html
         row = html.split(t["id"], 1)[1].split("</li>", 1)[0]
-        assert "tag--repo" in row and "tag--origin" not in row
+        assert "tag--origin" not in row
+        assert '<span class="trow__asked"></span>' in row
 
     def test_the_filter_offers_who_asked(self, db_path):
         self._fire()
@@ -1463,3 +1473,86 @@ class TestAutomationRunsAreTasksAmongTasks:
         html = _make_client().get("/api/tasks/list").text
         assert html.count("↻ daily 03:00") == 3         # every run, in its own week
         assert ">2</span> tasks" in html and ">1</span> tasks" in html
+
+
+class TestTheRowSaysWhyOrNothing:
+    """The why column is empty when a task went the ordinary way, and says the
+    one clause worth reading when it did not."""
+
+    def _row_html(self, html, task_id):
+        return html.split(task_id, 1)[0].rsplit("<li", 1)[1] + html.split(task_id, 1)[1].split("</li>", 1)[0]
+
+    def test_an_ordinary_task_says_nothing(self, db_path):
+        from core import store
+        t = store.create_task("plain work", repo="test-repo")
+        store.set_status(t["id"], "done")
+        row = self._row_html(_make_client().get("/api/tasks/list").text, t["id"])
+        assert '<span class="trow__why"></span>' in row
+        assert "trow__state--done" in row                     # done is a quiet word, not a pill
+
+    def test_a_failure_says_why(self, db_path):
+        from core import store
+        t = store.create_task("scan", repo="test-repo")
+        store.post_message(t["id"], "orchestrator", kind="note",
+                           text="[fail] reviewer ended without a result (2 attempts)")
+        store.set_status(t["id"], "failed")
+        row = self._row_html(_make_client().get("/api/tasks/list").text, t["id"])
+        assert "no result from the reviewer ×2" in row and "why--bad" in row
+        assert "ended without a result (2 attempts)" in row   # the whole note, in the tooltip
+
+    def test_a_closed_mr_is_not_merged_not_done(self, db_path):
+        from core import store
+        t = store.create_task("proposed then dropped", repo="test-repo")
+        store.set_status(t["id"], "done")
+        mr = mergerequests.create_mr(t["id"], "test-repo", "feature/x", "main")
+        mergerequests.set_review_status(mr["id"], "approved")
+        mergerequests.set_status(mr["id"], "closed")
+        row = self._row_html(_make_client().get("/api/tasks/list").text, t["id"])
+        assert "trow__state--not-merged" in row
+        assert "approved, closed unmerged" in row
+
+    def test_a_merge_over_a_verdict_is_said_quietly(self, db_path):
+        from core import store
+        t = store.create_task("landed anyway", repo="test-repo")
+        store.set_status(t["id"], "done")
+        mr = mergerequests.create_mr(t["id"], "test-repo", "feature/x", "main")
+        mergerequests.set_review_status(mr["id"], "changes_requested")
+        mergerequests.mark_merged(mr["id"], "abc1234")
+        row = self._row_html(_make_client().get("/api/tasks/list").text, t["id"])
+        assert "changes requested · merged anyway" in row and "why--muted" in row
+
+
+class TestAReviewHangsUnderWhatItReviewed:
+    def test_the_review_is_a_child_of_the_task_whose_mr_it_read(self, db_path):
+        from core import reviews, store
+        work = store.create_task("the work", repo="test-repo")
+        store.set_status(work["id"], "done")
+        mr = mergerequests.create_mr(work["id"], "test-repo", "feature/x", "main")
+        # the same header ensure_review_task writes: Review-of-MR / Origin-task
+        goal = f"Review-of-MR: {mr['id']}\nOrigin-task: {work['id']}\n\nreview it"
+        assert reviews.parse_review_marker(goal)["origin_task"] == work["id"]
+        rev = store.create_task(goal, repo="test-repo", title=f"Review {mr['id']}: the work")
+        store.post_message(rev["id"], "reviewer", kind="result", text="APPROVED: looks right")
+        store.set_status(rev["id"], "done")
+
+        html = _make_client().get("/api/tasks/list").text
+        assert html.index(work["key"]) < html.index(rev["key"])
+        child = html.split(rev["id"], 1)[0].rsplit("<li", 1)[1]
+        assert "trow--child" in child
+        assert f"Review of {mr['id']}" in html
+        assert "verdict: approved" in html
+
+
+def test_the_backlog_names_its_columns_once_on_the_rows_grid(db_path):
+    """One header over every week, cut from the same grid variable as the
+    rows, so a column's name sits over the column."""
+    from core import store
+    t = store.create_task("anything", repo="test-repo")
+    store.set_status(t["id"], "done")
+    html = _make_client().get("/api/tasks/list").text
+    assert html.count('class="thead"') == 1
+    head = html.split('class="thead"', 1)[1].split("</div>", 1)[0]
+    for name in ("Key", "Title", "Asked by", "Worked", "Why", "Status", "When"):
+        assert f">{name}<" in head, name
+    css = (Path(__file__).parent.parent / "web" / "static" / "app.css").read_text()
+    assert css.count("grid-template-columns: var(--c-grid)") >= 2   # header and rows alike
