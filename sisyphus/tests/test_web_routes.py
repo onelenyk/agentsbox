@@ -6,6 +6,7 @@ All tests use the ``db_path`` fixture from conftest for DB setup.
 
 import os
 import sys
+from pathlib import Path
 from unittest.mock import patch
 
 # Ensure sisyphus is importable (same as conftest)
@@ -1429,3 +1430,26 @@ class TestRepeatsFoldInsideAWeekNotAcrossWeeks:
         assert ">3</span> tasks" in week      # three runs happened that week
         assert "×3" in week                    # on one row
         assert html.count("🤖 Nightly repo scan") == 1
+
+
+class TestATaskTitleCanBeSelected:
+    """Rows, cards and asks are links wrapping their own text. A link claims
+    the drag, so a title could be opened but never selected or copied — and
+    the mouseup at the end of the attempt read as "open me"."""
+
+    def test_task_links_release_the_drag(self, db_path):
+        from core import store
+        t = store.create_task("copy my title", repo="test-repo")
+        store.set_status(t["id"], "done")
+        html = _make_client().get("/api/tasks/list").text
+        row = html.split(t["id"], 1)[1]
+        assert 'draggable="false"' in row
+
+    def test_the_page_knows_a_drag_from_a_click(self, db_path):
+        html = _make_client().get("/tasks").text
+        assert "dragIsNotAClick" in html
+
+    def test_a_sprint_heading_is_selectable_text(self, db_path):
+        css = (Path(__file__).parent.parent / "web" / "static" / "app.css").read_text()
+        head = css.split(".sprint__head {", 1)[1].split("}", 1)[0]
+        assert "user-select: none" not in head

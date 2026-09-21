@@ -433,7 +433,7 @@ body::before {
 .sprint[hidden] { display: none; }
 .sprint__head {
   display: flex; align-items: baseline; gap: 10px; cursor: pointer;
-  padding: 14px 12px 10px; list-style: none; user-select: none;
+  padding: 14px 12px 10px; list-style: none;
 }
 .sprint__head::-webkit-details-marker { display: none; }
 .sprint__head:hover .sprint__name { color: var(--text); }
@@ -457,6 +457,12 @@ body::before {
   list-style: none; display: flex; flex-direction: column; padding-bottom: 10px;
 }
 .trows__none { font-size: 13px; color: var(--muted); padding: 16px 4px; }
+/* A row, a card and an ask are each wrapped in a link, and dragging across a
+   link drags the LINK — so a task title could be opened but never selected or
+   copied. The link still opens on click; it just stops claiming the drag.
+   (The templates also set draggable="false": the CSS property is WebKit-only
+   and the attribute is what every engine agrees on.) */
+.trow a, .ask, .run, .queued, .subtask { -webkit-user-drag: none; user-select: text; }
 .trow[hidden] { display: none; }
 /* A row is a line of text a person scans by the hundred: it gets the size and
    the contrast of something meant to be read, a height the eye can track
@@ -628,7 +634,7 @@ body::before {
    the full rendering lives once, in the Result card above the thread */
 .msg--result { padding: 0; }
 .msg--result > summary {
-  cursor: pointer; list-style: none; user-select: none;
+  cursor: pointer; list-style: none;
   display: flex; align-items: center; gap: 8px;
   padding: 10px 14px;
 }

@@ -105,6 +105,21 @@
         // Back should close the panel, not leave the board behind it.
         window.addEventListener("popstate", function () { closeTaskPanel(true); });
 
+        // ── A drag is a selection, not a click ──────────────────────────
+        // Rows and cards are links wrapping their own text, so selecting a
+        // task title ended in a mouseup the link read as "open me": you could
+        // never copy a title, only navigate away from it. Caught in the
+        // capture phase so it stops htmx and the browser both.
+        (function dragIsNotAClick() {
+            var x = 0, y = 0;
+            document.addEventListener("mousedown", function (e) { x = e.clientX; y = e.clientY; }, true);
+            document.addEventListener("click", function (e) {
+                var moved = Math.abs(e.clientX - x) + Math.abs(e.clientY - y) > 6;
+                var picked = window.getSelection && String(window.getSelection()).length > 0;
+                if (moved && picked) { e.preventDefault(); e.stopPropagation(); }
+            }, true);
+        })();
+
         // ── One poll for the whole app ──────────────────────────────────
         // Surfaces used to re-fetch themselves on their own timers whether or
         // not anything had happened — the board every 7s at ~135 KB a time.
