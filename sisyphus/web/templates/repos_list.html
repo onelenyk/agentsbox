@@ -12,13 +12,13 @@
             {% elif r.reach == 'remote' %}<span class="status status--active right">remote</span>
             {% else %}<span class="status status--failed right" title="source path not found or not a git repo">unreachable</span>{% endif %}
         </div>
-        <a href="/repos/{{ r.name }}" class="term wrap" style="display:block;color:var(--text-2)">{{ r.source }}</a>
+        <a href="/repos/{{ r.name }}" class="term wrap repos-list__link">{{ r.source }}</a>
         {# "remote" above only means the source looks like a URL — nothing has
            ever dialled it. The check below is the part that actually tries. #}
         <div id="repo-check-{{ loop.index0 }}"></div>
         <div class="ecard__foot">
             <a class="btn btn--ghost btn--sm" href="/repos/{{ r.name }}">Open</a>
-            <div class="acts" style="margin-left:auto">
+            <div class="acts repos-list__actions">
                 <button class="btn btn--ghost btn--sm" hx-post="/api/repos/{{ r.name }}/check"
                         hx-target="#repo-check-{{ loop.index0 }}" hx-swap="innerHTML"
                         hx-disabled-elt="this"

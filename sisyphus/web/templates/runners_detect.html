@@ -1,24 +1,24 @@
 <div class="modal-backdrop" onclick="if(event.target===this)this.remove()">
     <div class="modal modal--wide" onclick="event.stopPropagation()">
-        <div class="modal__head" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
-            <h2 style="font-size:15px">Detected runtimes</h2>
+        <div class="modal__head--row">
+            <h2>Detected runtimes</h2>
             <button type="button" class="btn btn--ghost btn--sm" onclick="this.closest('.modal-backdrop').remove()">Close</button>
         </div>
         <div class="modal__body">
             <div class="result__label">Found on this machine</div>
             {% if detected %}
-            <div class="bars" style="margin-top:8px">
+            <div class="bars runners-detect__bars">
                 {% for d in detected %}
-                <div class="statline" style="align-items:flex-start">
+                <div class="statline runners-detect__statline">
                     <span class="cap">
                         {{ d.name }} <span class="muted mono">{{ d.type }}</span>
-                        <br><span class="muted mono" style="font-size:11px">{{ d.path }}</span>
+                        <br><span class="muted mono runners-detect__hint">{{ d.path }}</span>
                         {% if not d.configured and d.hint %}
-                        <br><span class="muted" style="font-size:11px">{{ d.hint }}</span>
+                        <br><span class="muted runners-detect__hint">{{ d.hint }}</span>
                         {% endif %}
                     </span>
                     {% if d.configured %}
-                    <span class="val" style="color:var(--good)">configured</span>
+                    <span class="val tone-good">configured</span>
                     {% else %}
                     {# Prefill comes from core.runner_profiles.suggested_config, per
                        type — an OpenRouter key must never be handed to a runner
@@ -34,15 +34,15 @@
             <div class="empty">No known runner binaries found on PATH or common install dirs.</div>
             {% endif %}
 
-            <div class="result__label" style="margin-top:18px">Configured runtimes — resolves to</div>
-            <div class="bars" style="margin-top:8px">
+            <div class="result__label runners-detect__label">Configured runtimes — resolves to</div>
+            <div class="bars runners-detect__bars">
                 {% for r in configured %}
                 <div class="statline">
                     <span class="cap">{{ r.name }} <span class="muted mono">{{ r.binary }}</span></span>
                     {% if r.resolved %}
-                    <span class="val mono" style="color:var(--good)">{{ r.resolved }}</span>
+                    <span class="val mono tone-good">{{ r.resolved }}</span>
                     {% else %}
-                    <span class="val" style="color:var(--bad)">NOT FOUND</span>
+                    <span class="val tone-bad">NOT FOUND</span>
                     {% endif %}
                 </div>
                 {% endfor %}

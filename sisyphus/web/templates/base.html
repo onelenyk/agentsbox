@@ -6,11 +6,8 @@
     <title>{% block title %}Sisyphus{% endblock %}</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230a0a0c'/><text x='16' y='23' font-size='21' text-anchor='middle' fill='%23f5a623'>⚡</text></svg>">
     <link rel="stylesheet" href="/static/app.css?v={{ asset_v('app.css') }}">
-    <style>
-        .htmx-indicator{opacity:0;transition:opacity 200ms ease-in}
-        .htmx-request .htmx-indicator{opacity:1}
-        .htmx-request.htmx-indicator{opacity:1}
-    </style>
+    {# Before first paint, or a light-theme reader sees a dark flash. #}
+    <script>try { var t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
     <script src="/static/htmx.min.js"></script>
 </head>
 <body>
@@ -42,8 +39,9 @@
             </nav>
             <div class="sys">
                 <div class="line"><span id="daemon-led" class="led live"></span> daemon <span id="daemon-val" class="val">live</span></div>
-                <div class="line" style="cursor:pointer" onclick="enableNotifications()" title="Browser notifications for finished / waiting tasks"><span id="notif-led" class="led idle"></span> browser <span id="notif-val" class="val">off</span></div>
+                <div class="line line--click" onclick="enableNotifications()" title="Browser notifications for finished / waiting tasks"><span id="notif-led" class="led idle"></span> browser <span id="notif-val" class="val">off</span></div>
                 <div class="line" title="Daemon webhook — SISYPHUS_NOTIFY_URL configures it"><span id="notify-led" class="led idle"></span> notify <span id="notify-val" class="val">…</span></div>
+                <div class="line line--click" onclick="toggleTheme()" title="Switch the colour theme (remembered in this browser)"><span class="led idle"></span> theme <span id="theme-val" class="val">dark</span></div>
                 <div class="line" title="Age of the newest backup snapshot — red when there is none or it is older than 48h"><span id="backup-led" class="led idle"></span> backup <span id="backup-val" class="val">…</span></div>
             </div>
         </aside>
@@ -65,7 +63,7 @@
             <div id="overlay-body"></div>
         </aside>
     </div>
-    <div id="toast" class="toast" style="display:none"></div>
+    <div id="toast" class="toast" hidden></div>
 
     <script>
         var overlayReturn = null;     // where the board was when the panel opened
@@ -206,10 +204,25 @@
             var t = document.getElementById("toast");
             t.textContent = msg;
             t.className = "toast " + (kind === "err" ? "toast--err" : "toast--ok");
-            t.style.display = "block";
+            t.hidden = false;
             clearTimeout(t._h);
-            t._h = setTimeout(function () { t.style.display = "none"; }, kind === "err" ? 3200 : 2000);
+            t._h = setTimeout(function () { t.hidden = true; }, kind === "err" ? 3200 : 2000);
         }
+        // A theme is only a data-theme value; app.css maps it to a token set
+        // (docs/design-system.md). The first theme listed is the default.
+        var THEMES = ["dark", "light"];
+        function showTheme() {
+            document.getElementById("theme-val").textContent = document.documentElement.dataset.theme || THEMES[0];
+        }
+        window.toggleTheme = function () {
+            var cur = document.documentElement.dataset.theme || THEMES[0];
+            var next = THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length];
+            if (next === THEMES[0]) delete document.documentElement.dataset.theme;
+            else document.documentElement.dataset.theme = next;
+            try { localStorage.setItem("theme", next === THEMES[0] ? "" : next); } catch (e) {}
+            showTheme();
+        };
+        showTheme();
         var b = document.body;
         b.addEventListener("reposUpdated",  function () { flash("Saved"); });
         b.addEventListener("runnersUpdated", function () { flash("Saved"); });

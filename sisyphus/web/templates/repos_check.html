@@ -1,23 +1,23 @@
 {# The result of a probe, not of the form. `tier` is what was proved; a repo the
    user labelled "gitlab" that proved nothing reads "unknown" here, because a
    check that renders "could not determine" as a green tick is worse than none. #}
-<div class="repo-check" style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
-    <div class="row" style="gap:6px;align-items:center;flex-wrap:wrap">
+<div class="repo-check">
+    <div class="row repocheck__row">
         <span class="status status--{{ 'done' if c.ok else 'failed' }}">{{ c.tier }}</span>
-        <span style="font-size:11px;color:var(--text-2)">{{ c.summary }}</span>
-        <span class="muted" style="font-size:10px;margin-left:auto">{{ c.duration_ms }} ms</span>
+        <span class="repocheck__summary">{{ c.summary }}</span>
+        <span class="muted repocheck__duration">{{ c.duration_ms }} ms</span>
     </div>
     {% for s in c.stages %}
     {# Colour by the stage's own status — "unknown" shares the amber of a thing
        still pending precisely because it is not a verdict. #}
     {% set tone = {'ok': 'var(--good)', 'fail': 'var(--bad)', 'unknown': 'var(--warn)'}.get(s.status, 'var(--text-2)') %}
-    <div style="margin-top:6px;font-size:11px">
-        <div class="row" style="gap:6px;align-items:baseline">
-            <span class="mono" style="color:var(--text-2);min-width:96px">{{ s.name }}</span>
-            <span class="mono" style="color:{{ tone }}">{{ s.status }}</span>
+    <div class="repocheck__line" style="--tone-color: {{ tone }}">
+        <div class="row repocheck__stage-row">
+            <span class="mono repocheck__stage-name">{{ s.name }}</span>
+            <span class="mono repocheck__stage-status">{{ s.status }}</span>
         </div>
-        {% if s.detail %}<div style="color:var(--text-2);margin-left:102px">{{ s.detail }}</div>{% endif %}
-        {% if s.fix %}<div style="color:{{ tone }};opacity:.85;margin-left:102px">→ {{ s.fix }}</div>{% endif %}
+        {% if s.detail %}<div class="repocheck__detail">{{ s.detail }}</div>{% endif %}
+        {% if s.fix %}<div class="repocheck__fix">→ {{ s.fix }}</div>{% endif %}
     </div>
     {% endfor %}
 </div>

@@ -17,12 +17,12 @@
                     </select>
                 </div>
 
-                <div id="ap-sched">
+                <div id="ap-sched" class="ap-section">
                     <div class="field"><label>Cron</label><input name="cron" value="{{ a.get('cron','') }}" placeholder="0 3 * * *  (min hour dom mon dow)"></div>
                     <div class="field"><label>…or interval (seconds)</label><input type="number" name="interval_seconds" min="0" value="{{ a.get('interval_seconds',0) }}" placeholder="3600"></div>
                 </div>
 
-                <div id="ap-wh">
+                <div id="ap-wh" class="ap-section">
                     <div class="field"><label>Platform</label>
                         <select name="webhook_platform">
                             <option value="">—</option>
@@ -57,8 +57,8 @@
 </div>
 <script>
     function apToggle(v) {
-        document.getElementById('ap-sched').style.display = (v === 'schedule') ? '' : 'none';
-        document.getElementById('ap-wh').style.display = (v === 'webhook') ? '' : 'none';
+        document.getElementById('ap-sched').hidden = (v !== 'schedule');
+        document.getElementById('ap-wh').hidden = (v !== 'webhook');
     }
     apToggle(document.querySelector('.modal-backdrop select[name=trigger_type]').value);
 </script>
