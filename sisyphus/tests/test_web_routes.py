@@ -104,6 +104,71 @@ def test_runners_add_claude(db_path):
     assert row is not None and row["type"] == "claude-cli"
 
 
+def _probe_patches(groups=None, login=None):
+    groups = groups if groups is not None else [{"id": "alias", "label": "Latest", "models": [
+        {"id": "opus", "name": "opus → Claude Opus 5", "ctx": "1M", "price": "$5 / $25"}]}]
+    login = login or {"ok": True, "summary": "Signed in as me@example.com", "detail": "via claude.ai"}
+    return (patch("core.runner_detect.resolve", return_value="/bin/claude"),
+            patch("core.runner_catalog.models", return_value=groups),
+            patch("core.runner_catalog.login_status", return_value=login))
+
+
+def test_runner_form_body_shows_the_runners_models_and_sign_in(db_path):
+    init_runners_table()
+    a, b, c = _probe_patches()
+    with a, b, c:
+        body = _make_client().get("/api/runners/form-body?type=claude-cli").text
+    assert 'value="opus"' in body and "Claude Opus 5" in body
+    assert "Signed in as me@example.com" in body
+    assert 'value="login" checked' in body          # a new runner starts on its own sign-in
+
+
+def test_runner_edit_form_keeps_an_unlisted_model_as_typed(db_path):
+    from core.runners import add_runner
+    init_runners_table()
+    row = add_runner("c", "claude", "claude-cli", model="claude-custom-x")
+    a, b, c = _probe_patches()
+    with a, b, c:
+        body = _make_client().get(f"/api/runners/form-body?type=claude-cli&runner_id={row['id']}").text
+    assert 'name="model_custom" value="claude-custom-x"' in body
+    assert '<input type="radio" name="model" value="" checked>' in body
+
+
+def test_runner_added_with_a_pasted_key_keeps_it_in_the_keychain(db_path):
+    from core.runners import get_runner_by_name
+    init_runners_table()
+    with patch("core.keychain.store") as store:
+        r = _make_client().post("/api/runners", data={
+            "name": "go", "binary": "opencode", "type": "opencode", "auth_mode": "key",
+            "api_key": "sk-go-12345678", "model": "opencode-go/qwen3.7-max"})
+    assert r.status_code == 200
+    row = get_runner_by_name("go")
+    assert row["auth_mode"] == "key" and row["model"] == "opencode-go/qwen3.7-max"
+    assert "sk-go" not in str(row)
+    store.assert_called_once_with(row["id"], "sk-go-12345678")
+
+
+def test_key_mode_without_a_key_is_refused(db_path):
+    init_runners_table()
+    r = _make_client().post("/api/runners", data={
+        "name": "k", "binary": "claude", "type": "claude-cli", "auth_mode": "key"})
+    assert r.status_code == 400 and "paste the API key" in r.headers["HX-Trigger"]
+
+
+def test_leaving_key_mode_removes_the_stored_key(db_path):
+    from core.runners import add_runner, get_runner
+    init_runners_table()
+    row = add_runner("k", "claude", "claude-cli", auth_mode="key", api_key_env="ANTHROPIC_API_KEY")
+    with patch("core.keychain.delete") as delete:
+        r = _make_client().post(f"/api/runners/{row['id']}/edit", data={
+            "name": "k", "binary": "claude", "type": "claude-cli", "auth_mode": "login",
+            "model": "sonnet", "model_custom": ""})
+    assert r.status_code == 200
+    after = get_runner(row["id"])
+    assert after["auth_mode"] == "login" and after["api_key_env"] == "" and after["model"] == "sonnet"
+    delete.assert_called_once_with(row["id"])
+
+
 def test_runners_add_rejects_unlaunchable_type_readably(db_path):
     init_runners_table()
     client = _make_client()

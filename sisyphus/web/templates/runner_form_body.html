@@ -1,0 +1,44 @@
+{% from "_ui.html" import dsec, choice, probe, model_picker %}
+<div class="field-pair">
+    <div class="field"><label>Name</label><input type="text" name="name" value="{{ name }}" required></div>
+    <div class="field">
+        <label>Binary</label><input type="text" name="binary" value="{{ binary }}" required>
+        <span class="hint">{{ resolved or 'not found — give the full path' }}</span>
+    </div>
+</div>
+
+{% call dsec('', 'Sign-in') %}
+<div class="choices choices--3">
+    {{ choice('auth_mode', 'login', mode == 'login', label ~ "'s own sign-in",
+              sub=probe(login.ok, login.summary, login.detail)) }}
+    {% call choice('auth_mode', 'key', mode == 'key', 'API key',
+                   sub='Kept in the macOS keychain, never in the database') %}
+        <input type="password" name="api_key" autocomplete="new-password"
+               placeholder="{{ 'saved — leave blank to keep it' if has_key else 'paste the key' }}">
+        <span class="choice__sub">{{ key_hint }}</span>
+    {% endcall %}
+    {% call choice('auth_mode', 'env', mode == 'env', 'Environment variable',
+                   sub="Read from the daemon's environment at launch") %}
+        <input type="text" name="api_key_env" value="{{ api_key_env }}" placeholder="ANTHROPIC_API_KEY">
+    {% endcall %}
+</div>
+{% endcall %}
+
+{% call dsec('', 'Model', meta=(count ~ ' the runner accepts') if count else '') %}
+{% if not count %}{{ probe(false, 'Could not list models', 'type an id below') }}{% endif %}
+{{ model_picker(groups, listed, default_label) }}
+<div class="field">
+    <label>…or a model id</label>
+    <input type="text" name="model_custom" value="{{ custom }}" placeholder="{{ custom_placeholder }}">
+    <span class="hint">Overrides the list when filled.</span>
+</div>
+{% endcall %}
+
+<details class="form-more"{{ ' open' if base_url }}>
+    <summary>Advanced</summary>
+    <div class="field">
+        <label>Base URL</label>
+        <input type="text" name="base_url" value="{{ base_url }}" placeholder="the provider's own endpoint">
+        <span class="hint">Only for a proxy or a self-hosted gateway.</span>
+    </div>
+</details>

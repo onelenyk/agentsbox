@@ -631,8 +631,9 @@ async def runners_page(request: Request):
 
 @router.get("/api/runners/list", response_class=HTMLResponse)
 async def runners_list_view(request: Request):
-    from core.runners import list_runners
-    return _tmpl().TemplateResponse(request, "runners_list.html", {"runners": list_runners()})
+    from core.runners import auth_mode, list_runners
+    runners = [{**r, "mode": auth_mode(r)} for r in list_runners()]
+    return _tmpl().TemplateResponse(request, "runners_list.html", {"runners": runners})
 
 def _runner_error(message: str):
     """A 400 the runners page can actually show.
@@ -648,20 +649,91 @@ def _runner_error(message: str):
     return resp
 
 
-def _runner_form_context() -> dict:
-    """Type list + per-type prefill hints, so the forms can't drift from the
-    set of types that actually have a launch profile."""
-    from core.runner_profiles import suggested_config
+RUNNER_LABELS = {"opencode": "opencode", "claude-cli": "Claude Code"}
+
+
+def _runner_kinds() -> list:
+    """Each launchable runner type with the binary this machine has for it."""
+    from core.runner_catalog import version
+    from core.runner_detect import KNOWN, resolve
     from core.runners import RUNNER_TYPES
-    return {
-        "types": list(RUNNER_TYPES),
-        "suggested": {t: suggested_config(t) for t in RUNNER_TYPES},
-    }
+    binary_of = {t: b for b, t in KNOWN.items()}
+    out = []
+    for t in RUNNER_TYPES:
+        b = binary_of.get(t, t)
+        path = resolve(b)
+        out.append({"id": t, "label": RUNNER_LABELS.get(t, t), "binary": b,
+                    "path": path or "", "version": version(path) if path else ""})
+    return out
+
+
+def _runner_form(request: Request, runner: Optional[dict]):
+    kinds = _runner_kinds()
+    if runner:
+        selected = runner.get("type") or "opencode"
+    else:
+        selected = next((k["id"] for k in kinds if k["path"]), kinds[0]["id"])
+    return _tmpl().TemplateResponse(request, "runner_form.html",
+                                    {"kinds": kinds, "selected": selected, "runner": runner})
 
 
 @router.get("/api/runners/new-form", response_class=HTMLResponse)
 async def runners_new_form(request: Request):
-    return _tmpl().TemplateResponse(request, "runners_new.html", _runner_form_context())
+    return await asyncio.to_thread(_runner_form, request, None)
+
+
+@router.get("/api/runners/form-body", response_class=HTMLResponse)
+async def runners_form_body(request: Request, type: str = "opencode", runner_id: str = ""):
+    """The part of the runner form that depends on the runner type: its own
+    sign-in, the models it accepts, and how a key would reach it."""
+    from core import keychain, runner_catalog
+    from core.runner_detect import KNOWN, resolve
+    from core.runners import RUNNER_TYPES, auth_mode, get_runner, list_runners
+
+    rtype = type if type in RUNNER_TYPES else "opencode"
+    runner = get_runner(runner_id) if runner_id else None
+    same = bool(runner and (runner.get("type") or "opencode") == rtype)
+    binary = runner["binary"] if same else {t: b for b, t in KNOWN.items()}.get(rtype, rtype)
+    resolved = resolve(binary) or ""
+
+    def probe():
+        groups = runner_catalog.models(rtype, resolved) if resolved else []
+        login = (runner_catalog.login_status(rtype, resolved) if resolved
+                 else {"ok": False, "summary": "Runner not found", "detail": ""})
+        return groups, login
+    groups, login = await asyncio.to_thread(probe)
+
+    if runner:
+        name = runner["name"]
+    else:
+        taken = {r["name"] for r in list_runners()}
+        name, n = binary.split("/")[-1], 2
+        while name in taken:
+            name, n = f"{binary.split('/')[-1]}-{n}", n + 1
+    model = (runner.get("model") or "") if same else ""
+    listed = model if runner_catalog.find(groups, model) else ""
+    mode = auth_mode(runner) if same else "login"
+    has_key = bool(same and mode == "key" and await asyncio.to_thread(keychain.read, runner["id"]))
+    if rtype == "claude-cli":
+        key_hint = "Handed to Claude Code as ANTHROPIC_API_KEY — billed to that key, not your subscription."
+        default_label = "Claude Code's own setting"
+        placeholder = "claude-sonnet-5"
+    else:
+        key_hint = ("Handed to opencode in the variable the chosen model's provider reads "
+                    "(OPENROUTER_API_KEY for openrouter/…).")
+        default_label = "opencode's configured model"
+        placeholder = "provider/model"
+    return _tmpl().TemplateResponse(request, "runner_form_body.html", {
+        "rtype": rtype, "label": RUNNER_LABELS.get(rtype, rtype), "name": name,
+        "binary": binary, "resolved": resolved, "login": login, "groups": groups,
+        "count": sum(len(g["models"]) for g in groups), "listed": listed,
+        "custom": "" if listed else model, "custom_placeholder": placeholder,
+        "default_label": default_label, "mode": mode, "has_key": has_key,
+        "key_hint": key_hint,
+        "api_key_env": (runner.get("api_key_env") or "") if same and mode == "env" else "",
+        "base_url": (runner.get("base_url") or "") if same else "",
+    })
+
 
 @router.get("/api/runners/detect", response_class=HTMLResponse)
 async def runners_detect_view(request: Request):
@@ -700,18 +772,53 @@ async def runners_detect_view(request: Request):
         {"detected": detected, "configured": conf},
     )
 
+def _runner_auth(rtype: str, model: str, auth_mode: str, api_key: str, api_key_env: str,
+                 runner_id: str = "") -> tuple:
+    """(auth_mode, api_key_env, key_to_store) for a submitted runner form, or
+    raise ValueError with the reason to show. A form without auth_mode (the
+    MCP tools, older clients) means what it always did: a variable if one is
+    named, else the CLI's own sign-in."""
+    from core import keychain
+    from core.runner_catalog import provider_env
+    mode = (auth_mode or "").strip() or ("env" if api_key_env.strip() else "login")
+    if mode == "login":
+        return mode, "", ""
+    if mode == "env":
+        if not api_key_env.strip():
+            raise ValueError("name the environment variable that holds the key")
+        return mode, api_key_env.strip(), ""
+    if mode == "key":
+        key = (api_key or "").strip()
+        if key and not keychain.valid_key(key):
+            raise ValueError("that does not look like an API key (no spaces or quotes)")
+        if not key and not (runner_id and keychain.read(runner_id)):
+            raise ValueError("paste the API key")
+        return mode, provider_env(rtype, model), key
+    raise ValueError(f"unknown sign-in mode {mode!r}")
+
+
 @router.post("/api/runners")
 async def runners_add(name: str = Form(...), binary: str = Form(...), type: str = Form("opencode"),
-                       model: str = Form(""), api_key_env: str = Form(""), base_url: str = Form("")):
+                       model: str = Form(""), model_custom: str = Form(""), api_key_env: str = Form(""),
+                       base_url: str = Form(""), auth_mode: str = Form(""), api_key: str = Form("")):
     import sqlite3
-    from core.runners import add_runner
+    from core import keychain
+    from core.runners import add_runner, delete_runner
     from fastapi.responses import Response
+    model = (model_custom or model or "").strip()
     try:
-        add_runner(name, binary, type, model, api_key_env, base_url)
+        mode, key_env, key = _runner_auth(type, model, auth_mode, api_key, api_key_env)
+        row = add_runner(name, binary, type, model, key_env, base_url, auth_mode=mode)
     except ValueError as e:
         return _runner_error(str(e))
     except sqlite3.IntegrityError:
         return _runner_error(f"a runner named {name!r} already exists")
+    if key:
+        try:
+            keychain.store(row["id"], key)
+        except keychain.KeychainError as e:
+            delete_runner(row["id"])
+            return _runner_error(str(e))
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "runnersUpdated"
     return resp
@@ -722,38 +829,43 @@ async def runners_edit_form(request: Request, runner_id: str):
     runner = get_runner(runner_id)
     if not runner:
         return HTMLResponse("<p>Runner not found</p>")
-    ctx = _runner_form_context()
-    ctx["runner"] = runner
-    return _tmpl().TemplateResponse(request, "runners_edit.html", ctx)
+    return await asyncio.to_thread(_runner_form, request, runner)
 
 @router.post("/api/runners/{runner_id}/edit")
 async def runners_edit(runner_id: str, name: str = Form(""), binary: str = Form(""),
-                        type: str = Form(""), model: str = Form(""), api_key_env: str = Form(""),
-                        base_url: str = Form("")):
+                        type: str = Form(""), model: str = Form(""), model_custom: str = Form(""),
+                        api_key_env: str = Form(""), base_url: str = Form(""),
+                        auth_mode: str = Form(""), api_key: str = Form("")):
     import sqlite3
-    from core.runners import update_runner
+    from core import keychain
+    from core.runners import get_runner, update_runner
     from fastapi.responses import Response
+    current = get_runner(runner_id)
+    if not current:
+        return _runner_error("runner not found")
     fields = {}
     if name: fields["name"] = name
     if binary: fields["binary"] = binary
     if type: fields["type"] = type
-    # Blank means "clear it", not "leave it alone" — these three are optional
-    # and routinely need removing (an opencode row picks its provider from the
-    # model prefix, so a leftover api_key_env/base_url describes a route that
-    # does not exist). Treating "" as absent made them unclearable from the UI;
-    # core.update_runner has always accepted an empty string. name/binary/type
-    # stay skip-if-blank: they are required, and the edit form submits every
-    # field on every save.
-    for key, value in (("model", model), ("api_key_env", api_key_env),
-                       ("base_url", base_url)):
-        if value is not None:
-            fields[key] = value
+    model = (model_custom or model or "").strip()
+    # Blank means "clear it", not "leave it alone" — model and base_url are
+    # optional and routinely need removing; the form submits every field on
+    # every save. name/binary/type stay skip-if-blank: they are required.
+    fields["model"] = model
+    fields["base_url"] = base_url
     try:
+        mode, key_env, key = _runner_auth(type or current.get("type") or "opencode", model,
+                                          auth_mode, api_key, api_key_env, runner_id)
+        fields["auth_mode"], fields["api_key_env"] = mode, key_env
+        if key:
+            keychain.store(runner_id, key)
         update_runner(runner_id, **fields)
-    except ValueError as e:
+    except (ValueError, keychain.KeychainError) as e:
         return _runner_error(str(e))
     except sqlite3.IntegrityError:
         return _runner_error(f"a runner named {name!r} already exists")
+    if mode != "key":
+        keychain.delete(runner_id)
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "runnersUpdated"
     return resp

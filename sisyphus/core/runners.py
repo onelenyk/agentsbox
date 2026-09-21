@@ -39,6 +39,20 @@ def validate_type(runner_type: str) -> str:
     return rtype
 
 
+AUTH_MODES = ("login", "key", "env")
+
+
+def auth_mode(runner: dict) -> str:
+    """How *runner* authenticates: its CLI's own sign-in ("login"), a key kept
+    in the keychain ("key"), or a variable from the daemon's environment
+    ("env"). Rows from before the column read as what they always meant: a
+    named variable is "env", nothing is the CLI's own login."""
+    mode = ((runner or {}).get("auth_mode") or "").strip()
+    if mode in AUTH_MODES:
+        return mode
+    return "env" if ((runner or {}).get("api_key_env") or "").strip() else "login"
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -64,6 +78,9 @@ def init_runners_table():
             updated_at TEXT NOT NULL
         )
     """)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(runners)")}
+    if "auth_mode" not in cols:
+        conn.execute("ALTER TABLE runners ADD COLUMN auth_mode TEXT DEFAULT ''")
     conn.commit()
 
     existing = conn.execute("SELECT COUNT(*) FROM runners").fetchone()[0]
@@ -102,8 +119,11 @@ def add_runner(
     base_url: str = "",
     extra_args: list = None,
     is_default: bool = False,
+    auth_mode: str = "",
 ) -> dict:
     runner_type = validate_type(runner_type)
+    if auth_mode and auth_mode not in AUTH_MODES:
+        raise ValueError(f"unknown sign-in mode {auth_mode!r}")
     rid = f"runner-{uuid4().hex[:8]}"
     now = _now()
     extra_json = json.dumps(extra_args or [])
@@ -114,10 +134,10 @@ def add_runner(
     conn = get_conn()
     conn.execute(
         """INSERT INTO runners (id, name, binary, type, model, api_key_env, base_url,
-           is_default, enabled, extra_args, health_status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'unknown', ?, ?)""",
+           is_default, enabled, extra_args, health_status, created_at, updated_at, auth_mode)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'unknown', ?, ?, ?)""",
         (rid, name, binary, runner_type, model, api_key_env, base_url,
-         int(is_default), extra_json, now, now),
+         int(is_default), extra_json, now, now, auth_mode),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM runners WHERE id = ?", (rid,)).fetchone()
@@ -192,12 +212,14 @@ def list_runners() -> list:
 def update_runner(runner_id: str, **fields) -> dict:
     allowed = {
         "name", "binary", "type", "model", "api_key_env", "base_url",
-        "enabled", "extra_args",
+        "enabled", "extra_args", "auth_mode",
     }
     updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
 
     if "type" in updates:
         updates["type"] = validate_type(updates["type"])
+    if updates.get("auth_mode") and updates["auth_mode"] not in AUTH_MODES:
+        raise ValueError(f"unknown sign-in mode {updates['auth_mode']!r}")
     if "extra_args" in updates and isinstance(updates["extra_args"], list):
         updates["extra_args"] = json.dumps(updates["extra_args"])
 
@@ -221,6 +243,8 @@ def delete_runner(runner_id: str) -> None:
     conn.execute("DELETE FROM runners WHERE id = ?", (runner_id,))
     conn.commit()
     conn.close()
+    from . import keychain
+    keychain.delete(runner_id)
 
 
 def set_default_runner(runner_id: str) -> Optional[dict]:
@@ -285,8 +309,19 @@ async def health_check(runner_id: str) -> dict:
         if note:
             notes.append(note)
 
+    mode = auth_mode(runner)
     api_env = runner.get("api_key_env", "")
-    if api_env and not os.environ.get(api_env):
+    if mode == "key":
+        from . import keychain
+        if not await asyncio.to_thread(keychain.read, runner["id"]):
+            issues.append("its API key is missing from the keychain — paste it again in Edit")
+    elif mode == "login" and resolved:
+        from .runner_catalog import login_status
+        rtype = (runner.get("type") or "").strip() or "opencode"
+        st = await asyncio.to_thread(login_status, rtype, resolved)
+        if not st["ok"]:
+            issues.append(f"{st['summary']} — {st['detail']}")
+    elif api_env and not os.environ.get(api_env):
         # An unset variable is only fatal for a CLI with nowhere else to look.
         # Both supported CLIs log in for themselves, and the daemon's own
         # environment is nearly empty under launchd — so the variable being

@@ -1563,3 +1563,86 @@ body.has-overlay { overflow: hidden; }
 .inbox-row__q { flex: 2 1 auto; min-width: 0; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .inbox-row__reply { display: flex; gap: 6px; flex: none; }
 .inbox-row__reply input { width: 220px; padding: 5px 10px; font-size: 12px; }
+
+/* ── Form building blocks ────────────────────────────────────────────────
+   Choices the form makes you weigh (which runner, how it signs in) are cards,
+   not a bare radio: each says what it means and, once picked, opens whatever
+   it needs. The radio itself is visually hidden; the card carries the state. */
+.field-pair { display: grid; grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr)); gap: 12px; }
+.choices { display: grid; grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr)); gap: 8px; }
+.choice {
+  display: flex; flex-direction: column; gap: 3px; min-width: 0; cursor: pointer; position: relative;
+  padding: 10px 12px; border: 1px solid var(--border-2); border-radius: var(--r);
+  background: var(--inset); transition: border-color .12s, background .12s;
+}
+.choice:hover { border-color: var(--muted); }
+.choice > input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.choice:has(> input:checked) { border-color: var(--accent-bd); background: var(--accent-bg); }
+.choice:has(> input:focus-visible) { box-shadow: 0 0 0 3px var(--accent-bg); }
+.choice__title { font-size: 13px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px; }
+.choice__title::before {
+  content: ""; flex: none; width: 12px; height: 12px; border-radius: 50%;
+  border: 1px solid var(--border-2); background: var(--panel);
+}
+.choice:has(> input:checked) .choice__title::before { border: 3px solid var(--accent); background: var(--text); }
+.choice__sub { font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }
+.choice__more { display: none; margin-top: 8px; }
+.choice:has(> input:checked) .choice__more { display: flex; flex-direction: column; gap: 6px; }
+.choice.is-off { opacity: .55; }
+
+/* A one-line verdict on something the form checked for you. */
+.probe { display: flex; align-items: baseline; gap: 8px; font-size: 12px; color: var(--text-2); }
+.probe::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); transform: translateY(-1px); }
+.probe--ok::before { background: var(--good); }
+.probe--bad::before { background: var(--bad); }
+.probe--bad { color: var(--bad); }
+.probe__detail { color: var(--muted); font-size: 11.5px; }
+
+/* Model picker: one scrolling list, grouped by provider, filtered as you type. */
+.mpick { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.mpick__list {
+  position: relative; max-height: 290px; overflow-y: auto; border: 1px solid var(--border-2);
+  border-radius: var(--r); background: var(--inset);
+}
+.mpick__group > summary {
+  position: sticky; top: 0; z-index: 1; cursor: pointer; list-style: none;
+  display: flex; gap: 8px; align-items: baseline; padding: 7px 12px;
+  font-size: 10.5px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--muted); background: var(--panel-2); border-bottom: 1px solid var(--border);
+}
+.mpick__group > summary::-webkit-details-marker { display: none; }
+.mpick__count { font-family: var(--mono); letter-spacing: 0; font-weight: 400; }
+.mpick__opt {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: baseline;
+  padding: 7px 12px; cursor: pointer; border-bottom: 1px solid var(--border); position: relative;
+}
+.mpick__opt:hover { background: var(--hover); }
+.mpick__opt > input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.mpick__opt:has(> input:checked) { background: var(--accent-bg); box-shadow: inset 2px 0 0 var(--accent); }
+.mpick__name { font-size: 12.5px; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mpick__id { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-left: 6px; }
+.mpick__ctx, .mpick__price { font-family: var(--mono); font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.mpick__price { min-width: 92px; text-align: right; }
+.mpick__opt[hidden], .mpick__group[hidden] { display: none; }
+.mpick__none { padding: 14px 12px; font-size: 12px; color: var(--muted); }
+
+.form-more > summary { cursor: pointer; font-size: 12px; color: var(--muted); list-style: none; }
+.form-more > summary::-webkit-details-marker { display: none; }
+.form-more > summary::before { content: "▸ "; }
+.form-more[open] > summary::before { content: "▾ "; }
+.form-more[open] > summary { margin-bottom: 10px; }
+
+@media (max-width: 640px) {
+  .field-pair, .choices { grid-template-columns: minmax(0, 1fr); }
+  .mpick__opt { grid-template-columns: minmax(0, 1fr) auto; }
+  .mpick__ctx { display: none; }
+}
+.choices--3 { --cols: 3; }
+.modal__form { display: flex; flex-direction: column; min-height: 0; }
+.modal--tall .modal__form .modal__body { overflow-y: auto; min-height: 0; }
+.ecard__health { font-size: 11px; margin-top: 2px; }
+.ecard__note { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.ecard__note--bad { color: var(--bad); }
+.ecard__foot .acts--start { margin-left: 0; }
+.choice__sub .probe { flex-wrap: wrap; row-gap: 2px; }
+.choice__sub .probe__detail { flex-basis: 100%; padding-left: 15px; }

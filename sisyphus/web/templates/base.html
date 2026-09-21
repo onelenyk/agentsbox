@@ -228,6 +228,32 @@
             var d = e.detail || {};
             flash(d.message || "smoke test finished", d.ok ? "ok" : "err");
         });
+        // Model pickers (_ui.html model_picker): filter as you type — a group
+        // with a match opens, one without hides — and keep the current pick in
+        // view when a picker arrives.
+        document.addEventListener("input", function (e) {
+            var f = e.target;
+            if (!f.matches || !f.matches("[data-mpick-filter]")) return;
+            var box = f.closest(".mpick"), q = f.value.trim().toLowerCase(), any = false;
+            box.querySelectorAll(".mpick__group").forEach(function (g) {
+                var n = 0;
+                g.querySelectorAll(".mpick__opt").forEach(function (o) {
+                    var hit = !q || o.textContent.toLowerCase().indexOf(q) !== -1;
+                    o.hidden = !hit;
+                    if (hit) n++;
+                });
+                g.hidden = n === 0;
+                if (q && n) g.open = true;
+                if (n) any = true;
+            });
+            box.querySelector(".mpick__none").hidden = any || !q;
+        });
+        b.addEventListener("htmx:afterSwap", function (e) {
+            e.detail.target.querySelectorAll(".mpick__list").forEach(function (l) {
+                var on = l.querySelector("input:checked");
+                if (on) l.scrollTop = on.parentElement.offsetTop - 40;
+            });
+        });
         b.addEventListener("htmx:afterRequest", function (e) {
             if (!e.detail.failed) return;
             // Already reported with a specific reason above — don't double-flash.
