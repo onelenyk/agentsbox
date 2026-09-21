@@ -83,8 +83,17 @@ def _parse_claude_usage(stdout: str) -> Optional[dict]:
     # runner row usually names no model (the CLI uses its own configured
     # default), so without this the Statistics page shows a blank model for
     # every Claude run — the one thing that row is for.
+    #
+    # One run can use several: the main model does the work and a small one
+    # handles side jobs. Taking the FIRST key named the side model — a run on
+    # this board that Opus did for $0.448 was recorded as Haiku, which spent
+    # $0.002 of it. The model that served the run is the one that cost most.
     model_usage = obj.get("modelUsage")
-    served = next(iter(model_usage), "") if isinstance(model_usage, dict) else ""
+    served = ""
+    if isinstance(model_usage, dict) and model_usage:
+        served = max(model_usage, key=lambda m: (
+            float((model_usage[m] or {}).get("costUSD") or 0),
+            int((model_usage[m] or {}).get("outputTokens") or 0)))
     return {
         "model": served,
         "input_tokens": int(u.get("input_tokens") or 0),

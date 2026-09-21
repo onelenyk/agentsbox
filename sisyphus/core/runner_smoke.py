@@ -111,7 +111,11 @@ async def smoke_test(runner: dict, timeout: int = DEFAULT_TIMEOUT) -> dict:
             mcp_config=mcp_config,
         )
 
-        env = dict(os.environ)
+        # The same environment a real worker gets, minus the parts that only
+        # matter to a full run — a smoke test that saw a different environment
+        # would pass while the real launch failed.
+        from .launcher import _without_host_session
+        env = _without_host_session(dict(os.environ))
         from .config import worker_env
         env.update(worker_env() or {})
         env["PATH"] = path_with_install_dirs(env.get("PATH", ""))

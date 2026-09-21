@@ -156,6 +156,21 @@ async def _monitored_communicate(
                 t.cancel()
 
 
+# Variables that identify the interactive terminal the DAEMON happened to be
+# started from — never something a worker should carry. A daemon launched from
+# a Superset terminal inherited SUPERSET_TERMINAL_ID and SUPERSET_HOME_DIR, and
+# the `claude` on PATH there is Superset's wrapper script: with those set, it
+# pings Superset's app on every worker launch and, once a default account is
+# chosen in Superset, swaps CLAUDE_CONFIG_DIR — the worker's Claude account —
+# for whatever the operator's terminal was using. Under launchd none of these
+# exist; stripping them makes a daemon started by hand behave the same way.
+_HOST_SESSION_PREFIXES = ("SUPERSET_",)
+
+
+def _without_host_session(env: dict) -> dict:
+    return {k: v for k, v in env.items() if not k.startswith(_HOST_SESSION_PREFIXES)}
+
+
 async def launch_agent(
     agent_def: dict,
     prompt: str,
@@ -250,7 +265,7 @@ async def launch_agent(
     # which doesn't exist on macOS → hundreds of sqlite3.OperationalError noise
     # lines that reviewers kept misreporting as "pre-existing sandbox issues".
     # Point it at a private per-run dir instead: isolated AND functional.
-    env = dict(os.environ)
+    env = _without_host_session(dict(os.environ))
     # launchd hands the daemon a nearly empty environment, and the worker
     # inherits it — so a project needing a real toolchain dies on its first
     # command. Apply the configured extras BEFORE the daemon's own variables
