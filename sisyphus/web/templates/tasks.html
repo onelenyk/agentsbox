@@ -14,7 +14,7 @@
         <span class="toolbar__note">every task, every repo</span>
         {% endcall %}
         {% include "_task_box.html" %}
-        <div id="tasks-list" hx-get="/api/tasks/list" hx-trigger="load, taskCreated from:body, taskUpdated from:body, every 7s[boardIdle()]" hx-swap="innerHTML">
+        <div id="tasks-list" hx-get="/api/tasks/list" hx-trigger="load, taskCreated from:body, taskUpdated from:body, dataChanged from:body, every 300s[boardIdle()]" hx-swap="innerHTML transition:true">
             <div class="empty">Loading…</div>
         </div>
     </div>

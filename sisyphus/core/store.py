@@ -178,6 +178,20 @@ def list_tasks(status: Optional[str] = None) -> List[dict]:
     return [dict(r) for r in rows]
 
 
+def child_counts() -> dict:
+    """{parent_id: (total, done)} for every parent that has children, in one
+    query. The board used to ask list_children() once per row — on a board of
+    162 tasks that was 162 connections and 162 statements per refresh, to
+    learn that almost none of them have children at all."""
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT parent_id, COUNT(*) AS n, SUM(status = 'done') AS done "
+        "FROM tasks WHERE parent_id IS NOT NULL GROUP BY parent_id"
+    ).fetchall()
+    conn.close()
+    return {r["parent_id"]: (r["n"], r["done"] or 0) for r in rows}
+
+
 def list_children(parent_id: str) -> List[dict]:
     """Child tasks of a fan-out parent, oldest first. Empty for a leaf task."""
     conn = get_conn()

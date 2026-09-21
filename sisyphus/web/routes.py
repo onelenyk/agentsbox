@@ -208,16 +208,20 @@ async def notifications_poll():
     from core import store
 
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat()
-    items = []
-    for status in ("waiting", "done", "failed"):
-        for t in store.list_tasks(status=status):
-            if t.get("updated_at", "") >= cutoff:
-                items.append({
-                    "key": f"{t['id']}:{status}:{t.get('updated_at', '')}",
-                    "task_id": t["id"],
-                    "status": status,
-                    "goal": t["goal"],
-                })
+    # One bounded query, not three unbounded ones: this used to pull every
+    # waiting, done and failed task in the database — the whole archive — and
+    # then throw away all but the last fifteen minutes, on a timer.
+    conn = store.get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT id, status, goal, updated_at FROM tasks "
+            "WHERE status IN ('waiting', 'done', 'failed') AND updated_at >= ? "
+            "ORDER BY updated_at", (cutoff,)).fetchall()
+    finally:
+        conn.close()
+    items = [{"key": f"{r['id']}:{r['status']}:{r['updated_at']}",
+              "task_id": r["id"], "status": r["status"], "goal": r["goal"]}
+             for r in rows]
     return {"items": items}
 
 @router.get("/runtime", response_class=HTMLResponse)
@@ -995,14 +999,14 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = ""):
 
     cols = ("in-progress", "needs-you", "to-merge", "shipped", "done", "failed")
     columns = {c: [] for c in cols}
+    kids_by_parent = store.child_counts()
     for status in store.VALID_STATUSES:
         tasks = [t for t in store.list_tasks(status=status) if not t.get("parent_id")
                  and (not repo or t.get("repo") == repo)]
         for t in tasks:
-            kids = store.list_children(t["id"])
+            kids = kids_by_parent.get(t["id"])
             if kids:
-                t["child_total"] = len(kids)
-                t["child_done"] = sum(1 for c in kids if c["status"] == "done")
+                t["child_total"], t["child_done"] = kids
             mr = task_latest_mr.get(t["id"])
             t["review_status"] = mr.get("review_status") if mr and mr.get("review_status") else None
             # While the branch can still land, the card shows what the MERGE

@@ -67,6 +67,19 @@ def _backup_status(backups: list) -> dict:
     return {"age_s": age_s, "stale": age_s > BACKUP_STALE_SECONDS}
 
 
+@api.get("/pulse")
+async def pulse():
+    """Has anything changed? The whole UI asks this one question on a timer
+    instead of each surface re-fetching itself blind — see core/pulse.py.
+
+    Deliberately tiny and deliberately dumb: it says nothing about WHAT moved,
+    only that something did, and the client re-fetches whichever surfaces it
+    has on screen."""
+    from core import pulse as _pulse
+
+    return {"v": _pulse.version()}
+
+
 @api.get("/health")
 async def health():
     """Liveness (ok) plus readiness: db reachable and the default runner's binary

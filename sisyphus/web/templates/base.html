@@ -105,6 +105,39 @@
         // Back should close the panel, not leave the board behind it.
         window.addEventListener("popstate", function () { closeTaskPanel(true); });
 
+        // ── One poll for the whole app ──────────────────────────────────
+        // Surfaces used to re-fetch themselves on their own timers whether or
+        // not anything had happened — the board every 7s at ~135 KB a time.
+        // Now a single 89-byte question ("has anything changed?") drives every
+        // surface on the page: when the answer moves, they refresh together;
+        // when it doesn't, nothing is fetched and nothing in the DOM is
+        // replaced. Each surface keeps a slow timer of its own as a safety net
+        // for a missed beat.
+        (function pulse() {
+            var last = null, failures = 0;
+            async function tick() {
+                try {
+                    var r = await fetch("/api/v1/pulse", { cache: "no-store" });
+                    if (!r.ok) throw new Error(r.status);
+                    var v = (await r.json()).v;
+                    failures = 0;
+                    if (last !== null && v !== last) {
+                        // Not taskUpdated: that one means "you did something"
+                        // and raises a toast. This is just news from the daemon.
+                        if (window.htmx) htmx.trigger(document.body, "dataChanged");
+                    }
+                    last = v;
+                } catch (e) {
+                    // The daemon is down or restarting. Back off so a dead
+                    // daemon does not mean a request every three seconds, and
+                    // let the sidebar's own heartbeat report the outage.
+                    failures++;
+                }
+                setTimeout(tick, failures ? Math.min(30000, 3000 * failures) : 3000);
+            }
+            tick();
+        })();
+
         function flash(msg, kind) {
             var t = document.getElementById("toast");
             t.textContent = msg;
@@ -221,7 +254,10 @@
         }
         refreshNotifUI();
         notifyPoll();
-        setInterval(notifyPoll, 10000);
+        // Driven by the pulse, not by a clock of its own: a browser
+        // notification can only follow something actually changing.
+        document.body.addEventListener("dataChanged", notifyPoll);
+        setInterval(notifyPoll, 120000);   // safety net for a missed beat
     </script>
 </body>
 </html>
