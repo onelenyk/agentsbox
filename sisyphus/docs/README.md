@@ -11,6 +11,8 @@ Living documents — kept current, read these first:
   e2e), the order stability is built in, and the rules that keep it honest.
 - [`known-gaps.md`](known-gaps.md) — honest ledger of what is still broken or
   missing, each entry moved to CLOSED only when the fix ships.
+- [`how-to-add-a-cli-runner.md`](how-to-add-a-cli-runner.md) — the step-by-step
+  for adding a new CLI runner (a new entry in `core/runner_profiles.py`).
 - [`adr/`](adr/) — architecture decision records (why the design is the way it is).
 
 Archive — completed plans and executed test campaigns, kept as the record of how
