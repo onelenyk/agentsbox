@@ -415,12 +415,12 @@ body::before {
 
 /* ── Status LEDs ─────────────────────────────────────────────────────── */
 .led { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
-.led.live { background: var(--good); animation: led-pulse var(--dur-ambient) infinite; }
+/* A steady dot, not a pulsing one: the halo drew the eye to a state that
+   almost never changes, and away from the work. */
+.led.live { background: var(--good); }
 .led.amber { background: var(--accent); }
 .led.idle { background: var(--muted); }
-.led.dead { background: var(--bad); animation: none; }
-@keyframes led-pulse { 0% { box-shadow: 0 0 0 0 var(--good-glow); } 70% { box-shadow: 0 0 0 6px var(--good-glow-0); } 100% { box-shadow: 0 0 0 0 var(--good-glow-0); } }
-@media (prefers-reduced-motion: reduce) { .led.live { animation: none; } }
+.led.dead { background: var(--bad); }
 .page-head {
   display: flex; align-items: center; justify-content: space-between;
   gap: var(--sp-8); margin-bottom: var(--sp-9);
@@ -2300,3 +2300,45 @@ body.has-overlay { overflow: hidden; }
 .mark--text   { color: var(--text-2); }
 .mark.is-now  { box-shadow: var(--ring-good); border-color: var(--good-bd); }
 .brand__mark { color: var(--accent); flex: none; }
+
+/* ── Home: the state line, then sections ─────────────────────────────────
+   Figures sit on a rule instead of in four equal boxes: the two that can
+   demand something of you are lit, the rest are just facts. */
+.state {
+  display: flex; align-items: baseline; gap: var(--sp-11); flex-wrap: wrap;
+  padding: var(--sp-5) 0 var(--sp-8); border-bottom: 1px solid var(--border); margin-bottom: var(--sp-9);
+}
+.state__item { display: flex; align-items: baseline; gap: var(--sp-4); }
+.state__n { font-size: var(--fs-5xl); font-weight: var(--fw-semibold); color: var(--text-2); line-height: var(--lh-tight); }
+.state__l { font-size: var(--fs-md); color: var(--muted); }
+.state__item.is-live .state__n { color: var(--good); }
+.state__item.is-wanted .state__n { color: var(--warn); }
+.state__rest { margin-left: auto; display: flex; flex-direction: column; gap: var(--sp-1); text-align: right; font-size: var(--fs-sm); color: var(--muted); }
+
+.sect { margin-bottom: var(--sp-10); }
+.sect__h {
+  display: flex; align-items: baseline; gap: var(--sp-5); margin: 0 0 var(--sp-5);
+  padding-bottom: var(--sp-3); border-bottom: 1px solid var(--border);
+  font-size: var(--fs-md); font-weight: var(--fw-semibold); color: var(--text-2);
+}
+.sect__meta { margin-left: auto; font-weight: var(--fw-normal); color: var(--muted); font-size: var(--fs-sm); }
+.sect__body { display: flex; flex-direction: column; gap: var(--sp-4); }
+.sect__quiet { margin: 0; padding: var(--sp-5) 0; font-size: var(--fs-md); color: var(--muted); }
+.dash-past { align-items: start; gap: var(--sp-11); }
+.dash-past__h { margin-top: var(--sp-9); }
+@media (max-width: 900px) { .state__rest { margin-left: 0; text-align: left; } }
+
+/* ── The agent roster: a list you can read, not a grid of equal cards ─── */
+.alist { display: flex; flex-direction: column; }
+.arow { padding: var(--sp-7) 0; border-bottom: 1px solid var(--border); }
+.arow:last-child { border-bottom: 0; }
+.arow__head { display: flex; align-items: center; gap: var(--sp-5); flex-wrap: wrap; }
+.arow__name { margin: 0; font-size: var(--fs-2xl); font-weight: var(--fw-semibold); }
+.arow__kind { font-size: var(--fs-sm); color: var(--muted); }
+.arow__runtime { margin-left: auto; font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted); }
+.arow__head .acts { display: flex; gap: var(--sp-3); }
+.arow__persona {
+  margin: var(--sp-4) 0 0; max-width: 80ch; font-size: var(--fs-body); line-height: var(--lh-relaxed); color: var(--text-2);
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.arow__tools { margin: var(--sp-4) 0 0; font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted); }

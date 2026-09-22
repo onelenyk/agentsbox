@@ -1,22 +1,16 @@
 {% from "_ui.html" import agent_marks %}
 {% if agents %}
-<div class="card-grid">
+{# A roster reads as a list, not as a grid of equal cards: the persona is the
+   point, so it gets room to be read, and the tools are one line of names
+   rather than a field of pills. #}
+<div class="alist">
     {% for a in agents %}
-    <div class="ecard">
-        <div class="ecard__head">
-            <div class="ecard__glyph {{ 'violet' if a.kind == 'orchestrator' else '' }}">{{ agent_marks.get(a.name, [(a.name or '?')[:2]|upper])[0] }}</div>
-            <div>
-                <div class="ecard__name">{{ a.name }}</div>
-                <div class="ecard__sub">{{ 'built-in' if a.is_builtin else 'custom' }}</div>
-            </div>
-            <span class="badge {{ 'badge--accent' if a.kind == 'orchestrator' else '' }} right">{{ a.kind }}</span>
-        </div>
-        {% if a.persona %}<div class="ecard__persona" title="{{ a.persona }}">{{ a.persona }}</div>{% endif %}
-        <div class="tool-chips">
-            {% for t in a.tools %}<span class="tc">{{ t }}</span>{% endfor %}
-        </div>
-        <div class="ecard__foot">
-            <span class="ecard__sub">runtime · {{ runners.get(a.runner_id) or 'default' }}{% if a.model %} · {{ a.model }}{% endif %}</span>
+    <article class="arow">
+        <div class="arow__head">
+            <span class="ecard__glyph {{ 'violet' if a.kind == 'orchestrator' else '' }}">{{ agent_marks.get(a.name, [(a.name or '?')[:2]|upper])[0] }}</span>
+            <h3 class="arow__name">{{ a.name }}</h3>
+            <span class="arow__kind">{{ a.kind }}{{ ' · built-in' if a.is_builtin else ' · custom' }}</span>
+            <span class="arow__runtime">{{ runners.get(a.runner_id) or 'default runtime' }}{% if a.model %} · {{ a.model }}{% endif %}</span>
             <div class="acts">
                 <button class="btn btn--ghost btn--sm" hx-get="/api/agents/{{ a.name }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
                 {% if not a.is_builtin %}
@@ -24,7 +18,9 @@
                 {% endif %}
             </div>
         </div>
-    </div>
+        {% if a.persona %}<p class="arow__persona">{{ a.persona }}</p>{% endif %}
+        <p class="arow__tools">{% for t in a.tools %}{{ t }}{{ '  ·  ' if not loop.last }}{% endfor %}</p>
+    </article>
     {% endfor %}
 </div>
 {% else %}
