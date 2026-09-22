@@ -83,8 +83,11 @@ class TestOldSessionsGo:
 
     def test_keeping_nothing_takes_every_session_there_is(self, tmp_path):
         """keep_days=0 means keep nothing. It is reachable only by hand: the
-        daemon loop reads 0 as "pruning off" and never calls this."""
-        path = _store(tmp_path, [("ses_a_moment_ago", 1.0 / 86400), ("ses_now", 0)])
+        daemon loop reads 0 as "pruning off" and never calls this. Both rows
+        are seconds old, never "this same millisecond" — a session written in
+        the millisecond the cutoff lands on is not older than it, which made
+        this test a coin flip."""
+        path = _store(tmp_path, [("ses_a_minute_ago", 60.0 / 86400), ("ses_seconds_ago", 5.0 / 86400)])
         res = runner_store.prune(keep_days=0, root=str(tmp_path))
         assert res["removed"] == 2 and _rows(path, "session") == 0
 
