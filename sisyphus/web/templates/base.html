@@ -223,6 +223,29 @@
             showTheme();
         };
         showTheme();
+
+        // How a task board is drawn (_ui.html view_switch): "list" or
+        // "sprint". A ?view= in the address wins, so a link can say which.
+        window.boardMode = function () {
+            var fromUrl = new URLSearchParams(location.search).get("view");
+            if (fromUrl === "list" || fromUrl === "sprint") return fromUrl;
+            try { return localStorage.getItem("boardMode") || "list"; } catch (e) { return "list"; }
+        };
+        function markBoardMode() {
+            var m = boardMode();
+            document.querySelectorAll(".seg__btn[data-view]").forEach(function (b) {
+                b.classList.toggle("is-on", b.dataset.view === m);
+                b.setAttribute("aria-pressed", b.dataset.view === m);
+            });
+        }
+        window.setBoardMode = function (m) {
+            try { localStorage.setItem("boardMode", m); } catch (e) {}
+            var url = new URL(location.href);
+            if (url.searchParams.has("view")) { url.searchParams.set("view", m); history.replaceState({}, "", url); }
+            markBoardMode();
+            document.body.dispatchEvent(new CustomEvent("boardModeChanged"));
+        };
+        markBoardMode();
         var b = document.body;
         b.addEventListener("reposUpdated",  function () { flash("Saved"); });
         b.addEventListener("runnersUpdated", function () { flash("Saved"); });

@@ -12,9 +12,10 @@
     <div class="board-main">
         {% call ui.toolbar([{'label': 'Tasks'}]) %}
         <span class="toolbar__note">every task, every repo</span>
+        {{ ui.view_switch() }}
         {% endcall %}
         {% include "_task_box.html" %}
-        <div id="tasks-list" hx-get="/api/tasks/list" hx-trigger="load, taskCreated from:body, taskUpdated from:body, dataChanged from:body, every 300s[boardIdle()]" hx-swap="innerHTML transition:true">
+        <div id="tasks-list" hx-get="/api/tasks/list" hx-vals='js:{view: boardMode()}' hx-trigger="load, boardModeChanged from:body, taskCreated from:body, taskUpdated from:body, dataChanged from:body, every 300s[boardIdle()]" hx-swap="innerHTML transition:true">
             <div class="empty">Loading…</div>
         </div>
     </div>
@@ -25,7 +26,7 @@
     // half-typed word with it — so the poll waits until you step out of it.
     function boardIdle() {
         var el = document.activeElement;
-        return !(el && el.closest && el.closest('.filters'));
+        return !(el && el.closest && el.closest('.filters, .sboard__tools'));
     }
 </script>
 {% endblock %}

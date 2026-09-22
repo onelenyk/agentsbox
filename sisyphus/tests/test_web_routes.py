@@ -1648,3 +1648,41 @@ class TestReplyingToAFinishedTaskReopensIt:
             _make_client().post(f"/api/tasks/{t['id']}/messages", data={"text": "note"})
         assert store.get_task(t["id"])["status"] == "active"
         assert store.list_events(t["id"]) == []
+
+
+# ── Sprint board: this week as lanes ─────────────────────────────────────
+
+
+def _srow(id, kind, when, **kw):
+    from web.routes import _sprint_of
+    return {"id": id, "kind": kind, "when": when, "sprint": _sprint_of(when), "live": None,
+            "children": [], **kw}
+
+
+def test_sprint_board_holds_open_work_from_any_week_and_only_this_weeks_closed():
+    from datetime import date
+    from web.routes import sprint_board
+    today = date(2026, 9, 23)                       # a Wednesday
+    top = [
+        _srow("a", "in-progress", "2026-09-22T10:00:00"),
+        _srow("b", "in-progress", "2026-09-22T11:00:00"),
+        _srow("c", "needs-you", "2026-09-10T10:00:00"),   # carried over
+        _srow("d", "to-merge", "2026-09-21T10:00:00"),
+        _srow("e", "shipped", "2026-09-22T09:00:00"),
+        _srow("f", "done", "2026-09-12T09:00:00"),        # closed last week: history
+        _srow("g", "failed", "2026-09-23T08:00:00"),
+    ]
+    b = sprint_board(top, running_ids={"a"}, today=today)
+    lanes = {l["key"]: [c["id"] for c in l["cards"]] for l in b["lanes"]}
+    assert lanes == {"queued": ["b"], "running": ["a"], "you": ["c", "d"], "done": ["e"], "failed": ["g"]}
+    carried = {c["id"]: c["carried"] for l in b["lanes"] for c in l["cards"]}
+    assert carried["c"] == "Week 37" and carried["a"] == ""
+    assert (b["total"], b["closed"], b["pct"], b["days_left"]) == (6, 2, 33, 4)
+
+
+def test_the_board_draws_the_sprint_view_when_asked(db_path):
+    from core.runners import init_runners_table
+    init_runners_table()
+    body = _make_client().get("/api/tasks/list?view=sprint").text
+    assert 'class="sboard"' in body and "Needs you" in body
+    assert "days left" in body or "last day" in body

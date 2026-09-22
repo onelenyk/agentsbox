@@ -4,6 +4,18 @@
    right. A page that rebuilds its own header makes every navigation look like
    a reload. #}
 
+{# Who each agent role is, at a glance — the same face on every surface. #}
+{% set agent_icons = {'orchestrator':'🧭','engineer':'🔧','reviewer':'🔍','explorer':'🔭','planner':'🗺️','mr-reviewer':'🔍','human':'🧑'} %}
+
+{# How a board is drawn: every week as a list, or this week as lanes. The
+   choice is remembered per browser (base.html: boardMode). #}
+{% macro view_switch() -%}
+<div class="seg" role="group" aria-label="Board view">
+    <button type="button" class="seg__btn" data-view="list" onclick="setBoardMode('list')" title="Every sprint, as a list">☰ List</button>
+    <button type="button" class="seg__btn" data-view="sprint" onclick="setBoardMode('sprint')" title="This week, as a board of cards">▦ Sprint</button>
+</div>
+{%- endmacro %}
+
 {% macro toolbar(crumbs) %}
 <div class="toolbar">
     <nav class="toolbar__crumbs">
