@@ -38,7 +38,7 @@
 </li>
 {%- endmacro %}
 
-{% from "_ui.html" import agent_icons as icons %}
+{% from "_ui.html" import agent_icons as icons, ask_card %}
 
 <div class="board">
 
@@ -47,33 +47,12 @@
         <header class="zone__head">
             <h2>Wants you</h2>
             {% if needs_you %}<span class="zone__count tnum">{{ needs_you|length }}</span>{% endif %}
+            <button type="button" class="zone__notify" data-notif-state onclick="enableNotifications()"
+                    title="A browser notification the moment something lands here"></button>
         </header>
         {% if needs_you %}
         <div class="asks">
-            {% for t in needs_you %}
-            <a class="ask" draggable="false" href="/tasks/{{ t.id }}" hx-get="/api/tasks/{{ t.id }}/panel" hx-target="#overlay-body" hx-swap="innerHTML" hx-push-url="/tasks/{{ t.id }}">
-                <div class="ask__top">
-                    <span class="tkey">{{ t.key }}</span>
-                    <span class="ask__title">{{ task_display_title(t) }}</span>
-                    <span class="ask__age"><span class="reltime" data-created="{{ t.updated_at or t.created_at }}"></span></span>
-                </div>
-                {% if t.question %}
-                <p class="ask__what">❓ {{ t.question }}</p>
-                <span class="ask__do">Answer in the thread →</span>
-                {% else %}
-                {% set gate = {
-                    'ready':        ('Reviewed and checked — waiting for your merge', 'good'),
-                    'check-failed': ('The recorded check failed — your call', 'bad'),
-                    'changes':      ('The reviewer asked for changes', 'bad'),
-                    'pending':      ('In review', ''),
-                    'died':         ('The review died without a verdict', 'bad'),
-                    'unreviewed':   ('Nobody reviewed this branch', ''),
-                }.get(t.gate, ('Waiting on you', '')) %}
-                <p class="ask__what {{ 'is-' ~ gate[1] if gate[1] }}">⇄ {{ gate[0] }}</p>
-                <span class="ask__do">Open the merge request →</span>
-                {% endif %}
-            </a>
-            {% endfor %}
+            {% for t in needs_you %}{{ ask_card(t, task_display_title(t)) }}{% endfor %}
         </div>
         {% else %}
         <p class="zone__empty">Nothing is waiting on you.</p>

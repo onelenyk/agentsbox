@@ -427,7 +427,7 @@ def test_task_box_allows_no_repo(db_path):
     """The task box offers a repo-less option (backend #3 support)."""
     html = _make_client().get("/tasks").text
     box = html.split('class="taskbox"')[1].split("</form>")[0]
-    assert '<option value="">no repo</option>' in box
+    assert "no repo" in box                          # the repo chip can be emptied
     assert 'name="repo" required' not in box
 
 
@@ -473,7 +473,7 @@ def test_board_lists_done_task_with_open_mr_under_to_merge(db_path):
 
     r = _make_client().get("/api/tasks/list")
     assert r.status_code == 200
-    assert "Open the merge request" in r.text   # it wants a decision from the human
+    assert "askc--" in r.text and "/view" in r.text   # it wants a decision from the human
     assert task["id"] in r.text
 
 
@@ -513,7 +513,7 @@ def test_each_status_gets_its_own_surface(db_path):
     html = client.get("/api/tasks/list").text
     try:
         # it wants you: the question itself, not a badge saying there is one
-        assert "Which database?" in html and "Answer in the thread" in html
+        assert "Which database?" in html and "askc__reply" in html
         # in flight: progress, and a queued task says it is only queued
         assert "stagebar" in html and "feat: half of it" in html
         assert "queued · waiting for the orchestrator" in html
@@ -890,9 +890,9 @@ def test_agents_delete_builtin_blocked(db_path):
 
 def test_task_box_hides_agent_choice_under_more(db_path):
     html = _make_client().get("/tasks").text
-    more = html.split('class="taskbox__more"')[1].split("</details>")[0]
-    assert "Auto" in more and "orchestrator dispatches" in more
-    assert "engineer (solo)" in more
+    box = html.split('class="taskbox"')[1].split("</form>")[0]
+    assert "engineer" in box.split("data-agents='", 1)[1].split("'", 1)[0]   # offered to @
+    assert "the orchestrator picks" in box                                  # and the default says so
 
 
 def test_task_detail_shows_handling_agent(db_path):
@@ -968,7 +968,8 @@ def test_task_box_creates_the_task_on_its_repo(db_path):
     from core import store
     with patch("core.orchestrator.emit") as mock_emit:
         r = _make_client().post("/api/tasks", data={"goal": "tidy the README", "repo": "alpha"})
-    assert r.status_code == 200 and r.headers.get("HX-Trigger") == "taskCreated"
+    assert r.status_code == 200 and "taskCreated" in r.headers.get("HX-Trigger", "")
+    assert "created" in r.text and "#alpha" in r.text                       # the receipt
     [t] = [t for t in store.list_tasks() if t["goal"] == "tidy the README"]
     assert t["repo"] == "alpha" and not t.get("agent")
     mock_emit.assert_called_once()
@@ -1686,3 +1687,40 @@ def test_the_board_draws_the_sprint_view_when_asked(db_path):
     body = _make_client().get("/api/tasks/list?view=sprint").text
     assert 'class="sboard"' in body and "Needs you" in body
     assert "days left" in body or "last day" in body
+
+
+# ── Wants you: answering from the card, creating with files ──────────────
+
+
+def test_an_answer_from_a_card_comes_back_as_a_receipt(db_path):
+    from core import store
+    t = store.create_task("pick a db", "")
+    store.set_status(t["id"], "waiting")
+    with patch("core.orchestrator.emit"):
+        r = _make_client().post(f"/api/tasks/{t['id']}/messages", data={"text": "2. Postgres", "from_card": "1"})
+    assert r.status_code == 200 and "askc-done" in r.text and "2. Postgres" in r.text
+    assert "HX-Trigger" not in r.headers                    # the board catches up on its own pulse
+    assert store.get_thread(t["id"])[-1]["text"] == "2. Postgres"
+
+
+def test_a_task_created_with_a_file_carries_it_from_the_first_pass(db_path, tmp_path, monkeypatch):
+    from core import store
+    monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+    with patch("web.routes.emit", create=True), patch("core.orchestrator.emit"):
+        r = _make_client().post("/api/tasks", data={"goal": "fix the crash"},
+                                files=[("files", ("../shot one.png", b"\x89PNG data", "image/png"))])
+    assert r.status_code == 200 and "1 file" in r.text
+    t = store.list_tasks()[0]
+    note = store.get_thread(t["id"])[0]
+    assert note["attachment"] == "shot-one.png" and note["author"] == "human"
+    assert (tmp_path / "tasks" / t["id"] / "attachments" / "shot-one.png").read_bytes() == b"\x89PNG data"
+
+
+def test_a_notification_says_which_kind_of_wait_it_is(db_path):
+    from core import store
+    t = store.create_task("scan", "")
+    store.post_message(t["id"], "orchestrator", kind="question",
+                       text="I couldn't produce a next-step decision (the orchestrator agent returned nothing, 3 attempts).")
+    store.set_status(t["id"], "waiting")
+    items = _make_client().get("/api/notifications/poll").json()["items"]
+    assert [i["verb"] for i in items if i["task_id"] == t["id"]] == ["is stuck"]

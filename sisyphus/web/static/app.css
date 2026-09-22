@@ -468,26 +468,7 @@ body::before {
 /* auto-FIT, not auto-fill: with one thing asking for you, an auto-fill grid
    left it 340px wide beside three empty tracks, which read as a card that
    failed to load rather than as the one thing on the page that wants you. */
-.asks { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: var(--sp-5); }
-.ask {
-  display: block; text-decoration: none; padding: var(--sp-6) var(--sp-7);
-  background: var(--panel); border: 1px solid var(--warn-bd);
-  border-left: 3px solid var(--warn); border-radius: var(--r);
-  transition: background var(--dur), transform var(--dur-fast), box-shadow var(--dur);
-}
-.ask:hover { background: var(--hover); transform: translateY(-1px); box-shadow: var(--shadow-lift); }
-.ask__top { display: flex; align-items: baseline; gap: var(--sp-4); }
-.ask__title {
-  font-size: var(--fs-lg); font-weight: var(--fw-bold); color: var(--text); line-height: var(--lh-snug);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.ask__age { margin-left: auto; flex: none; font-size: var(--fs-xs); color: var(--muted); }
-.ask__what {
-  margin: var(--sp-4) 0 var(--sp-4); font-size: var(--fs-md); line-height: var(--lh-normal); color: var(--text-2);
-}
-.ask__what.is-good { color: var(--good); }
-.ask__what.is-bad { color: var(--bad); }
-.ask__do { font-size: var(--fs-sm); color: var(--warn); }
+.asks { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--sp-6); align-items: stretch; }
 
 /* ── In flight ───────────────────────────────────────────────────────── */
 .zone--run { --col: var(--accent); --col-bg: var(--accent-bg); }
@@ -1557,32 +1538,73 @@ body.has-overlay { overflow: hidden; }
    surface, a visible frame, an accent rail down the side and the key that
    sends it named in the hint. */
 .taskbox {
+  position: relative; display: flex; flex-direction: column; gap: var(--sp-5);
   margin-bottom: var(--sp-8); padding: var(--sp-6) var(--sp-7);
-  background: var(--panel); border: 1px solid var(--border);
-  border-left: 3px solid var(--accent); border-radius: var(--r-lg);
+  background: var(--panel); border: 1px solid var(--accent-bd); border-radius: var(--r-lg);
   transition: border-color var(--dur), box-shadow var(--dur);
 }
-.taskbox:focus-within { border-color: var(--border-2); border-left-color: var(--accent-hi); box-shadow: var(--shadow-lift); }
-.taskbox__row { display: flex; gap: var(--sp-5); align-items: flex-start; }
-.taskbox__row textarea {
-  flex: 1 1 auto; min-width: 0; min-height: 42px; resize: none; overflow-y: auto;
-  font-size: var(--fs-xl); line-height: var(--lh-snug); padding: var(--sp-4) var(--sp-6);
-  background: var(--inset); border-color: var(--border);
+.taskbox:focus-within { border-color: var(--accent); box-shadow: var(--ring); }
+.taskbox.is-drop { border-style: dashed; background: var(--accent-bg); }
+.taskbox__field { position: relative; }
+.taskbox__textarea {
+  width: 100%; min-height: 42px; height: var(--ta-height, auto); resize: none; overflow-y: auto;
+  font-size: var(--fs-2xl); line-height: var(--lh-normal); padding: var(--sp-2) 0;
+  background: transparent; border: 0; box-shadow: none;
 }
-.taskbox__row textarea::placeholder { color: var(--muted); }
-.taskbox__row select { flex: 0 0 auto; max-width: 170px; background-color: var(--inset); }
-.taskbox__row .btn { flex: none; align-self: stretch; padding-inline: var(--sp-8); }
-.taskbox__foot { display: flex; align-items: center; gap: var(--sp-6); margin-top: var(--sp-4); }
-.taskbox__hint { font-size: var(--fs-sm); color: var(--muted); }
+.taskbox__textarea:focus { box-shadow: none; }
+.taskbox__textarea::placeholder { color: var(--muted); }
+.taskbox__pop {
+  position: absolute; left: 0; top: 100%; z-index: var(--z-sticky); min-width: 220px;
+  display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-2);
+  background: var(--hover); border: 1px solid var(--border-2); border-radius: var(--r); box-shadow: var(--shadow-lift);
+}
+.taskbox__pop[hidden] { display: none; }
+.taskbox__opt {
+  font: inherit; font-size: var(--fs-md); text-align: left; cursor: pointer; color: var(--text);
+  padding: var(--sp-3) var(--sp-4); border: 0; border-radius: var(--r-sm); background: transparent;
+}
+.taskbox__opt.is-on, .taskbox__opt:hover { background: var(--accent-bg); color: var(--accent-hi); }
+
+.taskbox__files { display: flex; flex-wrap: wrap; gap: var(--sp-4); }
+.taskbox__files[hidden] { display: none; }
+.taskbox__file {
+  display: inline-flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border-2); border-radius: var(--r); background: var(--panel-2); font-size: var(--fs-base);
+}
+.taskbox__file img { width: 44px; height: 32px; object-fit: cover; border-radius: var(--r-xs); }
+.taskbox__file-name { color: var(--text-2); }
+.taskbox__file-x { font: inherit; border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 var(--sp-1); }
+.taskbox__file-x:hover { color: var(--bad); }
+
+.taskbox__bar { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
+.taskbox__chips { display: flex; gap: var(--sp-3); flex-wrap: wrap; }
+.taskbox__chip {
+  font: inherit; font-size: var(--fs-base); cursor: pointer; padding: var(--sp-1) var(--sp-4);
+  border-radius: var(--r-pill); border: 1px solid var(--accent-bd); background: var(--accent-bg); color: var(--accent-hi);
+}
+.taskbox__chip--agent, .taskbox__chip--file { color: var(--violet); background: var(--violet-bg); border-color: var(--violet-bd); }
+.taskbox__chip.is-empty { color: var(--muted); background: transparent; border-color: var(--border-2); border-style: dashed; }
+.taskbox__chip:disabled { cursor: default; }
+.taskbox__attach {
+  display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; cursor: pointer;
+  color: var(--muted); background: transparent; border: 1px solid var(--border-2); border-radius: var(--r);
+}
+.taskbox__attach:hover { color: var(--text); border-color: var(--muted); }
+.taskbox__hint { margin-left: auto; font-size: var(--fs-sm); color: var(--muted); }
 .taskbox__hint kbd {
   font-family: var(--mono); font-size: var(--fs-2xs); color: var(--text-2);
   background: var(--panel-2); border: 1px solid var(--border);
   border-bottom-width: 2px; border-radius: var(--r-xs); padding: 1px var(--sp-2); margin: 0 var(--sp-1);
 }
-.taskbox__more { margin-left: auto; font-size: var(--fs-base); color: var(--muted); }
-.taskbox__more summary { cursor: pointer; width: max-content; }
-.taskbox__more label { display: flex; align-items: center; gap: var(--sp-4); margin-top: var(--sp-4); }
-@media (max-width: 640px) { .taskbox__row { flex-wrap: wrap; } .taskbox__row textarea { flex-basis: 100%; } }
+.taskbox__bar .btn { padding-inline: var(--sp-8); }
+.taskbox__done:empty { display: none; }
+.taskbox__receipt { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; font-size: var(--fs-md); color: var(--text-2); }
+.taskbox__tick { color: var(--good); font-weight: var(--fw-heavy); }
+.taskbox__receipt .taskbox__chip { cursor: default; font-size: var(--fs-sm); }
+.taskbox__receipt-note { color: var(--muted); }
+.taskbox__open { color: var(--accent-hi); text-decoration: none; margin-left: auto; }
+.taskbox__open:hover { color: var(--accent); }
+@media (max-width: 640px) { .taskbox__hint { display: none; } }
 .project-autopilots { font-size: var(--fs-base); margin: calc(-1 * var(--sp-2)) 0 var(--sp-7); color: var(--muted); }
 .project-autopilots a { color: var(--text-2); text-decoration: none; }
 .project-autopilots a:hover { color: var(--text); }
@@ -2061,8 +2083,6 @@ body.has-overlay { overflow: hidden; }
 
 /* ── Dynamic height textarea (from _task_box.html) ───────────────────── */
 
-/* Textarea that grows with content, using CSS custom property for height */
-.taskbox__textarea { resize: none; height: var(--ta-height, auto); }
 
 /* ── Segmented switch: one choice out of a few, always visible ───────── */
 .seg { display: inline-flex; padding: var(--sp-1); gap: var(--sp-1); border: 1px solid var(--border-2); border-radius: var(--r); background: var(--inset); }
@@ -2151,3 +2171,66 @@ body.has-overlay { overflow: hidden; }
 .apcard__facts { display: flex; flex-direction: column; gap: var(--sp-2); }
 .apcard__goal { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .apcard .meta-line .v { min-width: 0; }
+
+/* ── "Wants you" cards (_ui.html ask_card) ───────────────────────────────
+   One card per kind of thing that waits on you; the kind's colour is --ask,
+   so a kind's look is one line here. */
+.btn--good { color: var(--good); background: var(--good-bg); border-color: var(--good-bd); }
+.btn--good:hover { background: var(--good-bd); }
+
+.zone__notify {
+  margin-left: auto; font: inherit; font-size: var(--fs-sm); color: var(--muted); cursor: pointer;
+  background: none; border: 0; padding: 0; display: inline-flex; align-items: center; gap: var(--sp-2);
+}
+.zone__notify::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.zone__notify.is-on { color: var(--text-2); cursor: default; }
+.zone__notify.is-on::before { background: var(--good); }
+
+.askc {
+  --ask: var(--info);
+  display: flex; flex-direction: column; gap: var(--sp-5); min-width: 0;
+  padding: var(--sp-7) var(--sp-8); border-radius: var(--r-lg);
+  background: var(--panel); border: 1px solid var(--border);
+}
+.askc--stuck  { --ask: var(--bad);  border-color: var(--bad-bd); }
+.askc--budget { --ask: var(--warn); }
+.askc--ready  { --ask: var(--good); }
+.askc--call   { --ask: var(--warn); }
+.askc__kind {
+  display: flex; align-items: center; gap: var(--sp-3); color: var(--ask);
+  font-size: var(--fs-2xs); font-weight: var(--fw-bold); letter-spacing: var(--ls-caps); text-transform: uppercase;
+}
+.askc__age { margin-left: auto; color: var(--muted); letter-spacing: 0; text-transform: none; font-weight: var(--fw-medium); font-size: var(--fs-sm); }
+.askc__title { display: flex; align-items: center; gap: var(--sp-4); min-width: 0; color: var(--text); text-decoration: none; }
+.askc__title:hover .askc__name { color: var(--accent-hi); }
+.askc__name { font-size: var(--fs-lg); font-weight: var(--fw-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.askc__text {
+  margin: 0; font-size: var(--fs-body); line-height: var(--lh-normal); color: var(--text-2); white-space: pre-line;
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+}
+.askc__opts { display: flex; flex-direction: column; gap: var(--sp-3); }
+.askc__opt {
+  font: inherit; font-size: var(--fs-md); text-align: left; cursor: pointer; color: var(--text);
+  display: flex; align-items: baseline; gap: var(--sp-4); padding: var(--sp-4) var(--sp-5);
+  border: 1px solid var(--border-2); border-radius: var(--r); background: var(--inset);
+  transition: border-color var(--dur), background var(--dur);
+}
+.askc__opt:hover { border-color: var(--accent-bd); background: var(--accent-bg); }
+.askc__opt b { font-family: var(--mono); font-size: var(--fs-xs); color: var(--accent); font-weight: var(--fw-semibold); }
+.askc__reply { display: flex; gap: var(--sp-3); }
+.askc__reply input { padding: var(--sp-3) var(--sp-5); font-size: var(--fs-md); }
+.askc__foot, .askc__note { font-size: var(--fs-sm); color: var(--muted); }
+.askc__facts .v.tone-bad { color: var(--bad); }
+.askc__facts { display: flex; flex-direction: column; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
+.askc__fact { font-size: var(--fs-base); }
+.askc__fact--sub { color: var(--text-2); font-size: var(--fs-xs); }
+.askc__acts { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; margin-top: auto; }
+.askc__end { margin-left: auto; }
+
+/* What a card becomes once you have answered it. */
+.askc-done {
+  display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-6) var(--sp-7);
+  border-radius: var(--r-lg); font-size: var(--fs-body);
+  background: var(--good-bg); border: 1px solid var(--good-bd);
+}
+.askc-done__tick { color: var(--good); font-weight: var(--fw-heavy); }

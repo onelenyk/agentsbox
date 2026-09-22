@@ -32,7 +32,7 @@
     // half-typed word with it — so the poll waits until you step out of it.
     function boardIdle() {
         var el = document.activeElement;
-        return !(el && el.closest && el.closest('.filters, .sboard__tools'));
+        return !(el && el.closest && el.closest('.filters, .sboard__tools, .askc__reply'));
     }
 </script>
 {% endblock %}

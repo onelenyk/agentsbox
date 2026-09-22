@@ -250,7 +250,8 @@
         b.addEventListener("reposUpdated",  function () { flash("Saved"); });
         b.addEventListener("runnersUpdated", function () { flash("Saved"); });
         b.addEventListener("agentsUpdated",  function () { flash("Saved"); });
-        b.addEventListener("taskCreated",    function () { flash("Task created"); });
+        b.addEventListener("taskCreated",    function (e) { if (!(e.detail && e.detail.quiet)) flash("Task created"); });
+        b.addEventListener("formError",      function (e) { flash(e.detail.value || e.detail, "err"); });
         b.addEventListener("taskUpdated",    function () { flash("Updated"); });
         // Runner writes reject unsupported types and duplicate names; the route
         // sends the reason on this trigger so the toast can say what went wrong
@@ -293,7 +294,7 @@
         b.addEventListener("htmx:afterRequest", function (e) {
             if (!e.detail.failed) return;
             // Already reported with a specific reason above — don't double-flash.
-            if ((e.detail.xhr.getResponseHeader("HX-Trigger") || "").indexOf("runnerError") !== -1) return;
+            if (/runnerError|formError/.test(e.detail.xhr.getResponseHeader("HX-Trigger") || "")) return;
             flash("Error: " + (e.detail.xhr.statusText || "request failed"), "err");
         });
 
@@ -351,6 +352,11 @@
             var p = Notification.permission;
             if (led) led.className = "led " + (p === "granted" ? "live" : (p === "denied" ? "dead" : "idle"));
             if (val) val.textContent = p === "granted" ? "on" : (p === "denied" ? "blocked" : "off");
+            // Anywhere else that offers them (the "Wants you" header) says the same.
+            document.querySelectorAll("[data-notif-state]").forEach(function (el) {
+                el.textContent = p === "granted" ? "notifications on" : (p === "denied" ? "notifications blocked" : "turn on notifications");
+                el.classList.toggle("is-on", p === "granted");
+            });
         }
         function enableNotifications() {
             if (!("Notification" in window)) return;
@@ -359,8 +365,8 @@
         var _notifSeen = null;  // null until the first poll seeds it (no notify on load)
         function showTaskNotification(i) {
             if (!("Notification" in window) || Notification.permission !== "granted") return;
-            var verb = i.status === "waiting" ? "needs your input"
-                     : (i.status === "done" ? "completed" : "failed");
+            var verb = i.verb || (i.status === "waiting" ? "needs your input"
+                     : (i.status === "done" ? "completed" : "failed"));
             var n = new Notification("Sisyphus — task " + verb, { body: i.goal, tag: i.task_id });
             n.onclick = function () { window.focus(); window.location.href = "/tasks/" + i.task_id; };
         }
@@ -383,6 +389,7 @@
         // Driven by the pulse, not by a clock of its own: a browser
         // notification can only follow something actually changing.
         document.body.addEventListener("dataChanged", notifyPoll);
+        document.body.addEventListener("htmx:afterSwap", refreshNotifUI);
         setInterval(notifyPoll, 120000);   // safety net for a missed beat
     </script>
 </body>
