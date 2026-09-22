@@ -57,8 +57,8 @@ def test_dashboard_page_and_view(db_path):
     assert c.get("/dashboard").status_code == 200
     v = c.get("/api/dashboard/view")
     assert v.status_code == 200
-    assert "Agents at work" in v.text
-    assert "Cost by agent" in v.text
+    assert "Now" in v.text
+    assert "Spend by agent" in v.text
 
 
 def test_dashboard_data_shape(db_path):

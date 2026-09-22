@@ -1,75 +1,78 @@
+{# Home, in the order a person actually reads it: where the system stands in
+   one line, what is happening now, and only then the history.
+
+   It used to open with four equal boxes and continue as a grid of equal
+   panels, so nothing on the page was more important than anything else — the
+   shape of every generated dashboard. Figures now sit on a rule, sections are
+   headings and hairlines instead of boxes, and the past is smaller than the
+   present. #}
 {% set ov = d.ov %}{% set t = ov.tasks %}{% set u = ov.usage %}{% set a = ov.activity %}
 {% from "_ui.html" import agent_mark %}
-<div class="kpis">
-    <div class="kpi kpi--live"><div class="l">Active</div><div class="v">{{ t.by_status.get('active', 0) }}</div><div class="d">{{ t.by_status.get('waiting', 0) }} waiting</div></div>
-    {# not "% completion" — the rate is done/(done+failed), which says nothing
-       about work still in flight and read as "everything is finished" #}
-    <div class="kpi"><div class="l">Done</div><div class="v">{{ t.done }}</div><div class="d">{{ t.failed }} failed</div></div>
-    <div class="kpi kpi--violet"><div class="l">Orchestrator passes</div><div class="v">{{ a.orchestrator_passes }}</div><div class="d">across {{ t.total }} tasks</div></div>
-    <div class="kpi kpi--amber"><div class="l">Total cost</div><div class="v">${{ '%.4f'|format(u.totals.cost) }}</div><div class="d">{{ '{:,}'.format(u.totals.tokens) }} tokens</div></div>
+
+<div class="state">
+    <div class="state__item{{ ' is-live' if t.by_status.get('active', 0) }}">
+        <span class="state__n tnum">{{ t.by_status.get('active', 0) }}</span>
+        <span class="state__l">active</span>
+    </div>
+    <div class="state__item{{ ' is-wanted' if t.by_status.get('waiting', 0) }}">
+        <span class="state__n tnum">{{ t.by_status.get('waiting', 0) }}</span>
+        <span class="state__l">waiting on you</span>
+    </div>
+    <div class="state__item">
+        <span class="state__n tnum">{{ t.done }}</span>
+        <span class="state__l">done{% if t.failed %} · <span class="tone-bad">{{ t.failed }} failed</span>{% endif %}</span>
+    </div>
+    <div class="state__rest">
+        <span>{{ a.orchestrator_passes }} orchestrator passes across {{ t.total }} tasks</span>
+        <span>${{ '%.4f'|format(u.totals.cost) }} · {{ '{:,}'.format(u.totals.tokens) }} tokens</span>
+    </div>
 </div>
 
-<div class="dash-grid">
-    <div class="stack">
-        <section class="panel">
-            <div class="panel__h"><span class="led {{ 'live' if live_sessions else 'idle' }}"></span><span class="t">Agents at work</span><span class="c">{{ live_sessions|length }} running</span></div>
-            {# one copy of the live-worker row, shared with the board's watch rail #}
-            <div class="panel__b">{% with sessions = live_sessions %}{% include "workers_live.html" %}{% endwith %}</div>
-        </section>
-
-        <section class="panel">
-            <div class="panel__h"><span class="t">Queue · waiting</span><span class="c">{{ d.waiting|length }}</span></div>
-            <div class="panel__b">
-                {% for w in d.waiting %}
-                <a class="q-row" href="/tasks/{{ w.id }}"><span class="status status--waiting">waiting</span><span class="g">{{ w.goal }}</span><span class="id">{{ w.id }}</span></a>
-                {% else %}
-                <div class="empty">Nothing waiting on a human.</div>
-                {% endfor %}
-            </div>
-        </section>
+<section class="sect">
+    <h2 class="sect__h">Now
+        <span class="sect__meta">{{ live_sessions|length }} running{% if d.waiting %} · {{ d.waiting|length }} waiting{% endif %}</span>
+    </h2>
+    <div class="sect__body">
+        {% if live_sessions %}{% with sessions = live_sessions %}{% include "workers_live.html" %}{% endwith %}{% endif %}
+        {% for w in d.waiting %}
+        <a class="q-row" href="/tasks/{{ w.id }}"><span class="status status--waiting">waiting</span><span class="g">{{ w.goal }}</span><span class="id">{{ w.id }}</span></a>
+        {% endfor %}
+        {% if not live_sessions and not d.waiting %}<p class="sect__quiet">No agent is running, and nothing is waiting on you.</p>{% endif %}
     </div>
+</section>
 
-    <div class="stack">
-        <section class="panel">
-            <div class="panel__h"><span class="t">Cost by agent</span><span class="c">${{ '%.4f'|format(u.totals.cost) }}</span></div>
-            <div class="panel__b dashboard__panel-padded">
-                {% if u.by_agent %}
-                {% set amax = (u.by_agent|map(attribute='cost')|list|max) or 0.0001 %}
-                <div class="bars">
-                    {% for r in u.by_agent %}
-                    <div class="bar-row"><span class="cap">{{ r.agent or '—' }}</span><span class="bar-track"><span class="bar-fill dashboard__bar-fill" style="--w:{{ (100*r.cost/amax)|round }}%"></span></span><span class="val">${{ '%.4f'|format(r.cost) }} · {{ r.runs }}×</span></div>
-                    {% endfor %}
-                </div>
-                {% else %}<div class="empty">No usage yet.</div>{% endif %}
-            </div>
-        </section>
+<div class="cols-2 dash-past">
+    <section class="sect">
+        <h2 class="sect__h">Spend by agent <span class="sect__meta">${{ '%.4f'|format(u.totals.cost) }} in all</span></h2>
+        {% if u.by_agent %}
+        {% set amax = (u.by_agent|map(attribute='cost')|list|max) or 0.0001 %}
+        <div class="bars">
+            {% for r in u.by_agent %}
+            <div class="bar-row"><span class="cap">{{ r.agent or '—' }}</span><span class="bar-track"><span class="bar-fill dashboard__bar-fill" style="--w:{{ (100*r.cost/amax)|round }}%"></span></span><span class="val">${{ '%.4f'|format(r.cost) }} · {{ r.runs }} runs</span></div>
+            {% endfor %}
+        </div>
+        {% else %}<p class="sect__quiet">Nothing has run yet.</p>{% endif %}
 
         {% if ov.created_by_day %}
-        <section class="panel">
-            {% set dmax = (ov.created_by_day|map(attribute='n')|list|max) or 1 %}
-            <div class="panel__h"><span class="t">Throughput</span><span class="c">tasks/day · peak {{ dmax }}</span></div>
-            <div class="panel__b dashboard__panel-padded-alt">
-                <div class="spark">
-                    {% for day in ov.created_by_day %}<div class="col" title="{{ day.day }}: {{ day.n }}"><span style="--h:{{ (100*day.n/dmax)|round }}%"></span></div>{% endfor %}
-                </div>
-                {# bare bars are unreadable without a scale: label the day and the count #}
-                <div class="spark-labels">
-                    {% for day in ov.created_by_day %}<span>{{ day.n }}<br>{{ day.day[8:] }}</span>{% endfor %}
-                </div>
-            </div>
-        </section>
+        {% set dmax = (ov.created_by_day|map(attribute='n')|list|max) or 1 %}
+        <h2 class="sect__h dash-past__h">Tasks a day <span class="sect__meta">peak {{ dmax }}</span></h2>
+        <div class="spark">
+            {% for day in ov.created_by_day %}<div class="col" title="{{ day.day }}: {{ day.n }}"><span style="--h:{{ (100*day.n/dmax)|round }}%"></span></div>{% endfor %}
+        </div>
+        <div class="spark-labels">
+            {% for day in ov.created_by_day %}<span>{{ day.n }}<br>{{ day.day[8:] }}</span>{% endfor %}
+        </div>
         {% endif %}
+    </section>
 
-        <section class="panel">
-            <div class="panel__h"><span class="t">Activity</span></div>
-            <div class="feed">
-                {% for m in d.recent %}
-                {% set tone = 'external' if m.kind == 'external' else ('human' if m.author == 'human' else ('orchestrator' if m.author == 'orchestrator' else 'worker')) %}
-                <div class="ev">{{ agent_mark('forge' if m.kind == 'external' else m.author) }}<span class="txt">{{ m.text[:80] }}</span></div>
-                {% else %}
-                <div class="empty">No activity yet.</div>
-                {% endfor %}
-            </div>
-        </section>
-    </div>
+    <section class="sect">
+        <h2 class="sect__h">Lately</h2>
+        <div class="feed">
+            {% for m in d.recent %}
+            <div class="ev">{{ agent_mark('forge' if m.kind == 'external' else m.author) }}<span class="txt">{{ m.text[:80] }}</span></div>
+            {% else %}
+            <p class="sect__quiet">Nothing has happened yet.</p>
+            {% endfor %}
+        </div>
+    </section>
 </div>

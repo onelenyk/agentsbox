@@ -1075,7 +1075,7 @@ class TestWorkersLive:
 
         r = _make_client().get("/api/workers/live")
         assert r.status_code == 200
-        assert "No agents running" in r.text
+        assert "No agent is running" in r.text
 
     def test_token_never_in_response(self, db_path):
         from core import sessions, store
@@ -1245,7 +1245,7 @@ class TestWatchRail:
         heartbeat.clear()
         sessions.clear()
         html = _make_client().get("/api/board/watch").text
-        assert "No agents running." in html
+        assert "No agent is running." in html
         assert "Product owner" not in html and "What next" not in html
         assert "the daemon's loops have not started" in html
 
