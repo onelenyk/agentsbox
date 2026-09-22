@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 # The whole orchestrator vocabulary. It never grows without also growing the
 # system prompt below — there is no other way to act on a task.
-Action = Literal["spawn_worker", "spawn_task", "ask_human", "note", "done", "fail", "noop"]
+Action = Literal["spawn_worker", "spawn_task", "ask_human", "answer", "note", "done", "fail", "noop"]
 
 MAX_PASSES = 25              # per-task budget — a runaway task fails loudly
 MAX_CONSECUTIVE_REPEATS = 3  # thrash circuit breaker
@@ -44,6 +44,7 @@ class Decision(BaseModel):
     role: Optional[str] = None
     instruction: Optional[str] = None
     question: Optional[str] = None
+    text: Optional[str] = None                 # for answer (the reply to the human)
     reason: Optional[str] = None
     subtasks: Optional[list[Subtask]] = None   # for spawn_task (fan-out)
 
@@ -195,7 +196,7 @@ async def dispatch_forever() -> None:
 # session, exactly like a worker's.
 ORCHESTRATOR_TOOLS = [
     "get_context", "decide_spawn_worker", "decide_spawn_task",
-    "decide_ask_human", "decide_complete", "decide_fail", "decide_note",
+    "decide_ask_human", "decide_answer", "decide_complete", "decide_fail", "decide_note",
 ]
 
 ORCHESTRATOR_PERSONA = """You are the Sisyphus orchestrator. You coordinate work \
@@ -223,8 +224,17 @@ Read the task thread, then CALL exactly one decision tool:
   "[<status>] child ..." messages; a task whose children are all done is itself
   done (no separate reviewer needed); if any child failed, spawn a fix-child.
 - decide_ask_human(question, why) — pause and ask the human.
+- decide_answer(text, why) — answer the human in the thread and finish the task.
+  For a goal that ASKS something ("how do I…", "why does…", "what happens if…")
+  rather than asking for a change. Spawn a worker first if the answer needs
+  reading the code — instruct it to investigate and ANSWER in its result,
+  changing no files — then pass that answer on with this. A question answered
+  needs no branch, no merge request and no reviewer; shipping a document
+  instead makes the human wait for a review of something they only asked about.
 - decide_complete(why) — the task is done. ONLY after a reviewer has APPROVED on
-  the thread (or all children are done); otherwise spawn a reviewer instead.
+  the thread (or all children are done); otherwise spawn a reviewer instead. A
+  branch already reviewed by its own review task counts as approved — never
+  spawn a second reviewer beside it; wait for its verdict.
 - decide_fail(reason, why) — the task cannot be completed.
 - decide_note(text, why) — record a thought and take another turn.
 
@@ -234,6 +244,15 @@ Messages prefixed with "[external]" are forge events about the change you shippe
 
 "why" is always a short one-line reason. Call the tool as a real invocation, not
 as text; make exactly one call, then stop."""
+
+
+# Every orchestrator persona this project has shipped, by SHA-256. A stored
+# persona whose hash is in here is one of ours, untouched — so an upgrade may
+# replace it. Anything else is someone's own tuning and is left alone
+# (core.agents._refresh_orchestrator_persona).
+SHIPPED_PERSONAS = {
+    "63961b0fa071a676b50995f82578e44d48c0f16b73a5157ddea54cbc480c8fab",  # to 2026-09-22
+}
 
 
 def orchestrator_agent_name() -> str:
@@ -412,10 +431,47 @@ def _reviewer_approved(task_id: str) -> bool:
         t = (text or "").lstrip().upper()
         return t.startswith("APPROVED") and not t.startswith("NOT APPROVED")
 
-    return any(
-        m["author"] == "reviewer" and m["kind"] == "result" and _is_approved(m["text"])
-        for m in store.get_thread(task_id)
+    if any(m["author"] == "reviewer" and m["kind"] == "result" and _is_approved(m["text"])
+           for m in store.get_thread(task_id)):
+        return True
+    # An approval from the branch's own independent review counts too — it is
+    # the stricter of the two (it answers to the recorded check).
+    return _mr_review(task_id)["verdict"] == "approved"
+
+
+def _mr_review(task_id: str) -> dict:
+    """What the INDEPENDENT review of this task's branch says.
+
+    Every opened MR gets its own review task (core.reviews.ensure_review_task),
+    run by mr-reviewer against the daemon's own recorded check. The orchestrator
+    used to read none of that: it looked only for a reviewer result on its own
+    thread, so it spawned a second reviewer beside the first. Both read the same
+    branch, and the second one — having no record of the check in its prompt —
+    re-ran the whole suite. On task-20504ac8 that was four minutes of duplicated
+    work, most of it after the branch had already been merged.
+
+    Returns {verdict, running}: the verdict recorded on the MR row, and whether
+    a review task for it is still on its feet.
+    """
+    from . import mergerequests, reviews
+    mr = mergerequests.latest_for_task(task_id)
+    if not mr:
+        return {"verdict": "", "running": False}
+    verdict = (mr.get("review_status") or "").strip()
+    running = any(
+        t["status"] in ("active", "waiting")
+        and t.get("agent") == "mr-reviewer"
+        and (reviews.parse_review_marker(t.get("goal") or "") or {}).get("mr_id") == mr["id"]
+        for t in store.list_tasks()
     )
+    return {"verdict": verdict, "running": running}
+
+
+def _produced_something(task_id: str) -> bool:
+    """Did this task change anything? A reviewer certifies work; a task that
+    only investigated and answered has nothing for one to read, and sending it
+    through a review made a question take a delivery cycle to answer."""
+    return any(m["kind"] in ("commit", "mr") for m in store.get_thread(task_id))
 
 
 def _children_pending(task_id: str) -> bool:
@@ -438,6 +494,15 @@ async def _terminate(task_id: str, status: str, reason: str = "") -> None:
     clones, run logs). Best-effort cleanup — never let it block termination."""
     task = store.get_task(task_id)
     store.set_status(task_id, status, cause=reason or None)
+    # Nothing this task's workers are still doing can change the outcome now.
+    # A live case: a reviewer kept running for four minutes after its branch had
+    # been reviewed and merged, re-running the whole test suite, because the
+    # only thing that ever stopped a worker was a human pressing Stop.
+    from . import cancellation
+    stopped = cancellation.request(task_id, why=f"the task is {status}")
+    if stopped:
+        store.post_message(task_id, "system", kind="note",
+                           text=f"stopped {stopped} worker(s) still running — the task is {status}")
     if status == "failed":
         # Every failed transition passes through here — the one choke point.
         # 8 of this daemon's 9 historical failures were silent; not anymore.
@@ -545,12 +610,24 @@ async def handle_event(
                     reason="workers keep failing to report a result")
         return Decision(action="ask_human", question=question, why="repeated worker failures"), None
 
+    # Someone else is already reviewing this task's branch: wait for that
+    # verdict instead of paying for a pass that can only decide to wait — or,
+    # worse, spawning a reviewer beside it. The verdict emits its own event.
+    if event_type != "human_replied" and _mr_review(task_id)["running"] and not _worker_in_flight(task_id):
+        return Decision(action="noop", why="the branch's own review is still running"), None
+
     thread_text = store.render_thread(task_id, for_prompt=True)
     decide = decide_fn or _decide
     decision = await decide(task, thread_text)
 
     # The orchestrator must not self-certify quality — a 'done' needs a
     # reviewer's approval on the thread. Otherwise, spawn one.
+    # An answer is only a deliverable when nothing was built. A task that
+    # committed or opened a merge request goes through review like any other —
+    # answering instead would be a way around the gate.
+    if decision.action == "answer" and _produced_something(task_id):
+        decision = Decision(action="done", why=decision.why or "the work is delivered, not merely answered")
+
     if decision.action == "done" and not (_reviewer_approved(task_id) or _all_children_done(task_id)):
         decision = Decision(
             action="spawn_worker", role="reviewer",
@@ -715,6 +792,13 @@ async def _execute(task_id: str, decision: Decision):
     if decision.action == "ask_human":
         store.post_message(task_id, "orchestrator", kind="question", text=decision.question or "")
         store.set_status(task_id, "waiting", cause="the orchestrator asked you")
+        return None
+    if decision.action == "answer":
+        # The deliverable IS the answer: it goes on the thread as the task's
+        # result, and the task is done. Nothing was built, so there is nothing
+        # for a reviewer to certify.
+        store.post_message(task_id, "orchestrator", kind="result", text=decision.text or "")
+        await _terminate(task_id, "done")
         return None
     if decision.action == "done":
         await _terminate(task_id, "done")

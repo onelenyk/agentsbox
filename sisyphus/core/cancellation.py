@@ -50,15 +50,27 @@ def unregister(task_id: str, role: str = "") -> None:
     roles.pop(role, None)
     if not roles:
         _EVENTS.pop(task_id, None)
+        _REASONS.pop(task_id, None)
 
 
-def request(task_id: str) -> int:
+_REASONS: dict = {}
+
+
+def reason(task_id: str) -> str:
+    """Why this task's workers were asked to stop, for the thread line the
+    worker writes. Empty means a human pressed Stop, which is the default."""
+    return _REASONS.get(task_id, "")
+
+
+def request(task_id: str, why: str = "") -> int:
     """Ask every worker on *task_id* to stop. Returns how many were signalled.
 
     Zero means nothing was running — the caller still has to park the task, or
     a "stop" on an idle task would silently do nothing.
     """
     roles = _EVENTS.get(task_id) or {}
+    if roles and why:
+        _REASONS[task_id] = why
     for role, event in roles.items():
         logger.info("cancellation: signalling %s worker on %s", role or "?", task_id)
         event.set()
@@ -75,3 +87,4 @@ def active_tasks() -> list:
 
 def clear() -> None:
     _EVENTS.clear()
+    _REASONS.clear()

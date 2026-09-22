@@ -898,3 +898,105 @@ class TestQueuedWorkerVisibility:
 
         kinds = [m["kind"] for m in store.get_thread(task["id"])]
         assert kinds == ["worker_queued", "worker_started"]
+
+
+class TestOneReviewPerBranch:
+    """A merge request gets its own review task (core.reviews) the moment it is
+    opened. The orchestrator used to read none of that and spawned a second
+    reviewer of its own — two agents on one branch, the second re-running the
+    whole suite because its prompt carried no record of the daemon's check.
+    Live cost on task-20504ac8: four minutes, most of them after the merge."""
+
+    def _mr_task(self, approved=None):
+        from core import mergerequests
+        task = store.create_task("ship it", repo="sisyphus")
+        store.set_status(task["id"], "active")
+        mr = mergerequests.create_mr(task["id"], "sisyphus", "sisyphus/t", "main", "ship it")
+        if approved:
+            mergerequests.set_review_status(mr["id"], approved)
+        return task, mr
+
+    @pytest.mark.asyncio
+    async def test_the_branchs_own_approval_counts_as_the_approval(self, db_path):
+        task, mr = self._mr_task(approved="approved")
+        decisions = _scripted([Decision(action="done", why="the review approved it")])
+        decision, bg = await handle_event(task["id"], "external", decide_fn=decisions)
+        assert decision.action == "done"
+        assert store.get_task(task["id"])["status"] == "done"
+
+    @pytest.mark.asyncio
+    async def test_a_running_review_is_waited_for_not_doubled(self, db_path):
+        from core import reviews
+        task, mr = self._mr_task()
+        review = reviews.ensure_review_task(mr)
+        assert review is not None
+        called = []
+
+        async def never(*a, **kw):
+            called.append(a)
+            return Decision(action="done", why="should not be asked")
+
+        decision, bg = await handle_event(task["id"], "worker_finished", decide_fn=never)
+        assert decision.action == "noop" and not called      # no pass was paid for
+        assert store.get_task(task["id"])["status"] == "active"
+
+    @pytest.mark.asyncio
+    async def test_a_verdict_wakes_the_task_that_made_the_branch(self, db_path):
+        from unittest.mock import patch as _patch
+        from web import agent_mcp
+        task, mr = self._mr_task()
+        review = agent_mcp.reviews.ensure_review_task(mr)
+        session = {"task_id": review["id"], "role": "mr-reviewer"}
+        with _patch("core.orchestrator.emit") as emit_:
+            with _patch("web.agent_mcp._end_worker"):
+                agent_mcp._approve(session, summary="looks right")
+        assert (task["id"], "external") in [c.args for c in emit_.call_args_list]
+
+
+class TestAQuestionIsAnswered:
+    @pytest.mark.asyncio
+    async def test_an_answer_finishes_the_task_without_a_reviewer(self, db_path):
+        task = store.create_task("how do I add a new CLI runner?", repo="sisyphus")
+        store.set_status(task["id"], "active")
+        decisions = _scripted([Decision(action="answer", text="Add an entry to runner_profiles.py.",
+                                        why="the goal asks a question")])
+        decision, bg = await handle_event(task["id"], "worker_finished", decide_fn=decisions)
+        assert decision.action == "answer"
+        thread = store.get_thread(task["id"])
+        assert thread[-1]["kind"] == "result" and "runner_profiles" in thread[-1]["text"]
+        assert store.get_task(task["id"])["status"] == "done"
+
+    @pytest.mark.asyncio
+    async def test_work_that_shipped_is_reviewed_even_if_it_answers(self, db_path):
+        task = store.create_task("how do I add a runner? write it down", repo="sisyphus")
+        store.set_status(task["id"], "active")
+        store.post_message(task["id"], "engineer", kind="commit", text="docs: a guide (abc1234)")
+
+        async def fake_spawn(tid, role, instruction, repo_name=None, **kw):
+            store.post_message(tid, role, kind="worker_started", text="spawning")
+
+        decisions = _scripted([Decision(action="answer", text="See the new guide.", why="…")])
+        with patch("core.orchestrator.spawn_worker", side_effect=fake_spawn):
+            decision, bg = await handle_event(task["id"], "worker_finished", decide_fn=decisions)
+            if bg:
+                await bg
+        assert decision.action == "spawn_worker" and decision.role == "reviewer"
+
+
+class TestWorkNobodyNeedsIsStopped:
+    @pytest.mark.asyncio
+    async def test_a_worker_still_running_is_stopped_when_the_task_ends(self, db_path):
+        from core import cancellation, worker
+        cancellation.clear()
+        task = store.create_task("ship it", repo="sisyphus")
+        store.set_status(task["id"], "active")
+        event = cancellation.register(task["id"], "reviewer")
+
+        await orchestrator._terminate(task["id"], "done")
+
+        assert event.is_set()
+        assert "stopped 1 worker" in store.get_thread(task["id"])[-1]["text"]
+        # …and the thread says who stopped it, not "a human".
+        line = worker.worker_end_message("reviewer", type("R", (), {"status": "cancelled"})(), task["id"])
+        assert "the task is done" in line and worker.STOPPED_MARKER not in line
+        cancellation.clear()

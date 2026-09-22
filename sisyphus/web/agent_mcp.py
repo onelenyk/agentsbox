@@ -208,6 +208,19 @@ def _verdict_body(verdict: str, body: str) -> str:
     return b
 
 
+def _wake_origin(origin_task_id: str) -> None:
+    """A verdict on a branch is news for the task that made it. Nothing used to
+    carry it there: the note landed on the origin thread and no event followed,
+    so an origin task with nothing else running would have waited forever for a
+    pass. It only ever moved because a SECOND reviewer of its own happened to
+    finish and wake it — which is exactly the duplicate this removes."""
+    try:
+        from core.orchestrator import emit
+        emit(origin_task_id, "external")
+    except Exception:  # noqa: BLE001 — the verdict is recorded either way
+        logger.warning("could not wake origin task %s after a verdict", origin_task_id, exc_info=True)
+
+
 def _record_verdict_on_own_mr(task_id: str, verdict: str) -> None:
     """A task's own reviewer approves on the thread; the review-gated merge
     reads mr.review_status. Only the Review-of-MR path (the marker branch of
@@ -234,6 +247,7 @@ def _approve(session, summary="", **_):
                         text=(f"review verdict for {marker['mr_id']}: APPROVED — "
                               f"{_verdict_body('APPROVED', summary)}"),
                     )
+                    _wake_origin(marker["origin_task"])
             else:
                 _record_verdict_on_own_mr(session["task_id"], "approved")
     except Exception:
@@ -291,6 +305,12 @@ def _decide_ask_human(session, question="", why="", **_):
     return _record(session, {"action": "ask_human", "question": question, "why": why})
 
 
+def _decide_answer(session, text="", why="", **_):
+    if not text.strip():
+        return {"error": "text required — this IS the answer the human reads"}
+    return _record(session, {"action": "answer", "text": text, "why": why or "answered the question"})
+
+
 def _decide_complete(session, why="", **_):
     return _record(session, {"action": "done", "why": why})
 
@@ -320,6 +340,7 @@ def _request_changes(session, reason="", **_):
                         text=(f"review verdict for {marker['mr_id']}: CHANGES REQUESTED — "
                               f"{_verdict_body('CHANGES REQUESTED', reason)}"),
                     )
+                    _wake_origin(marker["origin_task"])
             else:
                 _record_verdict_on_own_mr(session["task_id"], "changes_requested")
     except Exception:
@@ -486,6 +507,8 @@ TOOLS = {
                           {"type": "object", "properties": {"subtasks": {"type": "array", "items": {"type": "object", "properties": {"repo": {"type": "string"}, "goal": {"type": "string"}}, "required": ["goal"]}}, "why": {"type": "string"}}, "required": ["subtasks"]}, _decide_spawn_task),
     "decide_ask_human": ("Decide: pause and ask the human a question.",
                          {"type": "object", "properties": {"question": {"type": "string"}, "why": {"type": "string"}}, "required": ["question"]}, _decide_ask_human),
+    "decide_answer": ("Decide: answer the human in the thread and finish — for a task that asks a question rather than asking for a change.",
+                      {"type": "object", "properties": {"text": {"type": "string"}, "why": {"type": "string"}}, "required": ["text"]}, _decide_answer),
     "decide_complete": ("Decide: the task is done (needs reviewer approval or all children done).",
                         {"type": "object", "properties": {"why": {"type": "string"}}}, _decide_complete),
     "decide_fail": ("Decide: the task cannot be completed.",

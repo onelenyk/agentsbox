@@ -125,4 +125,11 @@ def record_review_death(goal: str, reason: str) -> None:
             text=(f"the review of {marker['mr_id']} died — its reviewer "
                   f"ended without a verdict: {reason}"),
         )
+        # …and wake it: a death is a verdict too, and the origin task may be
+        # waiting on nothing else.
+        try:
+            from .orchestrator import emit
+            emit(marker["origin_task"], "external")
+        except Exception:  # noqa: BLE001
+            logger.exception("could not wake origin task %s after a review death", marker["origin_task"])
 
