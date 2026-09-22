@@ -156,6 +156,10 @@ def describe_schedule(ap: dict) -> str:
     if len(parts) != 5:
         return cron or "no schedule"
     minute, hour, dom, mon, dow = parts
+    if minute.isdigit() and hour.isdigit():
+        # The scheduler reads cron in UTC; a person reads a clock in their own
+        # zone. "daily 06:07" for a run that lands at 09:07 was simply wrong.
+        hour, minute, dow = _to_local(int(hour), int(minute), dow)
     if minute.startswith("*/") and hour == "*" and (dom, mon, dow) == ("*", "*", "*"):
         return f"every {minute[2:]}m"
     if hour.startswith("*/") and minute.isdigit() and (dom, mon, dow) == ("*", "*", "*"):
@@ -171,6 +175,105 @@ def describe_schedule(ap: dict) -> str:
         if dom.isdigit() and mon == "*" and dow == "*":
             return f"monthly on the {int(dom)}{'st' if dom == '1' else ('nd' if dom == '2' else ('rd' if dom == '3' else 'th'))} at {at}"
     return cron
+
+
+def _to_local(hour: int, minute: int, dow: str):
+    """A UTC hh:mm (and cron weekday) as the local clock shows it. A weekday
+    moves with the time when the shift crosses midnight."""
+    utc = datetime.now(timezone.utc).replace(hour=hour, minute=minute, second=0, microsecond=0)
+    local = utc.astimezone()
+    shift = (local.date() - utc.date()).days
+    if shift and dow.isdigit():
+        dow = str((int(dow) + shift) % 7)
+    return str(local.hour), str(local.minute), dow
+
+
+_DAY_NAMES = {"Sun": "Sunday", "Mon": "Monday", "Tue": "Tuesday", "Wed": "Wednesday",
+              "Thu": "Thursday", "Fri": "Friday", "Sat": "Saturday"}
+
+# Events a person would recognise, phrased as "when …". Anything else is read
+# off the event name.
+_EVENT_WORDS = {
+    ("jira", "issue_created"): "a Jira issue is created",
+    ("jira", "issue_updated"): "a Jira issue is updated",
+    ("github", "push"): "someone pushes to GitHub",
+    ("github", "pull_request"): "a GitHub pull request opens or changes",
+    ("github", "issues"): "a GitHub issue opens or changes",
+    ("gitlab", "merge_request"): "a GitLab merge request opens or changes",
+    ("gitlab", "push"): "someone pushes to GitLab",
+}
+
+
+def _clock(when: Optional[str], now: datetime) -> Optional[dict]:
+    """An instant as a person reads it: 'today 09:07', and how far away."""
+    if not when:
+        return None
+    try:
+        t = datetime.fromisoformat(when)
+    except ValueError:
+        return None
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    local, today = t.astimezone(), now.astimezone().date()
+    days = (local.date() - today).days
+    day = {0: "today", 1: "tomorrow", -1: "yesterday"}.get(days, local.strftime("%a %-d %b"))
+    secs = int((t - now).total_seconds())
+    ago = abs(secs)
+    span = (f"{ago // 86400}d" if ago >= 86400 else
+            f"{ago // 3600}h {ago % 3600 // 60:02d}m" if ago >= 3600 else f"{max(ago // 60, 1)}m")
+    return {"day": day, "time": local.strftime("%H:%M"),
+            "rel": f"in {span}" if secs >= 0 else f"{span} ago"}
+
+
+def explain(ap: dict, now: Optional[datetime] = None) -> dict:
+    """Everything the autopilot page says about when an automation runs, in
+    sentences: what sets it off, the raw setting behind that, and its next and
+    last run on the reader's own clock."""
+    now = now or datetime.now(timezone.utc)
+    kind = (ap.get("trigger_type") or "").strip()
+    out = {"icon": "⏰", "sentence": "", "detail": "", "next": None, "never": "",
+           "last": _clock(ap.get("last_run"), now)}
+    if kind == "webhook":
+        platform = (ap.get("webhook_platform") or "").strip().lower()
+        event = (ap.get("webhook_event") or "").strip()
+        words = _EVENT_WORDS.get((platform, event)) or (
+            f"{platform.capitalize() or 'a service'} reports “{event.replace('_', ' ')}”" if event
+            else f"{platform.capitalize() or 'a service'} sends any event")
+        out.update(icon="🔔", sentence=f"When {words}",
+                   detail=f"listens at POST /api/v1/webhooks/{platform or '…'}"
+                          + (f" for “{event}”" if event else ""),
+                   never="runs only when the event arrives")
+        return out
+    if kind != "schedule" or not is_schedule(ap):
+        out.update(icon="▶", sentence="Only when you press Run now", never="no schedule")
+        return out
+    short = describe_schedule(ap)
+    cron = (ap.get("cron") or "").strip()
+    sentence = short
+    m = re.match(r"^daily (\d\d:\d\d)$", short)
+    if m:
+        sentence = f"Every day at {m.group(1)}"
+    elif re.match(r"^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d\d:\d\d$", short):
+        day, at = short.split()
+        sentence = f"Every {_DAY_NAMES[day]} at {at}"
+    elif short.startswith(("every ", "hourly", "monthly")):
+        sentence = short[0].upper() + short[1:]
+    elif short == cron:
+        sentence = "On a custom schedule"
+    tz = datetime.now().astimezone().strftime("%Z") or "local"
+    out["sentence"] = sentence + (f" ({tz})" if re.search(r"\d\d:\d\d", sentence) else "")
+    if cron:
+        out["detail"] = f"cron “{cron}”, read in UTC"
+    else:
+        out["detail"] = f"every {int(ap.get('interval_seconds') or 0)} seconds"
+    problem = schedule_problem(ap)
+    if problem:
+        out["never"] = problem
+    elif not ap.get("enabled"):
+        out["never"] = "paused"
+    else:
+        out["next"] = _clock(ap.get("next_run"), now)
+    return out
 
 
 def is_schedule(ap: dict) -> bool:

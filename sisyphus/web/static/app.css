@@ -2139,3 +2139,15 @@ body.has-overlay { overflow: hidden; }
   .sboard__lanes { grid-template-columns: minmax(0, 1fr); overflow-x: visible; }
   .sboard__tools { margin-left: 0; width: 100%; }
 }
+
+/* ── Autopilot card: when it runs, said in a sentence ───────────────── */
+.apcard__when {
+  display: flex; flex-direction: column; gap: var(--sp-1);
+  padding: var(--sp-5) var(--sp-6); border-radius: var(--r);
+  background: var(--inset); border: 1px solid var(--border);
+}
+.apcard__sentence { font-size: var(--fs-xl); font-weight: var(--fw-semibold); color: var(--text); }
+.apcard__raw { font-family: var(--mono); font-size: var(--fs-2xs); color: var(--muted); }
+.apcard__facts { display: flex; flex-direction: column; gap: var(--sp-2); }
+.apcard__goal { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.apcard .meta-line .v { min-width: 0; }
