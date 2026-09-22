@@ -10,6 +10,11 @@
         <div class="kpi kpi--violet"><div class="l">Workers in flight</div><div class="v">{{ process.workers_in_flight }}</div><div class="d">restart kills these</div></div>
     </div>
 </div>
+<div class="panel runtime__panel-margin">
+    <div class="result__label">Runner session store</div>
+    <p class="rstore__why">Every worker run is one CLI session, recorded by the runner and never read back — continuity comes from the task thread. Old sessions are pruned daily.</p>
+    {% include "runtime_store.html" %}
+</div>
 <div class="panel">
     <div class="result__label">Configuration</div>
     <pre class="mono runtime__config">workspace_root:   {{ workspace_root }}

@@ -171,6 +171,11 @@ async def startup():
     from core import backup
     asyncio.create_task(backup.backup_forever())
 
+    # The runner's own session store grows with every worker run and is never
+    # read back (core.runner_store) — prune it so it cannot quietly eat the disk.
+    from core import runner_store
+    asyncio.create_task(runner_store.prune_forever())
+
 @router.get("/", response_class=HTMLResponse)
 async def root():
     return HTMLResponse('<meta http-equiv="refresh" content="0;url=/dashboard">')
@@ -316,8 +321,30 @@ async def runtime_page(request: Request):
             # core.worker for why this page used to advertise a 6x-wrong number
             "limits": {"worker_timeout": _worker.WORKER_TIMEOUT_SECONDS,
                        "worker_idle_timeout": _worker.WORKER_IDLE_TIMEOUT_SECONDS},
+            "runner_store": _runner_store_view(),
         },
     )
+
+def _runner_store_view() -> dict:
+    from core import runner_store
+    from core.config import get_config
+    st = runner_store.stats()
+    st["size_h"] = runner_store.human_size(st["bytes"])
+    st["keep_days"] = int(get_config("runner_store.keep_days", runner_store.DEFAULT_KEEP_DAYS) or 0)
+    return st
+
+
+@router.post("/api/runtime/prune-runner-store", response_class=HTMLResponse)
+async def runtime_prune_runner_store(request: Request):
+    """Prune the runner's session store now (the daily loop does it too)."""
+    from core import runner_store
+    res = await asyncio.to_thread(runner_store.prune,
+                                  _runner_store_view()["keep_days"] or runner_store.DEFAULT_KEEP_DAYS)
+    view = _runner_store_view()
+    view["flash"] = (f"skipped — {res['skipped']}" if res["skipped"] else
+                     f"removed {res['removed']} session(s), freed {runner_store.human_size(res['freed'])}")
+    return _tmpl().TemplateResponse(request, "runtime_store.html", {"runner_store": view})
+
 
 @router.get("/repos", response_class=HTMLResponse)
 async def repos_page(request: Request):
