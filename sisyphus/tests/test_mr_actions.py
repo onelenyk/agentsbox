@@ -1,5 +1,6 @@
 """Tests for the local MR git actions — mergeability, land, merge — on real
 temp repos, plus a route smoke test."""
+import re
 import subprocess
 
 from fastapi.testclient import TestClient
@@ -161,24 +162,30 @@ class TestTheCardPredictsTheButton:
         store.set_status(mr["task_id"], "done")
         return TestClient(app).get("/api/tasks/list").text
 
+    @staticmethod
+    def _plain_merge(html):
+        return re.search(r'hx-post="/api/mr/[^"]+/merge" hx-target', html) is not None
+
     def test_reviewed_and_checked_reads_as_ready(self, db_path, tmp_path):
         html = self._card(db_path, tmp_path, review="approved", check="passed")
-        assert "waiting for your merge" in html
+        assert "Ready to merge" in html and "review approved" in html
+        assert self._plain_merge(html)
 
     def test_an_approval_over_a_failing_check_never_reads_as_ready(self, db_path, tmp_path):
         html = self._card(db_path, tmp_path, review="approved", check="failed")
-        assert "recorded check failed" in html
-        assert "waiting for your merge" not in html
+        assert "checks failed" in html and "Your call" in html
+        assert "Ready to merge" not in html and not self._plain_merge(html)
+        assert "Merge anyway" in html and "Fix it" in html
 
     def test_a_branch_nobody_reviewed_says_so(self, db_path, tmp_path):
         html = self._card(db_path, tmp_path)
-        assert "Nobody reviewed this branch" in html
-        assert "waiting for your merge" not in html
+        assert "nobody has reviewed it" in html
+        assert "Ready to merge" not in html and not self._plain_merge(html)
 
     def test_a_review_that_died_says_so_not_silence(self, db_path, tmp_path):
         html = self._card(db_path, tmp_path, review="died", check="passed")
         assert "review died" in html.lower()
-        assert "ready to merge" not in html
+        assert "Ready to merge" not in html
 
     def test_the_badge_and_the_gate_cannot_disagree(self, db_path, tmp_path):
         """gate_state asks merge_block_reason rather than re-deriving it."""
@@ -368,7 +375,7 @@ class TestAVerdictIsShownWhetherOrNotTheBranchLanded:
             mergerequests.mark_merged(mr["id"], "abc1234")
         store.set_status(mr["task_id"], "done")
         html = TestClient(app).get("/api/tasks/list").text
-        row = html.split(mr["task_id"], 1)[1].split("</li>", 1)[0]
+        row = next(r for r in html.split('<li class="trow')[1:] if mr["task_id"] in r.split("</li>", 1)[0])
         return row.split('class="trow__why', 1)[1].split("</span>", 1)[0]
 
     def test_an_open_verdict_blocks_and_says_so(self, db_path, tmp_path):

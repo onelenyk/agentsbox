@@ -1,0 +1,13 @@
+{# What the task box says once a task exists: which one, where it went, who
+   takes it — until the next one replaces it. #}
+<div class="taskbox__receipt">
+    <span class="taskbox__tick" aria-hidden="true">✓</span>
+    <span class="tkey">{{ task.key or task.id }}</span>
+    <span>created</span>
+    {% if task.repo %}<span class="taskbox__chip">#{{ task.repo }}</span>{% endif %}
+    {% if task.agent %}<span class="taskbox__chip taskbox__chip--agent">@{{ task.agent }}</span>{% endif %}
+    {% if files %}<span class="taskbox__chip taskbox__chip--file">{{ files|length }} file{{ 's' if files|length != 1 }}</span>{% endif %}
+    <span class="taskbox__receipt-note">queued — {{ ('@' ~ task.agent ~ ' takes it') if task.agent else 'the orchestrator picks it up next' }}</span>
+    <a class="taskbox__open" href="/tasks/{{ task.id }}" hx-get="/api/tasks/{{ task.id }}/panel" hx-target="#overlay-body"
+       hx-swap="innerHTML" hx-push-url="/tasks/{{ task.id }}">open →</a>
+</div>

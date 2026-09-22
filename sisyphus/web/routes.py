@@ -4,7 +4,7 @@ import logging
 import re
 from pathlib import Path
 from typing import List, Optional
-from fastapi import APIRouter, Request, Form
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
@@ -233,9 +233,22 @@ async def notifications_poll():
             "ORDER BY updated_at", (cutoff,)).fetchall()
     finally:
         conn.close()
-    items = [{"key": f"{r['id']}:{r['status']}:{r['updated_at']}",
-              "task_id": r["id"], "status": r["status"], "goal": r["goal"]}
-             for r in rows]
+    # Say which kind of "wants you" it is (core.asks): a broken runner and a
+    # question are different reasons to come back, and a finished task whose
+    # branch now waits is not merely "completed".
+    from core import asks
+    open_mr = {m["task_id"] for m in mergerequests.list_mrs() if m["status"] == "open"}
+    items = []
+    for r in rows:
+        verb = None
+        if r["status"] == "waiting":
+            kind = asks.for_waiting(dict(r), store.get_thread(r["id"]))["kind"]
+            verb = {"stuck": "is stuck", "budget": "hit a spending cap",
+                    "question": "asks you something"}[kind]
+        elif r["status"] == "done" and r["id"] in open_mr:
+            verb = "is ready to merge"
+        items.append({"key": f"{r['id']}:{r['status']}:{r['updated_at']}",
+                      "task_id": r["id"], "status": r["status"], "goal": r["goal"], "verb": verb})
     return {"items": items}
 
 @router.get("/runtime", response_class=HTMLResponse)
@@ -1070,6 +1083,36 @@ def _enrich_now_card(t, mr, status):
     t["cost"] = f"${cost:.2f}" if cost else None
 
 
+def _runner_line(agent_name: str) -> dict:
+    """Which runner and model an agent runs on — what a stuck card names so you
+    know where to look."""
+    from core.agents import get_agent
+    from core.runners import get_default_runner, get_runner
+    agent = get_agent(agent_name) or {}
+    runner = (get_runner(agent["runner_id"]) if agent.get("runner_id") else None) or get_default_runner() or {}
+    return {"runner": runner.get("name") or "default", "runner_id": runner.get("id") or "",
+            "model": agent.get("model") or runner.get("model") or "the runner's default"}
+
+
+def _attach_asks(needs_you: list, latest_mr: dict) -> None:
+    """Give each "Wants you" task the card it needs (core.asks): a question to
+    answer, a stuck task to retry, a budget to lift, or a branch to merge."""
+    from core import asks, attachments, store
+    for t in needs_you:
+        mr = latest_mr.get(t["id"])
+        if t.get("status") == "waiting":
+            ask = asks.for_waiting(t, store.get_thread(t["id"]))
+            if ask["kind"] == "stuck":
+                ask.update(_runner_line("orchestrator"))
+        elif mr:
+            ask = asks.for_merge(mr, t.get("gate") or "", attachments.read(t["id"], "change.patch") or "")
+        else:
+            ask = {"kind": "question", "prompt": "Waiting for your reply.", "options": []}
+        t["ask"] = ask
+    order = {"stuck": 0, "question": 1, "budget": 2, "merge": 3}
+    needs_you.sort(key=lambda t: (order.get(t["ask"]["kind"], 9), t.get("updated_at") or ""))
+
+
 def board_column(task, mr):
     """Derived board column from task status + latest merge-request state."""
     status = task.get("status", "")
@@ -1195,6 +1238,7 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = "", vi
     # doing to you right now, and the three that ask something of you get
     # their own surface above everything else.
     needs_you = columns["needs-you"] + columns["to-merge"]
+    _attach_asks(needs_you, task_latest_mr)
     running, queued = [], []
     for t in columns["in-progress"]:
         # A live worker is in flight whatever the thread says; a thread with
@@ -1521,9 +1565,24 @@ def _sprint_of(when: str) -> dict:
     return {"id": f"{year}-W{week:02d}", "label": label, "span": span}
 
 
+MAX_ATTACHMENT_BYTES = 25 * 2**20
+
+
+def _size(n: int) -> str:
+    return f"{n / 2**20:.1f} MB" if n >= 2**20 else f"{max(n // 1024, 1)} KB"
+
+
+def _task_box_error(message: str):
+    from fastapi.responses import Response
+    resp = Response(status_code=422)
+    resp.headers["HX-Trigger"] = json.dumps({"formError": message})
+    return resp
+
+
 @router.post("/api/tasks")
-async def tasks_create(goal: str = Form(...), repo: str = Form(""), agent: str = Form(""),
-                       title: str = Form("")):
+async def tasks_create(request: Request, goal: str = Form(...), repo: str = Form(""),
+                       agent: str = Form(""), title: str = Form(""),
+                       files: List[UploadFile] = File(default=[])):
     from core import store
     from core.agents import get_agent
     from core.orchestrator import emit
@@ -1538,10 +1597,30 @@ async def tasks_create(goal: str = Form(...), repo: str = Form(""), agent: str =
         if not a or a["kind"] != "worker":
             return Response(status_code=422)
     # Repo optional — repo-less tasks run in a scratch dir (see web/api.py).
+    uploads = []
+    for f in files or []:
+        data = await f.read()
+        if not data:
+            continue
+        if len(data) > MAX_ATTACHMENT_BYTES:
+            return _task_box_error(f"{f.filename} is over {MAX_ATTACHMENT_BYTES // 2**20} MB")
+        uploads.append((f.filename or "file", data))
     task = store.create_task(goal, repo, agent=agent or None, title=title or None)
+    # Attached before the first pass, so the orchestrator's very first read of
+    # the thread already has them — with the path, which is what an agent opens.
+    from core import attachments
+    saved = []
+    for name, data in uploads:
+        stored = attachments.save_bytes(task["id"], name, data)
+        saved.append(stored)
+        store.post_message(task["id"], "human", kind="note", attachment=stored,
+                           text=f"attached {stored} ({_size(len(data))}) — {attachments.path(task['id'], stored)}")
     emit(task["id"], "created")
-    resp = Response(status_code=200)
-    resp.headers["HX-Trigger"] = "taskCreated"
+    resp = _tmpl().TemplateResponse(request, "taskbox_done.html", {
+        "task": store.get_task(task["id"]), "files": saved,
+    })
+    # quiet: the receipt under the box says it; a toast on top would repeat it.
+    resp.headers["HX-Trigger"] = json.dumps({"taskCreated": {"quiet": True}})
     return resp
 
 # ── Mission Planner ─────────────────────────────────────────────────────
@@ -2045,7 +2124,7 @@ async def task_detail_view(request: Request, task_id: str):
     return _tmpl().TemplateResponse(request, "task_detail_content.html", ctx)
 
 @router.post("/api/tasks/{task_id}/messages")
-async def task_reply(task_id: str, text: str = Form(...)):
+async def task_reply(task_id: str, text: str = Form(...), from_card: str = Form("")):
     from core import store
     from core.orchestrator import emit
     from fastapi.responses import Response
@@ -2065,6 +2144,16 @@ async def task_reply(task_id: str, text: str = Form(...)):
         store.post_message(task_id, "system", kind="note", text="reopened by the human with a reply")
     store.post_message(task_id, "human", kind="answer", text=text)
     emit(task_id, "human_replied")
+    if from_card:
+        # Answered from a "Wants you" card: the card becomes a receipt for what
+        # was said, and the board catches up on its next pulse — reloading it
+        # here would wipe the receipt before it could be read.
+        from html import escape
+        said = (text[:70] + "…") if len(text) > 70 else text
+        return HTMLResponse(
+            f'<div class="askc-done"><span class="askc-done__tick">✓</span>'
+            f'<span class="tkey">{escape(task.get("key") or task_id)}</span>'
+            f'<span>answered “{escape(said)}” — back to work</span></div>')
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "taskUpdated"
     return resp

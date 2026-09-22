@@ -1,62 +1,234 @@
-{# The one way to start work: say what should get done, press Enter. Planning,
-   splitting and asking back belong to the orchestrator, so nothing here asks
-   for them up front. Include with `fixed_repo` set on a project page — the
-   page already names the repo. #}
-<form class="taskbox" hx-post="/api/tasks" hx-swap="none"
-      hx-on::after-request="if (event.detail.successful) taskboxDone(this)">
-    <div class="taskbox__row">
+{# The one way to start work: say what should get done, press Enter.
+
+   Everything else is said in the same line: #repo picks the repository,
+   @agent hands it to one agent (otherwise the orchestrator decides), and a
+   pasted or dropped file is attached to the task. The chips under the text
+   show what the line currently means, so nothing is decided invisibly. A
+   project page sets `fixed_repo`: the page already is the repo.
+
+   After Enter the box clears and a receipt below it names the task it made. #}
+{% set box_repos = repo_names() %}
+<form class="taskbox" hx-post="/api/tasks" hx-encoding="multipart/form-data"
+      hx-target="find .taskbox__done" hx-swap="innerHTML"
+      hx-on::after-request="if (event.detail.elt === this && event.detail.successful) taskbox.done(this)"
+      data-repos='{{ ([] if fixed_repo else box_repos)|tojson }}' data-agents='{{ worker_agent_names()|tojson }}'
+      data-fixed-repo="{{ fixed_repo or '' }}">
+    <div class="taskbox__field">
         <textarea class="taskbox__textarea" name="goal" rows="1" required autocomplete="off"
-                  placeholder="{% if fixed_repo %}What should get done in {{ fixed_repo }}?{% else %}What should get done?{% endif %}"
-                  onkeydown="taskboxKey(event, this.form)" oninput="taskboxGrow(this)"></textarea>
-        {% if fixed_repo %}
-        <input type="hidden" name="repo" value="{{ fixed_repo }}">
-        {% else %}
-        <select name="repo" class="taskbox__repo" onchange="taskboxRemember(this)" title="Repository — none runs read-only in a scratch dir">
-            <option value="">no repo</option>
-            {% set names = repo_names() %}
-            {% for r in names %}
-            <option value="{{ r }}"{% if names|length == 1 %} selected{% endif %}>{{ r }}</option>
-            {% endfor %}
-        </select>
-        {% endif %}
+                  placeholder="{% if fixed_repo %}What should get done in {{ fixed_repo }}? @agent picks who{% else %}What should get done? #repo picks where, @agent who{% endif %}"
+                  aria-label="New task"></textarea>
+        <div class="taskbox__pop" role="listbox" hidden></div>
+    </div>
+    <div class="taskbox__files" hidden></div>
+    <div class="taskbox__bar">
+        <span class="taskbox__chips">
+            <button type="button" class="taskbox__chip" data-chip="repo"{% if fixed_repo %} disabled{% endif %}
+                    title="{{ 'This page is ' ~ fixed_repo if fixed_repo else 'Where it runs — type #name, or click to pick' }}">
+                {%- set first_repo = fixed_repo or (box_repos[0] if box_repos|length == 1 else '') -%}
+                {{ '#' ~ first_repo if first_repo else 'no repo' }}</button>
+            <button type="button" class="taskbox__chip taskbox__chip--agent" data-chip="agent"
+                    title="Who does it — type @name, or click to pick">auto — the orchestrator picks</button>
+        </span>
+        <button type="button" class="taskbox__attach" aria-label="Attach a file" title="Attach a file (or paste / drop it)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.5l-8.5 8.5a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8l8.3-8.3"></path></svg>
+        </button>
+        <span class="taskbox__hint"><kbd>↵</kbd> start · <kbd>⇧↵</kbd> new line · paste a file to attach</span>
         <button type="submit" class="btn btn--primary">Start ↵</button>
     </div>
-    <div class="taskbox__foot">
-        <span class="taskbox__hint"><kbd>↵</kbd> starts it · <kbd>⇧↵</kbd> new line · the orchestrator picks who works on it</span>
-    <details class="taskbox__more">
-        <summary>More</summary>
-        <label>Handled by
-            <select name="agent">
-                <option value="" selected>Auto — orchestrator dispatches</option>
-                {% for a in worker_agent_names() %}
-                <option value="{{ a }}">{{ a }} (solo)</option>
-                {% endfor %}
-            </select>
-        </label>
-    </details>
-    </div>
+    <input type="hidden" name="repo" value="{{ fixed_repo or '' }}">
+    <input type="hidden" name="agent" value="">
+    <input type="file" name="files" multiple hidden>
+    <div class="taskbox__done" aria-live="polite"></div>
 </form>
 <script>
-    function taskboxKey(e, form) {
-        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-            e.preventDefault();
-            if (e.target.value.trim() && !form.classList.contains('htmx-request')) htmx.trigger(form, 'submit');
-        }
+window.taskbox = window.taskbox || (function () {
+    var NONE = "no repo";
+    function state(form) {
+        if (!form._tb) form._tb = { files: [], pick: null };
+        return form._tb;
     }
-    function taskboxGrow(ta) {
-        ta.style.setProperty('--ta-height', 'auto');   // collapse first, or it can never shrink
-        ta.style.setProperty('--ta-height', Math.min(ta.scrollHeight, 240) + 'px');
+    function lists(form) {
+        return { repos: JSON.parse(form.dataset.repos || "[]"), agents: JSON.parse(form.dataset.agents || "[]") };
     }
-    function taskboxRemember(sel) { try { localStorage.setItem('taskboxRepo', sel.value); } catch (e) { } }
-    function taskboxDone(form) {
-        const ta = form.querySelector('textarea');
-        ta.value = ''; taskboxGrow(ta); ta.focus();
-        const more = form.querySelector('details'); if (more) { more.open = false; form.querySelector('[name=agent]').value = ''; }
+    function defaultRepo(form) {
+        if (form.dataset.fixedRepo) return form.dataset.fixedRepo;
+        var repos = lists(form).repos, v = null;
+        try { v = localStorage.getItem("taskboxRepo"); } catch (e) {}
+        if (v !== null && (v === "" || repos.indexOf(v) !== -1)) return v;
+        return repos.length === 1 ? repos[0] : "";
     }
-    document.querySelectorAll('.taskbox__repo').forEach(function (sel) {
-        try {
-            const v = localStorage.getItem('taskboxRepo');
-            if (v !== null && [...sel.options].some(o => o.value === v)) sel.value = v;
-        } catch (e) { }
-    });
+    // What the line means right now: the last #repo / @agent it names that
+    // actually exists, else the defaults.
+    function tokens(form) {
+        var text = form.goal.value, l = lists(form), repo = null, agent = "";
+        text.replace(/(^|\s)#([\w.-]+)/g, function (_, s, n) {
+            var hit = l.repos.find(function (r) { return r.toLowerCase() === n.toLowerCase(); });
+            if (hit) repo = hit;
+        });
+        text.replace(/(^|\s)@([\w.-]+)/g, function (_, s, n) {
+            var hit = l.agents.find(function (a) { return a.toLowerCase() === n.toLowerCase(); });
+            if (hit) agent = hit;
+        });
+        return { repo: repo !== null ? repo : (state(form).pick !== null ? state(form).pick : defaultRepo(form)), agent: agent };
+    }
+    function sync(form) {
+        var t = tokens(form);
+        form.repo.value = t.repo;
+        form.agent.value = t.agent;
+        var rc = form.querySelector('[data-chip="repo"]'), ac = form.querySelector('[data-chip="agent"]');
+        rc.textContent = t.repo ? "#" + t.repo : NONE;
+        rc.classList.toggle("is-empty", !t.repo);
+        ac.textContent = t.agent ? "@" + t.agent : "auto — the orchestrator picks";
+        ac.classList.toggle("is-empty", !t.agent);
+    }
+    function grow(ta) {
+        ta.style.setProperty("--ta-height", "auto");   // collapse first, or it can never shrink
+        ta.style.setProperty("--ta-height", Math.min(ta.scrollHeight, 240) + "px");
+    }
+
+    // ── suggestions for #repo and @agent ────────────────────────────────
+    function openPop(form, items, onPick) {
+        var pop = form.querySelector(".taskbox__pop");
+        if (!items.length) { closePop(form); return; }
+        pop.innerHTML = "";
+        items.forEach(function (it, i) {
+            var b = document.createElement("button");
+            b.type = "button";
+            b.className = "taskbox__opt" + (i === 0 ? " is-on" : "");
+            b.textContent = it.label;
+            b.setAttribute("role", "option");
+            b.onmousedown = function (e) { e.preventDefault(); onPick(it); closePop(form); };
+            pop.appendChild(b);
+        });
+        pop._items = items; pop._pick = onPick; pop._i = 0;
+        pop.hidden = false;
+    }
+    function closePop(form) { var pop = form.querySelector(".taskbox__pop"); pop.hidden = true; pop._items = null; }
+    function movePop(form, d) {
+        var pop = form.querySelector(".taskbox__pop"), opts = pop.querySelectorAll(".taskbox__opt");
+        pop._i = (pop._i + d + opts.length) % opts.length;
+        opts.forEach(function (o, i) { o.classList.toggle("is-on", i === pop._i); });
+    }
+    function choosePop(form) {
+        var pop = form.querySelector(".taskbox__pop");
+        pop._pick(pop._items[pop._i]);
+        closePop(form);
+    }
+    function suggest(form) {
+        var ta = form.goal, before = ta.value.slice(0, ta.selectionStart);
+        var m = before.match(/(^|\s)([#@])([\w.-]*)$/);
+        if (!m) { closePop(form); return; }
+        var l = lists(form), sigil = m[2], part = m[3].toLowerCase();
+        var names = sigil === "#" ? l.repos : l.agents;
+        var items = names.filter(function (n) { return n.toLowerCase().indexOf(part) === 0; })
+                         .map(function (n) { return { label: sigil + n, name: n }; });
+        openPop(form, items, function (it) {
+            var start = ta.selectionStart - m[3].length - 1;
+            ta.value = ta.value.slice(0, start) + sigil + it.name + " " + ta.value.slice(ta.selectionStart);
+            var at = start + it.name.length + 2;
+            ta.setSelectionRange(at, at);
+            ta.focus();
+            sync(form);
+        });
+    }
+
+    // ── attachments ─────────────────────────────────────────────────────
+    function addFiles(form, list) {
+        var st = state(form);
+        Array.prototype.forEach.call(list, function (f) { st.files.push(f); });
+        paintFiles(form);
+    }
+    function paintFiles(form) {
+        var st = state(form), box = form.querySelector(".taskbox__files"), dt = new DataTransfer();
+        st.files.forEach(function (f) { dt.items.add(f); });
+        form.files.files = dt.files;
+        box.innerHTML = "";
+        box.hidden = !st.files.length;
+        st.files.forEach(function (f, i) {
+            var el = document.createElement("span");
+            el.className = "taskbox__file";
+            if (f.type.indexOf("image/") === 0) {
+                var img = document.createElement("img");
+                img.src = URL.createObjectURL(f);
+                img.alt = "";
+                el.appendChild(img);
+            }
+            var name = document.createElement("span");
+            name.className = "taskbox__file-name";
+            name.textContent = f.name + " · " + (f.size >= 1048576 ? (f.size / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(f.size / 1024)) + " KB");
+            el.appendChild(name);
+            var x = document.createElement("button");
+            x.type = "button";
+            x.className = "taskbox__file-x";
+            x.setAttribute("aria-label", "Remove " + f.name);
+            x.textContent = "✕";
+            x.onclick = function () { st.files.splice(i, 1); paintFiles(form); };
+            el.appendChild(x);
+            box.appendChild(el);
+        });
+    }
+
+    function wire(form) {
+        if (form._wired) return;
+        form._wired = true;
+        var ta = form.goal;
+        ta.addEventListener("input", function () { grow(ta); sync(form); suggest(form); });
+        ta.addEventListener("click", function () { suggest(form); });
+        ta.addEventListener("blur", function () { setTimeout(function () { closePop(form); }, 120); });
+        ta.addEventListener("keydown", function (e) {
+            var pop = form.querySelector(".taskbox__pop");
+            if (!pop.hidden) {
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); movePop(form, e.key === "ArrowDown" ? 1 : -1); return; }
+                if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); choosePop(form); return; }
+                if (e.key === "Escape") { e.preventDefault(); closePop(form); return; }
+            }
+            if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+                e.preventDefault();
+                if (ta.value.trim() && !form.classList.contains("htmx-request")) htmx.trigger(form, "submit");
+            }
+        });
+        ta.addEventListener("paste", function (e) {
+            var files = e.clipboardData && e.clipboardData.files;
+            if (files && files.length) { e.preventDefault(); addFiles(form, files); }
+        });
+        form.addEventListener("dragover", function (e) { e.preventDefault(); form.classList.add("is-drop"); });
+        form.addEventListener("dragleave", function () { form.classList.remove("is-drop"); });
+        form.addEventListener("drop", function (e) {
+            e.preventDefault(); form.classList.remove("is-drop");
+            if (e.dataTransfer.files.length) addFiles(form, e.dataTransfer.files);
+        });
+        form.querySelector(".taskbox__attach").onclick = function () { form.files.click(); };
+        form.files.addEventListener("change", function () {
+            // the input is also our transport; take its picks into the list
+            var picked = Array.prototype.slice.call(form.files.files).filter(function (f) { return state(form).files.indexOf(f) === -1; });
+            addFiles(form, picked);
+        });
+        form.querySelector('[data-chip="repo"]').onclick = function () {
+            var l = lists(form);
+            openPop(form, [{ label: NONE, name: "" }].concat(l.repos.map(function (r) { return { label: "#" + r, name: r }; })), function (it) {
+                state(form).pick = it.name;
+                try { localStorage.setItem("taskboxRepo", it.name); } catch (e) {}
+                sync(form);
+            });
+        };
+        form.querySelector('[data-chip="agent"]').onclick = function () {
+            var l = lists(form);
+            openPop(form, l.agents.map(function (a) { return { label: "@" + a, name: a }; }), function (it) {
+                ta.value = (ta.value.replace(/\s+$/, "") + " @" + it.name + " ").replace(/^\s+/, "");
+                ta.focus(); grow(ta); sync(form);
+            });
+        };
+        sync(form);
+    }
+    function done(form) {
+        form.goal.value = "";
+        grow(form.goal);
+        state(form).files = [];
+        paintFiles(form);
+        sync(form);
+        form.goal.focus();
+    }
+    return { wire: wire, done: done };
+})();
+document.querySelectorAll(".taskbox").forEach(taskbox.wire);
 </script>

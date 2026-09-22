@@ -21,7 +21,7 @@ TIERS = {
         "test_budget", "test_concurrency", "test_config", "test_design_system",
         "test_env", "test_forge_poll",
         "test_heartbeat", "test_launcher_cancel", "test_ledger", "test_logging_setup",
-        "test_markdown", "test_mergerequests", "test_migrations", "test_notifications", "test_pulse", "test_timeline", "test_runner_catalog",
+        "test_markdown", "test_mergerequests", "test_migrations", "test_notifications", "test_pulse", "test_timeline", "test_runner_catalog", "test_asks",
         "test_notify",
         "test_orchestrator", "test_preflight", "test_repo_context",
         "test_repos", "test_reviews",

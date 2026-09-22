@@ -123,3 +123,99 @@
     </div>
 </div>
 {%- endmacro %}
+
+
+{# ── "Wants you": one card per thing that waits on the person ──────────────
+   core.asks decides the kind; each kind carries its own actions, so the
+   answer, the retry or the merge happens on the card. Answers post with
+   from_card=1, and the reply route swaps the card for a one-line receipt. #}
+{% macro ask_icon(kind) -%}
+{%- if kind == 'question' -%}
+<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg>
+{%- elif kind in ('stuck', 'budget') -%}
+<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
+{%- else -%}
+<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M6 21V9a9 9 0 0 0 9 9"></path></svg>
+{%- endif -%}
+{%- endmacro %}
+
+{% macro ask_reply_attrs(task_id) -%}
+hx-post="/api/tasks/{{ task_id }}/messages" hx-target="closest .askc" hx-swap="outerHTML"
+{%- endmacro %}
+
+{% macro ask_card(t, title) -%}
+{%- set a = t.ask -%}
+{%- set tone = {'question': 'question', 'stuck': 'stuck', 'budget': 'budget'}.get(a.kind, 'ready' if a.ready else 'call') -%}
+{%- set label = {'question': 'Question', 'stuck': 'Stuck', 'budget': 'Spending cap'}.get(a.kind, 'Ready to merge' if a.ready else 'Your call') -%}
+<article class="askc askc--{{ tone }}">
+    <header class="askc__kind">
+        {{ ask_icon(a.kind) }}<span>{{ label }}</span>
+        <span class="askc__age reltime" data-created="{{ t.updated_at or t.created_at }}"></span>
+    </header>
+    <a class="askc__title" href="/tasks/{{ t.id }}" draggable="false"
+       hx-get="/api/tasks/{{ t.id }}/panel" hx-target="#overlay-body" hx-swap="innerHTML" hx-push-url="/tasks/{{ t.id }}">
+        <span class="tkey">{{ t.key }}</span><span class="askc__name">{{ title }}</span>
+    </a>
+
+    {%- if a.kind == 'question' %}
+    <p class="askc__text" title="{{ a.text }}">{{ a.prompt }}</p>
+    {% if a.options %}
+    <div class="askc__opts">
+        {% for n, opt in a.options %}
+        <button type="button" class="askc__opt" {{ ask_reply_attrs(t.id) }}
+                hx-vals='{{ {"text": n ~ ". " ~ opt, "from_card": "1"}|tojson }}'><b>{{ n }}</b>{{ opt }}</button>
+        {% endfor %}
+    </div>
+    {% endif %}
+    <form class="askc__reply" {{ ask_reply_attrs(t.id) }}>
+        <input type="hidden" name="from_card" value="1">
+        <input type="text" name="text" required autocomplete="off"
+               placeholder="{{ 'or answer in your own words…' if a.options else 'Answer…' }}">
+        <button type="submit" class="btn btn--ghost btn--sm" aria-label="Send">↵</button>
+    </form>
+    {% if a.asker %}<footer class="askc__foot">asked by {{ a.asker }}</footer>{% endif %}
+
+    {%- elif a.kind == 'stuck' %}
+    <p class="askc__text">{{ a.headline }}{% if a.attempts %} · {{ a.attempts }} attempts{% endif %}</p>
+    <div class="askc__facts">
+        <div class="meta-line"><span class="k">runner</span><span class="v">{{ a.runner }}</span></div>
+        <div class="meta-line"><span class="k">model</span><span class="v">{{ a.model }}</span></div>
+        {% if a.error %}<div class="meta-line"><span class="k">error</span><span class="v tone-bad">{{ a.error }}</span></div>{% endif %}
+    </div>
+    <div class="askc__acts">
+        <button type="button" class="btn btn--primary btn--sm" {{ ask_reply_attrs(t.id) }}
+                hx-vals='{"text": "Retry — the runtime was checked.", "from_card": "1"}'>Retry</button>
+        <a class="btn btn--ghost btn--sm" href="/runners">Runners</a>
+        <button type="button" class="btn btn--ghost btn--sm askc__end" hx-get="/api/tasks/{{ t.id }}/logs" hx-target="#modal-container" hx-swap="innerHTML">Log</button>
+    </div>
+
+    {%- elif a.kind == 'budget' %}
+    <p class="askc__text">{{ a.headline }}</p>
+    <div class="askc__acts">
+        <button type="button" class="btn btn--primary btn--sm" {{ ask_reply_attrs(t.id) }}
+                hx-vals='{"text": "Continue.", "from_card": "1"}'>Continue</button>
+        <span class="askc__note">or leave it parked</span>
+    </div>
+
+    {%- else %}
+    <ul class="askc__facts">
+        {% for tone_, text in a.facts %}<li class="askc__fact tone-{{ tone_ }}">{{ '✓' if tone_ == 'good' else ('✗' if tone_ == 'bad' else '·') }} {{ text }}</li>{% endfor %}
+        {% if a.broke %}<li class="askc__fact askc__fact--sub mono">{{ a.broke }}</li>{% endif %}
+        <li class="askc__fact askc__fact--sub mono">{% if a.diff.files %}+{{ a.diff.adds }} −{{ a.diff.dels }} · {{ a.diff.files }} file{{ 's' if a.diff.files != 1 }} · {% endif %}{{ a.branch }}</li>
+    </ul>
+    <div class="askc__acts">
+        {% if a.ready %}
+        <button type="button" class="btn btn--good btn--sm" hx-post="/api/mr/{{ a.mr_id }}/merge" hx-target="#modal-container" hx-swap="innerHTML">Merge</button>
+        {% else %}
+        {% if a.fix %}<button type="button" class="btn btn--primary btn--sm" {{ ask_reply_attrs(t.id) }}
+                hx-vals='{{ {"text": a.fix, "from_card": "1"}|tojson }}'>Fix it</button>{% endif %}
+        <button type="button" class="btn btn--ghost btn--sm" hx-post="/api/mr/{{ a.mr_id }}/merge" hx-vals='{"force": "1"}'
+                hx-confirm="Merge past the gate? The thread will record that you overrode it." hx-target="#modal-container" hx-swap="innerHTML">Merge anyway</button>
+        {% endif %}
+        <button type="button" class="btn btn--ghost btn--sm" hx-get="/api/mr/{{ a.mr_id }}/view" hx-target="#modal-container" hx-swap="innerHTML">Diff</button>
+        <button type="button" class="btn btn--ghost btn--sm askc__end" hx-post="/api/mr/{{ a.mr_id }}/close"
+                hx-confirm="Close this merge request without merging?" hx-target="#modal-container" hx-swap="innerHTML">Close</button>
+    </div>
+    {%- endif %}
+</article>
+{%- endmacro %}
