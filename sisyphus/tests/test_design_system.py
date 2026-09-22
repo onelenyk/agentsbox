@@ -16,7 +16,10 @@ TEMPLATES = {p.name: p.read_text() for p in (WEB / "templates").glob("*.html")}
 # Token blocks: the base `:root { … }` and every `:root[data-theme="…"] { … }`.
 _BLOCK = re.compile(r"^:root(\[data-theme=\"[a-z-]+\"\])? \{\n(.*?)\n\}\n", re.S | re.M)
 TOKEN_BLOCKS = [(m.group(1) or "", m.group(2)) for m in _BLOCK.finditer(CSS)]
-RULES = _BLOCK.sub("", CSS)
+# @font-face declares the typefaces the tokens then point at, so it is the one
+# place that names a family and a weight outright.
+_FACE = re.compile(r"@font-face\s*\{[^}]*\}", re.S)
+RULES = _FACE.sub("", _BLOCK.sub("", CSS))
 DEFINED = set(re.findall(r"(--[a-z0-9-]+)\s*:", CSS))
 
 COLOUR = re.compile(r"#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)")

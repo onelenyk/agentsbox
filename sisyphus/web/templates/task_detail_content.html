@@ -61,7 +61,7 @@
   {%- endif -%}
   {%- endmacro %}
 
-  {% set icons = {'orchestrator':'🧭','engineer':'🔧','reviewer':'🔍','mr-reviewer':'🔍','explorer':'🔭','planner':'🗺️','human':'🧑','worker':'⚙️'} %}
+  {% from "_ui.html" import agent_mark %}
   <div class="task-main">
     {% if parent %}
     <div class="breadcrumb">↑ Part of <a href="/tasks/{{ parent.id }}">{{ task_display_title(parent) }}</a></div>
@@ -150,7 +150,7 @@
         {% if st.type == 'run' %}
         <li class="step step--{{ 'live' if st.how == 'running' else ('ok' if st.how == 'ok' else 'bad') }}">
             <div class="step__head">
-                <span class="step__who"><span class="step__icon">{{ icons.get(st.role, '⚙️') }}</span>{{ st.role }}</span>
+                <span class="step__who">{{ agent_mark(st.role) }}{{ st.role }}</span>
                 <span class="step__what">
                     {%- if st.how == 'running' %}working{% if st.live %} · last output {{ st.live.quiet_s ~ 's' if st.live.quiet_s is not none and st.live.quiet_s < 60 else ((st.live.quiet_s // 60)|int ~ 'm' if st.live.quiet_s is not none else 'none yet') }} ago{% endif %}
                     {%- elif st.how == 'ok' %}{{ 'committed' if st.commits else 'finished' }}
@@ -172,7 +172,7 @@
         {% elif st.type == 'dead-runs' %}
         <li class="step step--bad">
             <div class="step__head">
-                <span class="step__who"><span class="step__icon">{{ icons.get(st.role, '⚙️') }}</span>{{ st.role }}</span>
+                <span class="step__who">{{ agent_mark(st.role) }}{{ st.role }}</span>
                 <span class="step__what">{{ st.runs|length }} attempt{{ '' if st.runs|length == 1 else 's' }} ended without a result</span>
                 <span class="step__when">{{ (st.started or st.ended)|when }}</span>
             </div>
@@ -185,7 +185,7 @@
         </li>
         {% elif st.type == 'question' %}
         <li class="step step--ask">
-            <div class="step__head"><span class="step__who"><span class="step__icon">{{ icons.get(st.role, '⚙️') }}</span>{{ st.role }}</span><span class="step__what">asked you</span><span class="step__when">{{ st.at|when }}</span></div>
+            <div class="step__head"><span class="step__who">{{ agent_mark(st.role) }}{{ st.role }}</span><span class="step__what">asked you</span><span class="step__when">{{ st.at|when }}</span></div>
             <div class="step__quote step__quote--ask">{{ st.text }}</div>
         </li>
         {% elif st.type == 'you' %}
@@ -206,12 +206,12 @@
         </li>
         {% elif st.type == 'verdict' %}
         <li class="step step--{{ 'ok' if st.approved else 'bad' }}">
-            <div class="step__head"><span class="step__who">🔍 review</span><span class="step__what">{{ 'approved' if st.approved else 'changes requested' }} · {{ st.mr }}</span><span class="step__when">{{ st.at|when }}</span></div>
+            <div class="step__head"><span class="step__who">{{ agent_mark('reviewer') }} review</span><span class="step__what">{{ 'approved' if st.approved else 'changes requested' }} · {{ st.mr }}</span><span class="step__when">{{ st.at|when }}</span></div>
             <details class="step__more"><summary>read the verdict</summary><div class="step__text">{{ st.text|truncate(1200) }}</div></details>
         </li>
         {% elif st.type == 'decision' %}
         <li class="step step--{{ 'ok' if st.done else 'bad' }}">
-            <div class="step__head"><span class="step__who">🧭 orchestrator</span><span class="step__what">{{ 'closed it' if st.done else 'gave up' }} — {{ st.text|truncate(110) }}</span><span class="step__when">{{ st.at|when }}</span></div>
+            <div class="step__head"><span class="step__who">{{ agent_mark('orchestrator') }} orchestrator</span><span class="step__what">{{ 'closed it' if st.done else 'gave up' }} — {{ st.text|truncate(110) }}</span><span class="step__when">{{ st.at|when }}</span></div>
         </li>
         {% elif st.type == 'merge' %}
         <li class="step step--ship">
@@ -289,9 +289,8 @@
     {% endif %}
     {% endmacro %}
 
-    {% macro dialogue_msg(m, icons, task) %}
+    {% macro dialogue_msg(m, agent_mark, task) %}
     {% set tone = 'external' if m.kind == 'external' else ('human' if m.author == 'human' else ('orchestrator' if m.author == 'orchestrator' else 'worker')) %}
-    {% set icon = '🔔' if m.kind == 'external' else icons.get(m.author, '⚙️') %}
     {% if m.kind == 'commit' %}
     <div class="msg msg--commit"><span class="msg__ic">✓</span>{{ m.text }}</div>
     {% elif m.kind == 'result' %}
@@ -299,7 +298,7 @@
        collapses to a one-line "shown above" hint, expandable to the raw text. #}
     <details class="msg msg--{{ tone }} msg--result" hx-preserve="true" id="result-{{ m.seq }}">
         <summary>
-            <span class="av av--{{ tone }}" title="{{ m.author }}">{{ icon }}</span>
+            {{ agent_mark('forge' if m.kind == 'external' else m.author) }}
             <span class="msg__who">{{ m.author }}</span>
             <span class="msg__kind">result</span>
             {% if m.text.startswith('APPROVED') %}
@@ -318,7 +317,7 @@
        so it says "You", sits on its own surface and keeps the accent. #}
     <div class="msg msg--{{ tone }}{{ ' msg--you' if m.author == 'human' }}">
         <div class="msg__head">
-            <span class="av av--{{ tone }}" title="{{ m.author }}">{{ icon }}</span>
+            {{ agent_mark('forge' if m.kind == 'external' else m.author) }}
             <span class="msg__who">{{ 'You' if m.author == 'human' else m.author }}</span>
             {% if m.kind not in ('note', 'answer') %}<span class="msg__kind">{{ m.kind }}</span>{% endif %}
             {% if m.kind == 'question' %}<span class="badge badge--warn">needs an answer</span>{% endif %}
@@ -339,7 +338,7 @@
         {% set ns.run = ns.run + [m] %}
         {% else %}
         {% if ns.run %}{{ machinery_run(ns.run) }}{% set ns.run = [] %}{% endif %}
-        {{ dialogue_msg(m, icons, task) }}
+        {{ dialogue_msg(m, agent_mark, task) }}
         {% endif %}
         {% else %}
         <div class="empty">No messages yet.</div>
@@ -357,7 +356,7 @@
         <div class="prop"><span class="k">Repo</span><span class="v">{{ task.repo or '—' }}</span></div>
         <div class="prop"><span class="k">Asked by</span><span class="v"{% if asked_by.about %} title="{{ asked_by.about }}"{% endif %}>{{ ('↻ ' ~ asked_by.who) if asked_by.auto else asked_by.who }}</span></div>
         <div class="prop"><span class="k">Handled by</span><span class="v">{{ task.agent ~ ' (solo)' if task.agent else 'orchestrator' }}</span></div>
-        {% if trail %}<div class="prop"><span class="k">Worked</span><span class="v trail">{% for a in trail %}<span class="trail__who" title="{{ a }}">{{ icons.get(a, '•') }}</span>{% endfor %}</span></div>{% endif %}
+        {% if trail %}<div class="prop"><span class="k">Worked</span><span class="v trail">{% for a in trail %}{{ agent_mark(a) }}{% endfor %}</span></div>{% endif %}
         {% if parent %}<div class="prop"><span class="k">Parent</span><a class="v" href="/tasks/{{ parent.id }}">{{ parent.key or parent.id }}</a></div>{% endif %}
     </div>
 

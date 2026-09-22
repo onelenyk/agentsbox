@@ -27,7 +27,7 @@
             {%- endif -%}
         </span>
         <span class="trail">
-            {%- for agent in row.trail %}<span class="trail__who{{ ' is-now' if agent == row.live }}" title="{{ agent }}{{ ' — working now' if agent == row.live }}">{{ icons.get(agent, '•') }}</span>{% endfor -%}
+            {%- for agent in row.trail %}{{ agent_mark(agent, agent == row.live) }}{% endfor -%}
         </span>
         <span class="trow__why{{ ' why--' ~ row.why.tone if row.why }}"{% if row.why and row.why.title %} title="{{ row.why.title }}"{% endif %}>
             {%- if row.why %}{% if row.why.tone == 'live' %}<span class="live-dot"></span> {% endif %}{{ row.why.text }}{% endif -%}
@@ -38,7 +38,7 @@
 </li>
 {%- endmacro %}
 
-{% from "_ui.html" import agent_icons as icons, ask_card %}
+{% from "_ui.html" import agent_mark, ask_card %}
 
 <div class="board">
 
@@ -74,7 +74,7 @@
                     <span class="run__title">{{ task_display_title(t) }}</span>
                     {% if t.child_total %}<span class="chip">⑂ {{ t.child_done }}/{{ t.child_total }}</span>{% endif %}
                     {% if t.live_role %}
-                    <span class="run__who"><span class="live-dot"></span>{{ icons.get(t.live_role, '⚙️') }} {{ t.live_role }} · {{ t.live_mins }}m</span>
+                    <span class="run__who"><span class="live-dot"></span>{{ agent_mark(t.live_role) }} {{ t.live_role }} · {{ t.live_mins }}m</span>
                     {% else %}
                     <span class="run__who run__who--idle">between steps</span>
                     {% endif %}
@@ -88,7 +88,7 @@
                     <span class="stagebar__label">{{ t.stage_now }}</span>
                 </div>
                 {% endif %}
-                {% if t.last_event %}<p class="run__event">{{ icons.get(t.last_author, '⚡') }} {{ t.last_event }}</p>{% endif %}
+                {% if t.last_event %}<p class="run__event">{{ agent_mark(t.last_author) }} {{ t.last_event }}</p>{% endif %}
             </a>
             {% endfor %}
             {% for t in queued %}

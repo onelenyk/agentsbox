@@ -1,9 +1,10 @@
+{% from "_ui.html" import agent_marks %}
 {% if agents %}
 <div class="card-grid">
     {% for a in agents %}
     <div class="ecard">
         <div class="ecard__head">
-            <div class="ecard__glyph {{ 'violet' if a.kind == 'orchestrator' else '' }}">{{ '◎' if a.kind == 'orchestrator' else '✦' }}</div>
+            <div class="ecard__glyph {{ 'violet' if a.kind == 'orchestrator' else '' }}">{{ agent_marks.get(a.name, [(a.name or '?')[:2]|upper])[0] }}</div>
             <div>
                 <div class="ecard__name">{{ a.name }}</div>
                 <div class="ecard__sub">{{ 'built-in' if a.is_builtin else 'custom' }}</div>

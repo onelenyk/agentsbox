@@ -46,13 +46,13 @@
             {% endif %}
             {% for m in messages %}
             <div class="cp-msg cp-msg--{{ m.role }}">
-                <div class="cp-av">{{ '🧑' if m.role == 'user' else '🛰' }}</div>
+                <div class="cp-av">{{ 'YOU' if m.role == 'user' else 'PL' }}</div>
                 <div class="cp-bubble">{{ m.text }}</div>
             </div>
             {% endfor %}
             {% if generating %}
             <div class="cp-msg cp-msg--assistant">
-                <div class="cp-av">🛰</div>
+                <div class="cp-av">PL</div>
                 <div class="cp-bubble cp-typing"><span></span><span></span><span></span></div>
             </div>
             {% endif %}
@@ -101,7 +101,7 @@
             <div class="sk-block"></div>
             <div class="sk-line sk-line--70"></div>
             <div class="sk-line sk-line--55"></div>
-            <div class="muted cp-skeleton__note">🛰 Planning against {{ plan.repo or 'the project' }}… reading its files &amp; conventions.</div>
+            <div class="muted cp-skeleton__note">Planning against {{ plan.repo or 'the project' }}… reading its files &amp; conventions.</div>
         </div>
         {% else %}
         <div class="cp-canvas-empty">

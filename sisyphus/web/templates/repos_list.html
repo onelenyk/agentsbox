@@ -3,7 +3,7 @@
     {% for r in repos %}
     <div class="ecard">
         <div class="ecard__head">
-            <div class="ecard__glyph green">⎇</div>
+            <div class="ecard__glyph green">{{ r.name[:2]|upper }}</div>
             <div>
                 <div class="ecard__name"><a href="/repos/{{ r.name }}">{{ r.name }}</a></div>
                 <div class="ecard__sub">⎇ {{ r.branch }}{% if r.task_total %} · {{ r.task_done }}/{{ r.task_total }} tasks{% endif %}</div>

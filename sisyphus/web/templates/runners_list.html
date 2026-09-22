@@ -3,7 +3,7 @@
     {% for r in runners %}
     <div class="ecard">
         <div class="ecard__head">
-            <div class="ecard__glyph green">▸</div>
+            <div class="ecard__glyph green">{{ 'CC' if r.type == 'claude-cli' else 'OC' }}</div>
             <div>
                 <div class="ecard__name">{{ r.name }}</div>
                 <div class="health ecard__health {{ 'is-healthy' if r.health_status == 'healthy' else ('is-unhealthy' if r.health_status == 'unhealthy' else '') }}"><span class="dot"></span>{{ r.health_status }}</div>
