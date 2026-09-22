@@ -314,6 +314,13 @@ def worker_end_message(role: str, result, task_id: str = "") -> str:
     interrupted by a human.
     """
     if getattr(result, "status", "") == "cancelled":
+        from . import cancellation
+        why = cancellation.reason(task_id) if task_id else ""
+        if why:
+            # The daemon stopped it, not a person — say which, or the thread
+            # accuses a human of something they did not do.
+            return (f"{role} was stopped before it reported: {why}. This is not a "
+                    f"failure and nothing is known to be wrong with the work.")
         return (f"{role} was {STOPPED_MARKER} before it reported. This is not a "
                 f"failure and nothing is known to be wrong with the work — the "
                 f"instruction was interrupted part-way. Do not fail the task for "

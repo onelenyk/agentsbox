@@ -16,11 +16,14 @@ The built-in worker agents (explorer/engineer/reviewer) are seeded from the
 legacy roles dict so behaviour is unchanged during the migration.
 """
 import json
+import logging
 from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import uuid4
 
 from .db import get_conn
+
+logger = logging.getLogger(__name__)
 
 AGENT_KINDS = ("worker", "orchestrator")
 
@@ -53,6 +56,8 @@ def init_agents_table() -> None:
     # (Phase 1 → Phase 2 upgrade) — without it, _decide has no agent to run.
     if conn.execute("SELECT COUNT(*) FROM agents WHERE kind = 'orchestrator'").fetchone()[0] == 0:
         _seed_orchestrator(conn)
+    else:
+        _refresh_orchestrator_persona(conn)
     _ensure_pinned_workers(conn)
     conn.close()
 
@@ -101,6 +106,35 @@ def _seed_workers(conn) -> None:
              json.dumps(spec["tools"]), now, now),
         )
     conn.commit()
+
+
+def _refresh_orchestrator_persona(conn) -> None:
+    """Carry a new built-in orchestrator persona onto an existing database.
+
+    Personas live in rows, seeded once, so a persona improvement in the code
+    never reached a database that already had one — the decider kept following
+    last release's instructions (the "answer instead of shipping a document"
+    rule would have been dead on arrival). Only a persona that still matches
+    one this project shipped is replaced; a tuned one is its owner's.
+    """
+    import hashlib
+
+    from .orchestrator import ORCHESTRATOR_PERSONA, SHIPPED_PERSONAS
+
+    row = conn.execute(
+        "SELECT id, persona FROM agents WHERE name = 'orchestrator' AND is_builtin = 1").fetchone()
+    if not row:
+        return
+    stored = row["persona"] or ""
+    if stored == ORCHESTRATOR_PERSONA:
+        return
+    if hashlib.sha256(stored.encode()).hexdigest() not in SHIPPED_PERSONAS:
+        logger.info("orchestrator persona was edited locally — leaving it alone")
+        return
+    conn.execute("UPDATE agents SET persona = ?, updated_at = ? WHERE id = ?",
+                 (ORCHESTRATOR_PERSONA, _now(), row["id"]))
+    conn.commit()
+    logger.info("orchestrator persona updated to the current built-in")
 
 
 def _seed_orchestrator(conn) -> None:
