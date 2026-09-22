@@ -1,10 +1,10 @@
-<!DOCTYPE html>
+{% import "_ui.html" as ui %}<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Sisyphus{% endblock %}</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230a0a0c'/><text x='16' y='23' font-size='21' text-anchor='middle' fill='%23f5a623'>⚡</text></svg>">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230a0a0c'/><path d='M6 26 25 7' stroke='%23f5a623' stroke-width='2.2' stroke-linecap='round' opacity='.5'/><circle cx='14' cy='18' r='5.2' stroke='%23f5a623' stroke-width='2.4' fill='none'/></svg>">
     <link rel="stylesheet" href="/static/app.css?v={{ asset_v('app.css') }}">
     {# Before first paint, or a light-theme reader sees a dark flash. #}
     <script>try { var t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
@@ -13,29 +13,29 @@
 <body>
     <div class="app">
         <aside class="sidebar">
-            <div class="brand"><span class="bolt">⚡</span> Sisyphus <small>v2</small></div>
+            <div class="brand">{{ ui.brand_mark() }} Sisyphus <small>v2</small></div>
             {# Every section is one click from anywhere. "Three doors" hid
                seven pages behind a word (System) a user had to already know —
                finding Backups meant guessing where they lived. A sidebar has
                the room; use it. #}
             <nav class="nav">
-                <a href="/dashboard" class="{{ 'active' if active_page == 'dashboard' else '' }}" title="Task box · Inbox · live agents"><span class="ic">◫</span> Home</a>
-                <a href="/tasks" class="{{ 'active' if active_page == 'tasks' else '' }}" title="The board"><span class="ic">◇</span> Tasks</a>
+                <a href="/dashboard" class="{{ 'active' if active_page == 'dashboard' else '' }}" title="Task box · Inbox · live agents">{{ ui.nav_icon("home") }} Home</a>
+                <a href="/tasks" class="{{ 'active' if active_page == 'tasks' else '' }}" title="The board">{{ ui.nav_icon("tasks") }} Tasks</a>
                 {% set projects = repo_names() %}
                 {% if projects %}
                 <div class="nav-sec">projects</div>
                 {% for p in projects %}
-                <a href="/p/{{ p }}" class="{{ 'active' if active_page == 'project:' ~ p else '' }}" title="{{ p }} — its board and task box"><span class="ic">⌥</span> {{ p }}</a>
+                <a href="/p/{{ p }}" class="{{ 'active' if active_page == 'project:' ~ p else '' }}" title="{{ p }} — its board and task box">{{ ui.nav_icon("project") }} {{ p }}</a>
                 {% endfor %}
                 {% endif %}
                 <div class="nav-sec">system</div>
-                <a href="/agents" class="{{ 'active' if active_page == 'agents' else '' }}"><span class="ic">✦</span> Agents</a>
-                <a href="/runners" class="{{ 'active' if active_page == 'runners' else '' }}"><span class="ic">▹</span> Runners</a>
-                <a href="/repos" class="{{ 'active' if active_page == 'repos' else '' }}"><span class="ic">⌥</span> Repos</a>
-                <a href="/autopilots" class="{{ 'active' if active_page == 'autopilots' else '' }}"><span class="ic">↻</span> Autopilot</a>
-                <a href="/stats" class="{{ 'active' if active_page == 'stats' else '' }}"><span class="ic">∿</span> Statistics</a>
-                <a href="/runtime" class="{{ 'active' if active_page == 'runtime' else '' }}"><span class="ic">⚙</span> Daemon</a>
-                <a href="/backups" class="{{ 'active' if active_page == 'backups' else '' }}"><span class="ic">◉</span> Backups</a>
+                <a href="/agents" class="{{ 'active' if active_page == 'agents' else '' }}">{{ ui.nav_icon("agents") }} Agents</a>
+                <a href="/runners" class="{{ 'active' if active_page == 'runners' else '' }}">{{ ui.nav_icon("runners") }} Runners</a>
+                <a href="/repos" class="{{ 'active' if active_page == 'repos' else '' }}">{{ ui.nav_icon("repos") }} Repos</a>
+                <a href="/autopilots" class="{{ 'active' if active_page == 'autopilots' else '' }}">{{ ui.nav_icon("autopilot") }} Autopilot</a>
+                <a href="/stats" class="{{ 'active' if active_page == 'stats' else '' }}">{{ ui.nav_icon("stats") }} Statistics</a>
+                <a href="/runtime" class="{{ 'active' if active_page == 'runtime' else '' }}">{{ ui.nav_icon("daemon") }} Daemon</a>
+                <a href="/backups" class="{{ 'active' if active_page == 'backups' else '' }}">{{ ui.nav_icon("backups") }} Backups</a>
             </nav>
             <div class="sys">
                 <div class="line"><span id="daemon-led" class="led live"></span> daemon <span id="daemon-val" class="val">live</span></div>

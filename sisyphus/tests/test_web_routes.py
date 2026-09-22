@@ -427,7 +427,9 @@ def test_task_box_allows_no_repo(db_path):
     """The task box offers a repo-less option (backend #3 support)."""
     html = _make_client().get("/tasks").text
     box = html.split('class="taskbox"')[1].split("</form>")[0]
-    assert "no repo" in box                          # the repo chip can be emptied
+    # The box carries the repo list and a repo field that may stay empty — how
+    # many repos happen to be configured is not this test's business.
+    assert "data-repos=" in box and 'name="repo"' in box
     assert 'name="repo" required' not in box
 
 

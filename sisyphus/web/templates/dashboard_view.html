@@ -1,5 +1,5 @@
 {% set ov = d.ov %}{% set t = ov.tasks %}{% set u = ov.usage %}{% set a = ov.activity %}
-{% set icons = {'orchestrator':'🧭','engineer':'🔧','reviewer':'🔍','explorer':'🔭','planner':'🗺️','human':'🧑'} %}
+{% from "_ui.html" import agent_mark %}
 <div class="kpis">
     <div class="kpi kpi--live"><div class="l">Active</div><div class="v">{{ t.by_status.get('active', 0) }}</div><div class="d">{{ t.by_status.get('waiting', 0) }} waiting</div></div>
     {# not "% completion" — the rate is done/(done+failed), which says nothing
@@ -65,8 +65,7 @@
             <div class="feed">
                 {% for m in d.recent %}
                 {% set tone = 'external' if m.kind == 'external' else ('human' if m.author == 'human' else ('orchestrator' if m.author == 'orchestrator' else 'worker')) %}
-                {% set icon = '🔔' if m.kind == 'external' else icons.get(m.author, '⚙️') %}
-                <div class="ev"><span class="av av--{{ tone }}" title="{{ m.author }}">{{ icon }}</span><span class="txt">{{ m.text[:80] }}</span></div>
+                <div class="ev">{{ agent_mark('forge' if m.kind == 'external' else m.author) }}<span class="txt">{{ m.text[:80] }}</span></div>
                 {% else %}
                 <div class="empty">No activity yet.</div>
                 {% endfor %}

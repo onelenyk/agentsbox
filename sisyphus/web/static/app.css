@@ -1,3 +1,57 @@
+/* The app's own voice. Served from /static/fonts, never a CDN: this daemon
+   runs on a laptop that is sometimes offline, and a UI that loses its
+   typeface when the wifi drops is not a UI. */
+@font-face {
+  font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 400; font-display: swap;
+  src: url('/static/fonts/ibm-plex-sans-latin-400-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 400; font-display: swap;
+  src: url('/static/fonts/ibm-plex-sans-cyrillic-400-normal.woff2') format('woff2');
+  unicode-range: U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;
+}
+@font-face {
+  font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 500; font-display: swap;
+  src: url('/static/fonts/ibm-plex-sans-latin-500-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 500; font-display: swap;
+  src: url('/static/fonts/ibm-plex-sans-cyrillic-500-normal.woff2') format('woff2');
+  unicode-range: U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;
+}
+@font-face {
+  font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 600; font-display: swap;
+  src: url('/static/fonts/ibm-plex-sans-latin-600-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 600; font-display: swap;
+  src: url('/static/fonts/ibm-plex-sans-cyrillic-600-normal.woff2') format('woff2');
+  unicode-range: U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;
+}
+@font-face {
+  font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 400; font-display: swap;
+  src: url('/static/fonts/ibm-plex-mono-latin-400-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 400; font-display: swap;
+  src: url('/static/fonts/ibm-plex-mono-cyrillic-400-normal.woff2') format('woff2');
+  unicode-range: U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;
+}
+@font-face {
+  font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500; font-display: swap;
+  src: url('/static/fonts/ibm-plex-mono-latin-500-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500; font-display: swap;
+  src: url('/static/fonts/ibm-plex-mono-cyrillic-500-normal.woff2') format('woff2');
+  unicode-range: U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;
+}
+
 /* Sisyphus design system — "Mission Control" ops console.
    Single source of truth for the UI. Tokens → components. No build step.
    Committed dark theme: near-black, amber signature, phosphor-green for live. */
@@ -65,8 +119,8 @@
   --r-sm: 6px; --r: 9px; --r-lg: 12px; --r-pill: 999px;
 
   /* type */
-  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
 
   /* elevation */
   --shadow:    0 1px 2px rgba(0,0,0,.5), 0 8px 24px rgba(0,0,0,.35);
@@ -312,7 +366,7 @@ body::before {
   transition: width var(--dur) ease;
 }
 .watch__head { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-5) var(--sp-6); border-bottom: 1px solid var(--border); }
-.watch__title { font-size: var(--fs-base); font-weight: var(--fw-bold); letter-spacing: var(--ls-wide); text-transform: uppercase; color: var(--text-2); white-space: nowrap; }
+.watch__title { font-size: var(--fs-base); font-weight: var(--fw-bold); color: var(--text-2); white-space: nowrap; }
 .watch__toggle { margin-left: auto; padding: 1px var(--sp-4); line-height: var(--lh-tight); }
 .watch__body { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; }
 
@@ -444,9 +498,7 @@ body::before {
 
 .zone { display: flex; flex-direction: column; gap: var(--sp-5); }
 .zone__head { display: flex; align-items: center; gap: var(--sp-5); flex-wrap: wrap; }
-.zone__head h2 {
-  font-size: var(--fs-xs); font-weight: var(--fw-bold); letter-spacing: var(--ls-caps);
-  text-transform: uppercase; color: var(--text-2);
+.zone__head h2 { font-size: var(--fs-md); font-weight: var(--fw-bold); color: var(--text-2);
 }
 .zone__count {
   font-family: var(--mono); font-size: var(--fs-xs); color: var(--col, var(--muted));
@@ -1064,7 +1116,7 @@ body::before {
   white-space: pre-wrap; word-break: break-word;
 }
 .diff-head { display: flex; align-items: baseline; gap: var(--sp-5); }
-.diff-head__label { font-size: var(--fs-2xs); font-weight: var(--fw-bold); letter-spacing: var(--ls-caps); text-transform: uppercase; color: var(--muted); }
+.diff-head__label { font-size: var(--fs-md); font-weight: var(--fw-bold); color: var(--muted); }
 .mr-merge { font-family: var(--mono); font-size: var(--fs-base); padding: var(--sp-4) var(--sp-5); border-radius: var(--r-md); }
 .mr-merge.ok  { color: var(--good); background: var(--good-bg); }
 .mr-merge.bad { color: var(--bad);  background: var(--bad-bg); }
@@ -1111,9 +1163,8 @@ select { cursor: pointer; appearance: none;
   padding: var(--sp-3) var(--sp-6); border-radius: var(--r-pill);
 }
 .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-6); margin-bottom: var(--sp-7); }
-.kpi { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--sp-7) var(--sp-8); position: relative; overflow: hidden; }
-.kpi::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--k, var(--border-2)); }
-.kpi .l { font-family: var(--mono); font-size: var(--fs-3xs); letter-spacing: var(--ls-caps-wide); text-transform: uppercase; color: var(--muted); }
+.kpi { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--sp-7) var(--sp-8);  }
+.kpi .l { font-size: var(--fs-md); color: var(--muted); }
 .kpi .v { font-size: var(--fs-6xl); font-weight: var(--fw-bold); margin-top: var(--sp-2); letter-spacing: var(--ls-tight); font-variant-numeric: tabular-nums; }
 .kpi .d { font-size: var(--fs-xs); color: var(--muted); margin-top: var(--sp-1); font-family: var(--mono); }
 .kpi--amber  { --k: var(--accent); } .kpi--amber .v { color: var(--accent-hi); }
@@ -1157,7 +1208,7 @@ select { cursor: pointer; appearance: none;
 
 /* panel header variant used by dashboard */
 .panel__h { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-6) var(--sp-8); border-bottom: 1px solid var(--border); }
-.panel__h .t { font-family: var(--mono); font-size: var(--fs-xs); letter-spacing: var(--ls-caps); text-transform: uppercase; color: var(--text-2); }
+.panel__h .t { font-family: var(--mono); font-size: var(--fs-md); color: var(--text-2); }
 .panel__h .c { margin-left: auto; font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted); }
 .panel__b { padding: var(--sp-4) var(--sp-5); }
 .stack { display: flex; flex-direction: column; gap: var(--sp-7); }
@@ -1168,7 +1219,7 @@ select { cursor: pointer; appearance: none;
   background: var(--panel); border: 1px solid var(--border);
   border-radius: var(--r-lg); padding: var(--sp-8) var(--sp-8);
 }
-.stat .label { font-size: var(--fs-xs); font-weight: var(--fw-semibold); letter-spacing: var(--ls-wide); text-transform: uppercase; color: var(--muted); }
+.stat .label { font-size: var(--fs-md); font-weight: var(--fw-semibold); color: var(--muted); }
 .stat .value { font-size: var(--fs-6xl); font-weight: var(--fw-bold); letter-spacing: var(--ls-tight); margin-top: var(--sp-3); font-variant-numeric: tabular-nums; }
 .stat .value.accent { color: var(--accent); }
 .stat .value.good { color: var(--good); }
@@ -1210,7 +1261,8 @@ select { cursor: pointer; appearance: none;
 .ecard__head { display: flex; align-items: center; gap: var(--sp-5); }
 .ecard__glyph {
   width: 32px; height: 32px; border-radius: var(--r); flex: none;
-  display: grid; place-items: center; font-size: var(--fs-2xl);
+  display: grid; place-items: center;
+  font-family: var(--mono); font-size: var(--fs-2xs); font-weight: var(--fw-medium); letter-spacing: var(--ls-wide);
   background: var(--accent-bg); color: var(--accent-hi);
 }
 .ecard__glyph.violet { background: var(--violet-bg); color: var(--violet); }
@@ -1287,9 +1339,7 @@ select { cursor: pointer; appearance: none;
 .rail-sec { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--sp-6) var(--sp-7); }
 /* One label style for every small heading on a detail surface: the rail's
    sections, the goal above the thread, the properties. */
-.rail-h {
-  font-size: var(--fs-2xs); font-weight: var(--fw-bold); letter-spacing: var(--ls-caps);
-  text-transform: uppercase; color: var(--muted); margin-bottom: var(--sp-4);
+.rail-h { font-size: var(--fs-md); font-weight: var(--fw-bold); color: var(--muted); margin-bottom: var(--sp-4);
 }
 .rail-sec .prop {
   display: flex; justify-content: space-between; align-items: center; gap: var(--sp-6);
@@ -1310,9 +1360,7 @@ select { cursor: pointer; appearance: none;
    lit block, work is a sequence of steps. Built only from tokens so a restyle
    of the app restyles this page with it. */
 .dsec { margin-bottom: var(--sp-9); }
-.dsec__label {
-  display: flex; align-items: center; gap: var(--sp-4); margin: 0 0 var(--sp-4);
-  font-size: var(--fs-2xs); font-weight: var(--fw-bold); letter-spacing: var(--ls-caps); text-transform: uppercase; color: var(--muted);
+.dsec__label { display: flex; align-items: center; gap: var(--sp-4); margin: 0 0 var(--sp-4); font-size: var(--fs-md); font-weight: var(--fw-bold); color: var(--muted);
 }
 .dsec__meta { text-transform: none; letter-spacing: 0; font-weight: var(--fw-normal); color: var(--muted); }
 .dirmark {
@@ -2122,9 +2170,7 @@ body.has-overlay { overflow: hidden; }
 .slane--you     { --lane: var(--warn); }
 .slane--done    { --lane: var(--info); }
 .slane--failed  { --lane: var(--bad); }
-.slane__head {
-  display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-5) var(--sp-6);
-  font-size: var(--fs-2xs); font-weight: var(--fw-bold); letter-spacing: var(--ls-caps); text-transform: uppercase; color: var(--text-2);
+.slane__head { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-5) var(--sp-6); font-size: var(--fs-md); font-weight: var(--fw-bold); color: var(--text-2);
 }
 .slane__head::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--lane); }
 .slane__count { margin-left: auto; font-family: var(--mono); letter-spacing: 0; color: var(--muted); }
@@ -2196,10 +2242,7 @@ body.has-overlay { overflow: hidden; }
 .askc--budget { --ask: var(--warn); }
 .askc--ready  { --ask: var(--good); }
 .askc--call   { --ask: var(--warn); }
-.askc__kind {
-  display: flex; align-items: center; gap: var(--sp-3); color: var(--ask);
-  font-size: var(--fs-2xs); font-weight: var(--fw-bold); letter-spacing: var(--ls-caps); text-transform: uppercase;
-}
+.askc__kind { display: flex; align-items: center; gap: var(--sp-3); color: var(--ask); font-size: var(--fs-md); font-weight: var(--fw-bold); }
 .askc__age { margin-left: auto; color: var(--muted); letter-spacing: 0; text-transform: none; font-weight: var(--fw-medium); font-size: var(--fs-sm); }
 .askc__title { display: flex; align-items: center; gap: var(--sp-4); min-width: 0; color: var(--text); text-decoration: none; }
 .askc__title:hover .askc__name { color: var(--accent-hi); }
@@ -2241,3 +2284,19 @@ body.has-overlay { overflow: hidden; }
 .rstore__why { margin: var(--sp-3) 0 0; font-size: var(--fs-base); color: var(--muted); max-width: 70ch; line-height: var(--lh-normal); }
 .rstore__flash { font-size: var(--fs-base); color: var(--good); }
 .rstore .btn { margin-left: auto; }
+
+/* ── Role marks: two letters instead of an emoji face ─────────────────── */
+.mark {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  min-width: 22px; height: 16px; padding: 0 var(--sp-1);
+  font-family: var(--mono); font-size: var(--fs-3xs); font-weight: var(--fw-medium);
+  letter-spacing: var(--ls-wide); color: var(--muted);
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--r-xs);
+}
+.mark--accent { color: var(--accent); background: var(--accent-bg); border-color: var(--accent-bd); }
+.mark--good   { color: var(--good);   background: var(--good-bg);   border-color: var(--good-bd); }
+.mark--violet { color: var(--violet); background: var(--violet-bg); border-color: var(--violet-bd); }
+.mark--info   { color: var(--info);   background: var(--info-bg);   border-color: var(--info-bd); }
+.mark--text   { color: var(--text-2); }
+.mark.is-now  { box-shadow: var(--ring-good); border-color: var(--good-bd); }
+.brand__mark { color: var(--accent); flex: none; }

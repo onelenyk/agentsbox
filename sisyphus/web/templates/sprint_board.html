@@ -1,6 +1,6 @@
 {# The current sprint as cards in status lanes (routes.sprint_board). The
    same rows the list draws, laid out for "where does this week stand". #}
-{% from "_ui.html" import agent_icons as icons %}
+{% from "_ui.html" import agent_mark %}
 
 {% macro task_card(r) -%}
 <a class="tcard tcard--{{ r.kind }}" draggable="false" href="/tasks/{{ r.id }}"
@@ -19,7 +19,7 @@
     {% endif %}
     <div class="tcard__foot">
         <span class="trail">
-            {%- for agent in r.trail %}<span class="trail__who{{ ' is-now' if agent == r.live }}" title="{{ agent }}{{ ' — working now' if agent == r.live }}">{{ icons.get(agent, '•') }}</span>{% endfor -%}
+            {%- for agent in r.trail %}{{ agent_mark(agent, agent == r.live) }}{% endfor -%}
         </span>
         {% if r.origin %}<span class="tag tag--origin{{ ' tag--bad' if r.origin.broken }}{{ ' tag--idle' if r.origin.paused }}" title="Created by the automation “{{ r.origin.name }}” — {{ r.origin.about }}">↻ {{ r.origin.short }}</span>{% endif %}
         {% if r.kids %}<span class="chip" title="subtasks done">⑂ {{ r.kids_done }}/{{ r.kids }}</span>{% endif %}
