@@ -451,3 +451,41 @@ class TestSayingWhenAnAutomationFires:
         assert ap.describe_schedule(self._ap(cron="5 4 3 2 1")) == "5 4 3 2 1"
         assert ap.describe_schedule(self._ap(cron="totally bogus")) == "totally bogus"
         assert ap.describe_schedule(self._ap()) == "no schedule"
+
+
+class TestTheClockIsTheReaders:
+    """Cron is read in UTC by the scheduler; a person reads their own clock."""
+
+    def _in_kyiv(self, monkeypatch):
+        import time
+        monkeypatch.setenv("TZ", "Europe/Kyiv")
+        time.tzset()
+
+    def test_a_utc_cron_is_said_in_local_time(self, monkeypatch):
+        from core.autopilot import describe_schedule
+        self._in_kyiv(monkeypatch)
+        # 06:07 UTC is 09:07 in Kyiv in summer and 08:07 in winter
+        assert describe_schedule({"trigger_type": "schedule", "cron": "7 6 * * *"}) in ("daily 09:07", "daily 08:07")
+
+    def test_a_weekday_moves_when_the_shift_crosses_midnight(self, monkeypatch):
+        from core.autopilot import describe_schedule
+        self._in_kyiv(monkeypatch)
+        assert describe_schedule({"trigger_type": "schedule", "cron": "30 22 * * 1"}).startswith("Tue 0")
+
+    def test_explain_says_when_next_and_last(self):
+        from datetime import datetime, timezone
+        from core.autopilot import explain
+        now = datetime(2026, 9, 22, 12, 0, tzinfo=timezone.utc)
+        x = explain({"trigger_type": "schedule", "cron": "7 6 * * *", "enabled": 1,
+                     "next_run": "2026-09-23T06:07:00+00:00", "last_run": "2026-09-22T06:07:06+00:00"}, now)
+        assert x["sentence"] == "Every day at 06:07 (UTC)"
+        assert x["detail"] == "cron “7 6 * * *”, read in UTC"
+        assert x["next"] == {"day": "tomorrow", "time": "06:07", "rel": "in 18h 07m"}
+        assert x["last"]["day"] == "today" and x["last"]["rel"] == "5h 52m ago"
+
+    def test_a_webhook_says_what_sets_it_off_and_where_it_listens(self):
+        from core.autopilot import explain
+        x = explain({"trigger_type": "webhook", "webhook_platform": "jira", "webhook_event": "issue_created"})
+        assert x["sentence"] == "When a Jira issue is created"
+        assert x["detail"] == "listens at POST /api/v1/webhooks/jira for “issue_created”"
+        assert x["next"] is None and x["last"] is None

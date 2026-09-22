@@ -25,6 +25,18 @@ def pytest_collection_modifyitems(config, items):
         item.add_marker(getattr(pytest.mark, tier_for(module)))
 
 
+@pytest.fixture(autouse=True)
+def _utc_clock(monkeypatch):
+    """Every test reads clocks in UTC unless it says otherwise, so a test of
+    "what time does this say" means the same on any machine."""
+    import time
+    monkeypatch.setenv("TZ", "UTC")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
 @pytest.fixture
 def db_path(tmp_path):
     db = tmp_path / "test.db"

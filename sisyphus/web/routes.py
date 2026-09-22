@@ -534,12 +534,13 @@ async def autopilots_page(request: Request):
     return _tmpl().TemplateResponse(request, "autopilots.html", {"active_page": "autopilots"})
 
 def _autopilots_list_response(request, flash=None, error=None):
-    from core.autopilot import list_autopilots, schedule_problem
+    from core.autopilot import explain, list_autopilots, schedule_problem
     rows = list_autopilots()
     for a in rows:
         # An automation whose clock can never fire it used to render the same
         # "—" as a webhook one and a paused one. See autopilot.schedule_problem.
         a["problem"] = schedule_problem(a)
+        a["explained"] = explain(a)
     return _tmpl().TemplateResponse(
         request,
         "autopilots_list.html",
