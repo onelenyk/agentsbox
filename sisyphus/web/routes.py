@@ -1354,6 +1354,9 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = "", vi
         return _tmpl().TemplateResponse(request, "sprint_board.html", {
             **sprint_board(top, {t["id"] for t in running}), "repo": repo,
             "repos": sorted({r["repo"] for r in rows if r["repo"]}),
+            "whos": sorted({a for r in rows for a in r["trail"]}),
+            # the same actionable cards the list view shows, keyed by task
+            "asks": {t["id"]: t for t in needs_you},
         })
 
     return _tmpl().TemplateResponse(request, "tasks_list.html", {

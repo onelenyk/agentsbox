@@ -265,6 +265,81 @@
             var d = e.detail || {};
             flash(d.message || "smoke test finished", d.ok ? "ok" : "err");
         });
+        // ── Filtering a board (_ui.html filter_bar) ─────────────────────
+        // One implementation for every view: the bar names a scope, the things
+        // it filters are [data-filter-item] inside it carrying data-* fields,
+        // and [data-filter-group] wrappers fold away when nothing in them
+        // matches. What you typed outlives the board's refresh, which replaces
+        // the whole list every few minutes.
+        function filterState(key) {
+            try { return JSON.parse(sessionStorage.getItem("filter:" + key) || "{}"); } catch (e) { return {}; }
+        }
+        function applyFilter(bar) {
+            var key = bar.dataset.filterBar;
+            var scope = document.querySelector(key) || document;
+            var q = (bar.querySelector("[data-f-q]").value || "").trim().toLowerCase();
+            var want = {}, on = !!q;
+            bar.querySelectorAll("[data-f-field]").forEach(function (sel) {
+                if (sel.value) { want[sel.dataset.fField] = sel.value; on = true; }
+                sel.parentElement.classList.toggle("is-set", !!sel.value);
+            });
+            var shown = 0, total = 0;
+            scope.querySelectorAll("[data-filter-item]").forEach(function (item) {
+                var ok = !q || (item.dataset.text || "").indexOf(q) !== -1;
+                for (var f in want) {
+                    var have = item.dataset[f] || "";
+                    if (f === "who") { if ((" " + have + " ").indexOf(" " + want[f] + " ") === -1) ok = false; }
+                    else if (have !== want[f]) { ok = false; }
+                }
+                item.hidden = !ok;
+                total++;
+                if (ok) shown++;
+            });
+            scope.querySelectorAll("[data-filter-group]").forEach(function (g) {
+                var n = g.querySelectorAll("[data-filter-item]:not([hidden])").length;
+                g.hidden = on && n === 0;
+                var c = g.querySelector("[data-filter-count]");
+                if (c) c.textContent = n;
+                if (on && n && g.tagName === "DETAILS") g.open = true;   // a match is never hidden in a fold
+                var none = g.querySelector("[data-filter-empty]");
+                if (none) none.hidden = n > 0;
+            });
+            var none = scope.querySelector("[data-filter-none]");
+            if (none) none.hidden = !(on && shown === 0);
+            bar.querySelector("[data-f-count]").textContent = on ? shown + " of " + total : "";
+            bar.querySelector("[data-f-clear]").hidden = !on;
+            bar.classList.toggle("is-on", on);
+            try {
+                var st = { q: q, f: want };
+                sessionStorage.setItem("filter:" + key, JSON.stringify(st));
+            } catch (e) {}
+        }
+        function wireFilter(bar) {
+            if (bar._wired) return;
+            bar._wired = true;
+            bar.addEventListener("input", function () { applyFilter(bar); });
+            bar.addEventListener("change", function () { applyFilter(bar); });
+            bar.querySelector("[data-f-clear]").addEventListener("click", function () {
+                bar.querySelector("[data-f-q]").value = "";
+                bar.querySelectorAll("[data-f-field]").forEach(function (s) { s.value = ""; });
+                applyFilter(bar);
+            });
+        }
+        function restoreFilters(where) {
+            (where || document).querySelectorAll("[data-filter-bar]").forEach(function (bar) {
+                var st = filterState(bar.dataset.filterBar);
+                if (st.q) bar.querySelector("[data-f-q]").value = st.q;
+                bar.querySelectorAll("[data-f-field]").forEach(function (sel) {
+                    var v = (st.f || {})[sel.dataset.fField];
+                    if (v && [].some.call(sel.options, function (o) { return o.value === v; })) sel.value = v;
+                });
+                wireFilter(bar);
+                applyFilter(bar);
+            });
+        }
+        b.addEventListener("htmx:afterSwap", function (e) { restoreFilters(e.detail.target); });
+        restoreFilters();
+
         // Model pickers (_ui.html model_picker): filter as you type — a group
         // with a match opens, one without hides — and keep the current pick in
         // view when a picker arrives.
