@@ -1,0 +1,13 @@
+{# The runner's own session store: how big it has grown, and one button to
+   prune it. Swapped in place after a prune so the new size is the answer. #}
+<div id="runner-store" class="rstore">
+    <div class="rstore__facts">
+        <div class="meta-line"><span class="k">size</span><span class="v">{{ runner_store.size_h }}</span></div>
+        <div class="meta-line"><span class="k">sessions</span><span class="v tnum">{{ runner_store.sessions }}</span></div>
+        <div class="meta-line"><span class="k">keeps</span><span class="v">{{ runner_store.keep_days }} days{% if not runner_store.keep_days %} — pruning off{% endif %}</span></div>
+    </div>
+    {% if runner_store.flash %}<div class="rstore__flash">{{ runner_store.flash }}</div>{% endif %}
+    <button class="btn btn--ghost btn--sm" hx-post="/api/runtime/prune-runner-store"
+            hx-target="#runner-store" hx-swap="outerHTML" hx-disabled-elt="this"
+            hx-on:htmx:before-request="this.textContent='Pruning…'">Prune now</button>
+</div>

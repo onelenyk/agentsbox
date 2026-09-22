@@ -2234,3 +2234,10 @@ body.has-overlay { overflow: hidden; }
   background: var(--good-bg); border: 1px solid var(--good-bd);
 }
 .askc-done__tick { color: var(--good); font-weight: var(--fw-heavy); }
+
+/* ── Runner session store (Daemon page) ──────────────────────────────── */
+.rstore { display: flex; align-items: center; gap: var(--sp-9); flex-wrap: wrap; margin-top: var(--sp-5); }
+.rstore__facts { display: flex; gap: var(--sp-9); flex-wrap: wrap; }
+.rstore__why { margin: var(--sp-3) 0 0; font-size: var(--fs-base); color: var(--muted); max-width: 70ch; line-height: var(--lh-normal); }
+.rstore__flash { font-size: var(--fs-base); color: var(--good); }
+.rstore .btn { margin-left: auto; }
