@@ -1113,7 +1113,7 @@ async def project_page(request: Request, name: str):
     })
 
 @router.get("/api/tasks/list", response_class=HTMLResponse)
-async def tasks_list_view(request: Request, repo: str = "", sprint: str = ""):
+async def tasks_list_view(request: Request, repo: str = "", sprint: str = "", view: str = ""):
     from core import store
 
     all_mrs = mergerequests.list_mrs()
@@ -1278,6 +1278,12 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = ""):
         elif r["kind"] in ("shipped", "done", "not-merged"):
             sprint["done"] += 1
 
+    if view == "sprint":
+        return _tmpl().TemplateResponse(request, "sprint_board.html", {
+            **sprint_board(top, {t["id"] for t in running}), "repo": repo,
+            "repos": sorted({r["repo"] for r in rows if r["repo"]}),
+        })
+
     return _tmpl().TemplateResponse(request, "tasks_list.html", {
         "needs_you": needs_you, "running": running, "queued": queued,
         "sprints": sprints, "repo": repo,
@@ -1435,6 +1441,55 @@ def _row(t: dict, kind: str, facts: dict, mr: Optional[dict] = None,
         "trail": trail, "live": t.get("live_role"),
         "why": _why(t, kind, mr, facts, auto=bool(origin), review=review),
         "when": t.get("updated_at") or t.get("created_at"),
+    }
+
+
+SPRINT_LANES = (
+    ("queued", "Queued", "waiting for the orchestrator to pick it up"),
+    ("running", "In progress", "an agent is on it"),
+    ("you", "Needs you", "a question to answer or a merge to decide"),
+    ("done", "Done", "finished this week — shipped, done, or closed unmerged"),
+    ("failed", "Failed", "ended this week without a result"),
+)
+
+
+def sprint_board(top: list, running_ids: set, today=None) -> dict:
+    """The current sprint as a board: this week's work in status lanes.
+
+    A sprint holds everything still open, whenever it started — work carried
+    over from an earlier week is still this week's work, and says where it came
+    from — and only what CLOSED this week. Done work from earlier weeks is
+    history, and lives in the list view.
+    """
+    from datetime import date
+    today = today or date.today()
+    now = _sprint_of(today.isoformat())
+    lanes = {key: [] for key, _, _ in SPRINT_LANES}
+    for r in top:
+        still_open = r["kind"] in ("in-progress", "needs-you", "to-merge")
+        this_week = r["sprint"]["id"] == now["id"]
+        if not (still_open or this_week):
+            continue
+        if r["kind"] == "in-progress":
+            lane = "running" if (r["id"] in running_ids or r.get("live")) else "queued"
+        elif r["kind"] in ("needs-you", "to-merge"):
+            lane = "you"
+        elif r["kind"] == "failed":
+            lane = "failed"
+        else:
+            lane = "done"
+        kids = r.get("children") or []
+        lanes[lane].append({**r, "carried": "" if this_week else r["sprint"]["label"],
+                            "kids": len(kids),
+                            "kids_done": sum(1 for k in kids if k["kind"] in ("shipped", "done"))})
+    total = sum(len(v) for v in lanes.values())
+    closed = len(lanes["done"]) + len(lanes["failed"])
+    return {
+        "sprint": now, "lanes": [{"key": k, "label": label, "about": about, "cards": lanes[k]}
+                                 for k, label, about in SPRINT_LANES],
+        "total": total, "closed": closed, "done": len(lanes["done"]),
+        "pct": round(100 * closed / total) if total else 0,
+        "days_left": 6 - today.weekday(),
     }
 
 

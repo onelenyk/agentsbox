@@ -1,0 +1,106 @@
+{# The current sprint as cards in status lanes (routes.sprint_board). The
+   same rows the list draws, laid out for "where does this week stand". #}
+{% from "_ui.html" import agent_icons as icons %}
+
+{% macro task_card(r) -%}
+<a class="tcard tcard--{{ r.kind }}" draggable="false" href="/tasks/{{ r.id }}"
+   hx-get="/api/tasks/{{ r.id }}/panel" hx-target="#overlay-body" hx-swap="innerHTML" hx-push-url="/tasks/{{ r.id }}"
+   data-origin="{{ 'auto' if r.origin else 'you' }}"
+   data-text="{{ (r.key ~ ' ' ~ r.title ~ ' ' ~ r.repo ~ ' ' ~ (r.origin.name if r.origin else '') ~ ' ' ~ (r.why.text if r.why else '') ~ ' ' ~ r.trail|join(' '))|lower }}">
+    <div class="tcard__top">
+        <span class="tkey">{{ r.key }}</span>
+        {% if r.repo and not repo %}<span class="tcard__repo">{{ r.repo }}</span>{% endif %}
+        <span class="tcard__when reltime" data-created="{{ r.when }}"></span>
+    </div>
+    <div class="tcard__title"{% if r.full %} title="{{ r.full }}"{% endif %}>{{ r.title }}{% if r.runs > 1 %} <span class="trow__runs tnum">×{{ r.runs }}</span>{% endif %}</div>
+    {% if r.why %}
+    <div class="tcard__why why--{{ r.why.tone }}"{% if r.why.title %} title="{{ r.why.title }}"{% endif %}>
+        {%- if r.why.tone == 'live' %}<span class="live-dot"></span> {% endif %}{{ r.why.text }}</div>
+    {% endif %}
+    <div class="tcard__foot">
+        <span class="trail">
+            {%- for agent in r.trail %}<span class="trail__who{{ ' is-now' if agent == r.live }}" title="{{ agent }}{{ ' — working now' if agent == r.live }}">{{ icons.get(agent, '•') }}</span>{% endfor -%}
+        </span>
+        {% if r.origin %}<span class="tag tag--origin{{ ' tag--bad' if r.origin.broken }}{{ ' tag--idle' if r.origin.paused }}" title="Created by the automation “{{ r.origin.name }}” — {{ r.origin.about }}">↻ {{ r.origin.short }}</span>{% endif %}
+        {% if r.kids %}<span class="chip" title="subtasks done">⑂ {{ r.kids_done }}/{{ r.kids }}</span>{% endif %}
+        {% if r.carried %}<span class="tag tcard__carried" title="Still open from an earlier sprint">↪ {{ r.carried }}</span>{% endif %}
+        {% if r.kind in ('shipped', 'not-merged', 'to-merge') %}<span class="tag tag--state tag--{{ r.kind }}">{{ r.word }}</span>{% endif %}
+    </div>
+</a>
+{%- endmacro %}
+
+<div class="sboard">
+    <header class="sboard__head">
+        <div class="sboard__name">
+            <h2>{{ sprint.label }}</h2>
+            <span class="sboard__span">{{ sprint.span }}</span>
+            <span class="sboard__left">{{ 'last day' if days_left == 0 else days_left ~ ' days left' }}</span>
+        </div>
+        <div class="sboard__progress" title="{{ closed }} of {{ total }} closed this sprint">
+            <span class="bar-track"><span class="bar-fill good sboard__bar" style="--w:{{ pct }}%"></span></span>
+            <span class="sboard__pct tnum">{{ closed }}/{{ total }} closed</span>
+        </div>
+        <div class="sboard__tools">
+            <input type="search" class="f-search" placeholder="Filter cards…" data-sboard-filter autocomplete="off">
+            <label class="chip-btn sboard__auto"><input type="checkbox" data-sboard-auto checked> ↻ automations</label>
+        </div>
+    </header>
+
+    <div class="sboard__lanes">
+        {% for lane in lanes %}
+        <section class="slane slane--{{ lane.key }}">
+            <header class="slane__head" title="{{ lane.about }}">
+                <span class="slane__name">{{ lane.label }}</span>
+                <span class="slane__count tnum">{{ lane.cards|length }}</span>
+            </header>
+            <div class="slane__cards">
+                {% for r in lane.cards %}{{ task_card(r) }}{% endfor %}
+                <p class="slane__empty"{% if lane.cards %} hidden{% endif %}>—</p>
+            </div>
+        </section>
+        {% endfor %}
+    </div>
+</div>
+
+<script>
+(function () {
+    function rel(iso) {
+        var d = Date.now() - new Date(iso).getTime();
+        if (d < 0) return '';
+        var s = Math.floor(d / 1000);
+        if (s < 3600) return Math.max(1, Math.floor(s / 60)) + 'm';
+        if (s < 86400) return Math.floor(s / 3600) + 'h';
+        return Math.floor(s / 86400) + 'd';
+    }
+    document.querySelectorAll('.sboard .reltime').forEach(function (el) {
+        if (el.dataset.created) el.textContent = rel(el.dataset.created);
+    });
+
+    // The board refreshes on its own, so what you typed or unticked has to
+    // outlive the swap.
+    var KEY = 'sprintFilter';
+    var q = document.querySelector('[data-sboard-filter]'), auto = document.querySelector('[data-sboard-auto]');
+    try {
+        var st = JSON.parse(sessionStorage.getItem(KEY) || '{}');
+        if (st.q) q.value = st.q;
+        if (st.auto === false) auto.checked = false;
+    } catch (e) {}
+    function apply() {
+        var text = q.value.trim().toLowerCase();
+        document.querySelectorAll('.slane').forEach(function (lane) {
+            var n = 0;
+            lane.querySelectorAll('.tcard').forEach(function (c) {
+                var hit = (!text || c.dataset.text.indexOf(text) !== -1) && (auto.checked || c.dataset.origin !== 'auto');
+                c.hidden = !hit;
+                if (hit) n++;
+            });
+            lane.querySelector('.slane__count').textContent = n;
+            lane.querySelector('.slane__empty').hidden = n > 0;
+        });
+        try { sessionStorage.setItem(KEY, JSON.stringify({ q: q.value, auto: auto.checked })); } catch (e) {}
+    }
+    q.addEventListener('input', apply);
+    auto.addEventListener('change', apply);
+    apply();
+})();
+</script>

@@ -7,6 +7,7 @@
     <div class="board-main">
         {% call ui.toolbar([{'label': 'Tasks', 'href': '/tasks'}, {'label': repo.name}]) %}
         <span class="toolbar__note mono">{{ repo.source }}{% if repo.branch %} · {{ repo.branch }}{% endif %}</span>
+        {{ ui.view_switch() }}
         <a class="btn btn--ghost btn--sm" href="/repos/{{ repo.name }}" title="Resources, setup, edit">⚙ Settings</a>
         {% endcall %}
         {% set fixed_repo = repo.name %}
@@ -20,7 +21,7 @@
         </div>
         {% endif %}
         <div id="tasks-list" hx-get="/api/tasks/list?repo={{ repo.name|urlencode }}"
-             hx-trigger="load, taskCreated from:body, taskUpdated from:body, dataChanged from:body, every 300s[boardIdle()]" hx-swap="innerHTML transition:true">
+             hx-vals='js:{view: boardMode()}' hx-trigger="load, boardModeChanged from:body, taskCreated from:body, taskUpdated from:body, dataChanged from:body, every 300s[boardIdle()]" hx-swap="innerHTML transition:true">
             <div class="empty">Loading…</div>
         </div>
     </div>
@@ -31,7 +32,7 @@
     // half-typed word with it — so the poll waits until you step out of it.
     function boardIdle() {
         var el = document.activeElement;
-        return !(el && el.closest && el.closest('.filters'));
+        return !(el && el.closest && el.closest('.filters, .sboard__tools'));
     }
 </script>
 {% endblock %}
