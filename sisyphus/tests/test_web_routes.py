@@ -528,9 +528,9 @@ def test_each_status_gets_its_own_surface(db_path):
         sessions.clear()
 
 
-def test_a_quiet_board_says_nothing_is_waiting_on_you(db_path):
+def test_a_quiet_board_does_not_spend_its_top_on_an_empty_wants_you(db_path):
     html = _make_client().get("/api/tasks/list").text
-    assert "Nothing is waiting on you." in html
+    assert "Wants you" not in html
 
 
 def test_every_sprint_is_on_the_page_newest_open(db_path):
@@ -614,7 +614,7 @@ def test_inbox_shows_done_task_with_open_mr_under_to_merge(db_path):
 def test_inbox_empty_state(db_path):
     r = _make_client().get("/api/inbox/view")
     assert r.status_code == 200
-    assert "Inbox zero" in r.text
+    assert r.text.strip() == ""        # Home's state line already says "0 waiting on you"
 
 
 def _open_mr(review_status=None):
@@ -1102,18 +1102,23 @@ class TestWorkersLive:
 
 
 class TestFlatNav:
-    """The three-door design hid seven pages behind the word "System" — a user
-    had to already know Backups lived there to find them. Every section is one
-    sidebar click from anywhere now, and the tabstrip is gone with the doors."""
+    """Every section is one sidebar click from anywhere, ordered by how often a
+    hand reaches for it: the work, its projects, what you configure, what you
+    observe. Repos is the projects heading's own link; Backups live on Daemon."""
 
     def test_every_section_is_one_click_from_anywhere(self, db_path):
         with patch("core.repos.load_repos", return_value=[]):
             html = _make_client().get("/dashboard").text
         nav = html.split('<nav class="nav">')[1].split("</nav>")[0]
-        assert nav.count("<a ") == 9
-        for label in ("Home", "Tasks", "Agents", "Runners", "Repos",
-                      "Autopilot", "Statistics", "Daemon", "Backups"):
-            assert label in nav
+        assert nav.count("<a ") == 8
+        order = ["Home", "Tasks", "/repos", "Agents", "Runners", "Autopilot", "Statistics", "Daemon"]
+        at = [nav.index(label) for label in order]
+        assert at == sorted(at), "the sidebar is out of order"
+        assert "Backups" not in nav
+
+    def test_backups_are_reachable_from_the_daemon_page(self, db_path):
+        html = _make_client().get("/runtime").text
+        assert 'id="backups"' in html and "/api/backups/list" in html
 
     def test_system_still_redirects_for_old_links(self, db_path):
         r = _make_client().get("/system")
@@ -1749,3 +1754,16 @@ def test_the_sprint_board_lets_you_answer_where_the_list_does(db_path):
     html = _make_client().get("/api/tasks/list?view=sprint").text
     assert "askc--question" in html and "The latest commits" in html
     assert f'hx-post="/api/tasks/{t["id"]}/messages"' in html
+
+
+def test_a_running_card_shows_its_progress_on_the_sprint_board(db_path):
+    """The stage bar was drawn only on the list's in-flight card; the same task
+    on the sprint board showed nothing of where it had got to."""
+    from core import store
+    t = store.create_task("build it", "test-repo")
+    store.set_status(t["id"], "active")
+    store.post_message(t["id"], "system", kind="worker_started", text="spawning engineer: go")
+    store.post_message(t["id"], "engineer", kind="commit", text="feat: half of it (abc1234)")
+    html = _make_client().get("/api/tasks/list?view=sprint").text
+    assert "stagebar" in html and "stagebar__label" in html
+    assert 'data-when=' in html and 'data-filter-item' in html      # and it filters like a row

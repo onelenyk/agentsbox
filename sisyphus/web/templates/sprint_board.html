@@ -14,6 +14,15 @@
         <span class="tcard__when reltime" data-created="{{ r.when }}"></span>
     </div>
     <div class="tcard__title"{% if r.full %} title="{{ r.full }}"{% endif %}>{{ r.title }}{% if r.runs > 1 %} <span class="trow__runs tnum">×{{ r.runs }}</span>{% endif %}</div>
+    {% if r.stages %}
+    <div class="stagebar">
+        {% for name, done in r.stages %}
+        <span class="stg {{ 'on' if done }} {{ 'now' if name == r.stage_now }}" title="{{ name }}"></span>
+        {% if not loop.last %}<span class="stg-link {{ 'on' if done }}"></span>{% endif %}
+        {% endfor %}
+        <span class="stagebar__label">{{ r.stage_now }}</span>
+    </div>
+    {% endif %}
     {% if r.why %}
     <div class="tcard__why why--{{ r.why.tone }}"{% if r.why.title %} title="{{ r.why.title }}"{% endif %}>
         {%- if r.why.tone == 'live' %}<span class="live-dot"></span> {% endif %}{{ r.why.text }}</div>
@@ -37,6 +46,10 @@
             <span class="sboard__span">{{ sprint.span }}</span>
             <span class="sboard__left">{{ 'last day' if days_left == 0 else days_left ~ ' days left' }}</span>
         </div>
+        <span class="zone__new" data-new hidden>
+            <span class="zone__new-n tnum" data-new-count>0</span> new since you last looked
+            <button type="button" class="seen-btn" data-seen>Mark seen</button>
+        </span>
         <div class="sboard__progress" title="{{ closed }} of {{ total }} closed this sprint">
             <span class="bar-track"><span class="bar-fill good sboard__bar" style="--w:{{ pct }}%"></span></span>
             <span class="sboard__pct tnum">{{ closed }}/{{ total }} closed</span>
