@@ -1533,8 +1533,8 @@ class TestAutomationRunsAreTasksAmongTasks:
     def test_the_filter_offers_who_asked(self, db_path):
         self._fire()
         html = _make_client().get("/api/tasks/list").text
-        assert 'data-field="origin"' in html
-        assert '<option value="auto">from automations</option>' in html
+        assert 'data-f-field="origin"' in html                 # the filter names who asked
+        assert '<option value="auto">an automation</option>' in html
 
     def test_each_week_keeps_its_own_runs_and_counts_them(self, db_path):
         self._fire(days=("2026-09-15", "2026-09-16", "2026-09-08"))
@@ -1726,3 +1726,26 @@ def test_a_notification_says_which_kind_of_wait_it_is(db_path):
     store.set_status(t["id"], "waiting")
     items = _make_client().get("/api/notifications/poll").json()["items"]
     assert [i["verb"] for i in items if i["task_id"] == t["id"]] == ["is stuck"]
+
+
+def test_both_views_offer_the_same_filter(db_path):
+    from core import store
+    store.create_task("filterable", "test-repo")
+    for url in ("/api/tasks/list", "/api/tasks/list?view=sprint"):
+        html = _make_client().get(url).text
+        assert 'data-f-field="repo"' in html, url
+        assert 'data-f-field="origin"' in html, url
+        assert "data-filter-item" in html and "data-filter-group" in html, url
+
+
+def test_the_sprint_board_lets_you_answer_where_the_list_does(db_path):
+    """A question was answerable on the list and merely readable on the sprint
+    board; both draw the same card now."""
+    from core import store
+    t = store.create_task("Give me review", "test-repo")
+    store.post_message(t["id"], "orchestrator", kind="question",
+                       text="What should I review? Please pick one:\n1. The latest commits\n2. The open MRs")
+    store.set_status(t["id"], "waiting")
+    html = _make_client().get("/api/tasks/list?view=sprint").text
+    assert "askc--question" in html and "The latest commits" in html
+    assert f'hx-post="/api/tasks/{t["id"]}/messages"' in html

@@ -13,6 +13,7 @@
       hx-on::after-request="if (event.detail.elt === this && event.detail.successful) taskbox.done(this)"
       data-repos='{{ ([] if fixed_repo else box_repos)|tojson }}' data-agents='{{ worker_agent_names()|tojson }}'
       data-fixed-repo="{{ fixed_repo or '' }}">
+    <div class="taskbox__label">New task{% if fixed_repo %} · {{ fixed_repo }}{% endif %}</div>
     <div class="taskbox__field">
         <textarea class="taskbox__textarea" name="goal" rows="1" required autocomplete="off"
                   placeholder="{% if fixed_repo %}What should get done in {{ fixed_repo }}? @agent picks who{% else %}What should get done? #repo picks where, @agent who{% endif %}"

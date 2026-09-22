@@ -583,35 +583,6 @@ body::before {
 /* Filters read as one instrument, not four loose controls: a single inset
    strip, a search that says what it searches, and pickers that look chosen
    when they are. */
-.filters {
-  display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
-  padding: var(--sp-2) var(--sp-3); background: var(--inset);
-  border: 1px solid var(--border); border-radius: var(--r-pill);
-}
-.f-search {
-  font-size: var(--fs-md); padding: var(--sp-2) var(--sp-6) var(--sp-2) var(--sp-11); width: 230px;
-  background-color: transparent; border-color: transparent; color: var(--text);
-  background-image: var(--icon-search);
-  background-repeat: no-repeat; background-position: 9px center; background-size: 14px;
-}
-.f-search:focus { background-color: var(--panel); border-color: var(--border-2); }
-.f-pick {
-  font-size: var(--fs-md); padding: var(--sp-2) var(--sp-10) var(--sp-2) var(--sp-5); width: auto;
-  background-color: transparent; border-color: transparent; color: var(--text-2);
-}
-.f-pick:hover { background-color: var(--panel); }
-/* A picker that is filtering says so instead of blending into the strip.
-   Class, not :valid — a select is valid whether or not anything is chosen,
-   and the value attribute never reflects the choice. */
-.f-pick.is-set {
-  color: var(--accent-hi); background-color: var(--accent-bg); border-color: var(--accent-bd);
-}
-.f-clear {
-  font: inherit; font-size: var(--fs-sm); cursor: pointer; color: var(--muted);
-  background: transparent; border: 1px solid var(--border);
-  border-radius: var(--r-pill); padding: var(--sp-2) var(--sp-5);
-}
-.f-clear:hover { color: var(--text); border-color: var(--border-2); background: var(--panel); }
 .zone__new {
   margin-left: auto; display: flex; align-items: center; gap: var(--sp-4);
   font-size: var(--fs-sm); color: var(--accent-hi);
@@ -2342,3 +2313,48 @@ body.has-overlay { overflow: hidden; }
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
 .arow__tools { margin: var(--sp-4) 0 0; font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted); }
+
+/* ── Filter bar (_ui.html filter_bar) ────────────────────────────────────
+   Every control names what it filters and sits on a surface you can see: the
+   old bar drew them transparent on transparent with grey placeholder text, so
+   a working filter looked like a disabled one. */
+.fbar { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
+.fbar__q {
+  display: flex; align-items: center; gap: var(--sp-3); color: var(--muted);
+  padding: var(--sp-3) var(--sp-5); background: var(--panel-2);
+  border: 1px solid var(--border-2); border-radius: var(--r);
+}
+.fbar__q input {
+  width: 210px; padding: 0; border: 0; background: transparent; box-shadow: none;
+  font-size: var(--fs-md); color: var(--text);
+}
+.fbar__q input:focus { box-shadow: none; }
+.fbar__q:focus-within { border-color: var(--accent); box-shadow: var(--ring); }
+.fbar__pick {
+  display: flex; align-items: center; gap: var(--sp-2); cursor: pointer;
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-5); background: var(--panel-2);
+  border: 1px solid var(--border-2); border-radius: var(--r);
+  transition: border-color var(--dur), background var(--dur);
+}
+.fbar__pick:hover { border-color: var(--muted); }
+.fbar__label { font-size: var(--fs-2xs); color: var(--muted); white-space: nowrap; }
+.fbar__pick select {
+  width: auto; padding: var(--sp-1) var(--sp-9) var(--sp-1) var(--sp-1);
+  border: 0; background-color: transparent; box-shadow: none;
+  font-size: var(--fs-md); color: var(--text-2); cursor: pointer;
+}
+.fbar__pick select:focus { box-shadow: none; }
+.fbar__pick.is-set { border-color: var(--accent-bd); background: var(--accent-bg); }
+.fbar__pick.is-set .fbar__label { color: var(--accent); }
+.fbar__pick.is-set select { color: var(--accent-hi); }
+.fbar__count { font-size: var(--fs-sm); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.fbar__clear {
+  font: inherit; font-size: var(--fs-sm); cursor: pointer; color: var(--text-2);
+  padding: var(--sp-3) var(--sp-5); background: transparent;
+  border: 1px solid var(--border-2); border-radius: var(--r);
+}
+.fbar__clear:hover { color: var(--text); border-color: var(--muted); background: var(--hover); }
+.fbar__clear[hidden] { display: none; }
+@media (max-width: 720px) { .fbar__q, .fbar__q input { width: 100%; } }
+.taskbox__label { font-size: var(--fs-sm); color: var(--muted); }
+.zone__sub { font-size: var(--fs-sm); color: var(--muted); }

@@ -12,7 +12,7 @@
 {#- One row, eight fixed columns. Most rows leave "asked by" and "why" empty,
     and that is the point: a row that says nothing there went the ordinary way,
     so the ones that do say something are the ones worth reading. -#}
-<li class="trow trow--{{ row.kind }} {{ 'trow--child' if row.parent_id }}"
+<li class="trow trow--{{ row.kind }} {{ 'trow--child' if row.parent_id }}" data-filter-item
     data-when="{{ row.when }}" data-repo="{{ row.repo }}" data-who="{{ row.trail|join(' ') }}"
     data-kind="{{ row.kind }}" data-origin="{{ 'auto' if row.origin else 'you' }}"
     data-text="{{ (row.key ~ ' ' ~ row.title ~ ' ' ~ (row.origin.name if row.origin else '') ~ ' ' ~ (row.why.text if row.why else ''))|lower }}">
@@ -38,7 +38,7 @@
 </li>
 {%- endmacro %}
 
-{% from "_ui.html" import agent_mark, ask_card %}
+{% from "_ui.html" import agent_mark, ask_card, filter_bar %}
 
 <div class="board">
 
@@ -109,42 +109,22 @@
     <section class="zone zone--backlog">
         <header class="zone__head">
             <h2>Backlog</h2>
-            <div class="filters">
-                <input type="search" class="f-search" placeholder="Filter by title or key…" autocomplete="off">
-                {% if repos %}
-                <select class="f-pick" data-field="repo">
-                    <option value="">any repo</option>
-                    {% for r in repos %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
-                </select>
-                {% endif %}
-                {% if whos %}
-                <select class="f-pick" data-field="who">
-                    <option value="">anyone</option>
-                    {% for w in whos %}<option value="{{ w }}">{{ w }}</option>{% endfor %}
-                </select>
-                {% endif %}
-                <select class="f-pick" data-field="origin" title="Who asked for the task">
-                    <option value="">from anyone</option>
-                    <option value="you">from you</option>
-                    <option value="auto">from automations</option>
-                </select>
-                <select class="f-pick" data-field="kind">
-                    <option value="">any status</option>
-                    <option value="in-progress">in flight</option>
-                    <option value="needs-you">wants you</option>
-                    <option value="to-merge">to merge</option>
-                    <option value="shipped">shipped</option>
-                    <option value="done">done</option>
-                    <option value="not-merged">not merged</option>
-                    <option value="failed">failed</option>
-                </select>
-                <button type="button" class="f-clear" hidden>clear</button>
-            </div>
+            <span class="zone__sub">every task, oldest sprints folded</span>
             <span class="zone__new" hidden>
                 <span class="zone__new-n tnum">0</span> new since you last looked
                 <button type="button" class="seen-btn">Mark seen</button>
             </span>
         </header>
+        {% set picks = [
+            {'field': 'repo', 'label': 'Repo', 'any': 'any repo', 'options': repos},
+            {'field': 'who', 'label': 'Worked by', 'any': 'anyone', 'options': whos},
+            {'field': 'origin', 'label': 'Asked by', 'any': 'anyone',
+             'options': [('you', 'you'), ('auto', 'an automation')]},
+            {'field': 'kind', 'label': 'Status', 'any': 'any status',
+             'options': [('in-progress', 'in flight'), ('needs-you', 'wants you'), ('to-merge', 'to merge'),
+                         ('shipped', 'shipped'), ('done', 'done'), ('not-merged', 'not merged'), ('failed', 'failed')]},
+        ] %}
+        {{ filter_bar('#backlog', picks | rejectattr('options', 'equalto', []) | list) }}
 
         {# One header for every week below it, on the same column bounds as
            the rows, and pinned while the backlog scrolls under it. #}
@@ -159,8 +139,9 @@
             <span role="columnheader" class="thead__right">When</span>
         </div>
 
+        <div id="backlog">
         {% for sp in sprints %}
-        <details class="sprint" data-sprint="{{ sp.id }}" {{ 'open' if loop.first }}>
+        <details class="sprint" data-sprint="{{ sp.id }}" data-filter-group {{ 'open' if loop.first }}>
             <summary class="sprint__head">
                 <span class="sprint__chev">▸</span>
                 <span class="sprint__name">{{ sp.label }}</span>
@@ -181,7 +162,8 @@
             </ol>
         </details>
         {% endfor %}
-        <p class="trows__none" hidden>Nothing matches these filters.</p>
+        <p class="trows__none" data-filter-none hidden>Nothing matches these filters.</p>
+        </div>
     </section>
     {% elif not needs_you and not running and not queued %}
     <p class="board-quiet">All quiet — nothing in flight, nothing finished yet.</p>
@@ -202,11 +184,9 @@
         if (el.dataset.created) el.textContent = rel(el.dataset.created);
     });
 
-    // Filtering happens on the rows already here: the board refreshes every
-    // seven seconds, and a round trip per keystroke would fight the refresh
-    // and lose your place in the list.
-    // Every poll replaces this list wholesale, so what the reader chose has to
-    // outlive the swap: the filters they set, and the sprints they unfolded.
+    // Filtering lives in base.html now, over [data-filter-item], so the list
+    // and the sprint board filter through the same code. What stays here is
+    // what only a list has: which weeks you unfolded, and what is new.
     var STATE = 'boardView';
     function readState() {
         try { return JSON.parse(sessionStorage.getItem(STATE) || '{}'); } catch (e) { return {}; }
@@ -214,45 +194,6 @@
     function writeState(patch) {
         try { sessionStorage.setItem(STATE, JSON.stringify(Object.assign(readState(), patch))); } catch (e) { }
     }
-    var search = document.querySelector('.f-search');
-    var picks = [].slice.call(document.querySelectorAll('.f-pick'));
-    var clear = document.querySelector('.f-clear');
-    var none = document.querySelector('.trows__none');
-    function filter() {
-        var q = (search && search.value || '').trim().toLowerCase();
-        var want = {};
-        picks.forEach(function (p) { if (p.value) want[p.dataset.field] = p.value; });
-        var active = q || Object.keys(want).length;
-        var shown = 0;
-        document.querySelectorAll('.trow').forEach(function (row) {
-            var ok = true;
-            for (var f in want) {
-                // "who" is a trail of every role that worked the task
-                var have = row.dataset[f] || '';
-                if (f === 'who' ? (' ' + have + ' ').indexOf(' ' + want[f] + ' ') === -1 : have !== want[f]) ok = false;
-            }
-            if (ok && q && (row.dataset.text || '').indexOf(q) === -1) ok = false;
-            row.hidden = !ok;
-            if (ok) shown++;
-        });
-        // A filter that leaves its matches inside a folded week looks like no
-        // matches at all, so filtering opens every sprint that still has one.
-        document.querySelectorAll('.sprint').forEach(function (sp) {
-            var hits = sp.querySelectorAll('.trow:not([hidden])').length;
-            sp.hidden = active && hits === 0;
-            if (active && hits) sp.open = true;
-        });
-        if (clear) clear.hidden = !active;
-        if (none) none.hidden = !(active && shown === 0);
-    }
-    function remember() {
-        var f = {};
-        picks.forEach(function (p) { if (p.value) f[p.dataset.field] = p.value; });
-        writeState({ q: search ? search.value : '', f: f });
-    }
-    if (search) search.addEventListener('input', function () { remember(); filter(); });
-    function markSet() { picks.forEach(function (p) { p.classList.toggle('is-set', !!p.value); }); }
-    picks.forEach(function (p) { p.addEventListener('change', function () { markSet(); remember(); filter(); }); });
     document.querySelectorAll('.sprint').forEach(function (sp, i) {
         sp.addEventListener('toggle', function () {
             var open = readState().open || {};
@@ -260,25 +201,13 @@
             writeState({ open: open });
         });
     });
-    if (clear) clear.onclick = function () {
-        if (search) search.value = '';
-        picks.forEach(function (p) { p.value = ''; });
-        remember();
-        markSet();
-        filter();
-    };
-
     (function restore() {
-        var st = readState();
-        if (search && st.q) search.value = st.q;
-        picks.forEach(function (p) { if (st.f && st.f[p.dataset.field]) p.value = st.f[p.dataset.field]; });
-        var open = st.open || {};
+        var open = readState().open || {};
         document.querySelectorAll('.sprint').forEach(function (sp, i) {
             var k = sp.dataset.sprint || i;
             if (k in open) sp.open = open[k];
         });
     })();
-    markSet();
 
     // "Finished while I wasn't looking" is the one thing about done work worth
     // a person's attention, and it is exactly what an archive sorted by date
@@ -305,6 +234,5 @@
     };
     if (!watermark()) { try { localStorage.setItem(KEY, new Date().toISOString()); } catch (e) { } }
     paint();
-    filter();
 })();
 </script>

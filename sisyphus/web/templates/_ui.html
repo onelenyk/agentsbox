@@ -263,3 +263,33 @@ hx-post="/api/tasks/{{ task_id }}/messages" hx-target="closest .askc" hx-swap="o
     <circle cx="8.5" cy="11" r="3.2" stroke="currentColor" stroke-width="1.6"></circle>
 </svg>
 {%- endmacro %}
+
+{# ── Filtering a board ────────────────────────────────────────────────────
+   One bar for both views. Each control says what it filters ("Repo", "Worked
+   by", …) instead of relying on a greyed-out placeholder, and carries a real
+   surface: the old bar drew every control transparent on transparent, so a
+   working filter read as a disabled one. The behaviour lives in base.html,
+   over [data-filter-item] elements, so a row and a card filter alike. #}
+{% macro filter_bar(scope, picks, placeholder='Filter by title, key or agent…') -%}
+<div class="fbar" data-filter-bar="{{ scope }}">
+    <label class="fbar__q">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.2"></circle><path d="M10.2 10.2 14 14" stroke-linecap="round"></path></svg>
+        <input type="search" data-f-q placeholder="{{ placeholder }}" autocomplete="off" aria-label="Filter by text">
+    </label>
+    {%- for p in picks %}
+    <label class="fbar__pick">
+        <span class="fbar__label">{{ p.label }}</span>
+        <select data-f-field="{{ p.field }}" aria-label="{{ p.label }}">
+            <option value="">{{ p.any or 'any' }}</option>
+            {%- for opt in p.options %}
+            {%- set value = opt if opt is string else opt[0] %}
+            {%- set label = opt if opt is string else opt[1] %}
+            <option value="{{ value }}">{{ label }}</option>
+            {%- endfor %}
+        </select>
+    </label>
+    {%- endfor %}
+    <span class="fbar__count" data-f-count aria-live="polite"></span>
+    <button type="button" class="fbar__clear" data-f-clear hidden>Clear filters</button>
+</div>
+{%- endmacro %}

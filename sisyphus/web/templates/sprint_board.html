@@ -1,11 +1,12 @@
 {# The current sprint as cards in status lanes (routes.sprint_board). The
    same rows the list draws, laid out for "where does this week stand". #}
-{% from "_ui.html" import agent_mark %}
+{% from "_ui.html" import agent_mark, ask_card, filter_bar %}
 
 {% macro task_card(r) -%}
-<a class="tcard tcard--{{ r.kind }}" draggable="false" href="/tasks/{{ r.id }}"
+<a class="tcard tcard--{{ r.kind }}" draggable="false" href="/tasks/{{ r.id }}" data-filter-item
    hx-get="/api/tasks/{{ r.id }}/panel" hx-target="#overlay-body" hx-swap="innerHTML" hx-push-url="/tasks/{{ r.id }}"
-   data-origin="{{ 'auto' if r.origin else 'you' }}"
+   data-origin="{{ 'auto' if r.origin else 'you' }}" data-repo="{{ r.repo }}" data-who="{{ r.trail|join(' ') }}"
+   data-kind="{{ r.kind }}" data-when="{{ r.when }}"
    data-text="{{ (r.key ~ ' ' ~ r.title ~ ' ' ~ r.repo ~ ' ' ~ (r.origin.name if r.origin else '') ~ ' ' ~ (r.why.text if r.why else '') ~ ' ' ~ r.trail|join(' '))|lower }}">
     <div class="tcard__top">
         <span class="tkey">{{ r.key }}</span>
@@ -40,22 +41,30 @@
             <span class="bar-track"><span class="bar-fill good sboard__bar" style="--w:{{ pct }}%"></span></span>
             <span class="sboard__pct tnum">{{ closed }}/{{ total }} closed</span>
         </div>
-        <div class="sboard__tools">
-            <input type="search" class="f-search" placeholder="Filter cards…" data-sboard-filter autocomplete="off">
-            <label class="chip-btn sboard__auto"><input type="checkbox" data-sboard-auto checked> ↻ automations</label>
-        </div>
     </header>
 
-    <div class="sboard__lanes">
+    {% set picks = [
+        {'field': 'repo', 'label': 'Repo', 'any': 'any repo', 'options': repos},
+        {'field': 'who', 'label': 'Worked by', 'any': 'anyone', 'options': whos},
+        {'field': 'origin', 'label': 'Asked by', 'any': 'anyone',
+         'options': [('you', 'you'), ('auto', 'an automation')]},
+    ] %}
+    {{ filter_bar('#sprint-lanes', picks | rejectattr('options', 'equalto', []) | list, 'Filter cards…') }}
+
+    <p class="trows__none" data-filter-none hidden>Nothing matches these filters.</p>
+    <div class="sboard__lanes" id="sprint-lanes">
         {% for lane in lanes %}
-        <section class="slane slane--{{ lane.key }}">
+        <section class="slane slane--{{ lane.key }}" data-filter-group>
             <header class="slane__head" title="{{ lane.about }}">
                 <span class="slane__name">{{ lane.label }}</span>
-                <span class="slane__count tnum">{{ lane.cards|length }}</span>
+                <span class="slane__count tnum" data-filter-count>{{ lane.cards|length }}</span>
             </header>
             <div class="slane__cards">
-                {% for r in lane.cards %}{{ task_card(r) }}{% endfor %}
-                <p class="slane__empty"{% if lane.cards %} hidden{% endif %}>—</p>
+                {% for r in lane.cards %}
+                {%- if lane.key == 'you' and asks and asks.get(r.id) %}{{ ask_card(asks[r.id], r.title) }}
+                {%- else %}{{ task_card(r) }}{% endif %}
+                {% endfor %}
+                <p class="slane__empty" data-filter-empty{% if lane.cards %} hidden{% endif %}>—</p>
             </div>
         </section>
         {% endfor %}
@@ -76,31 +85,5 @@
         if (el.dataset.created) el.textContent = rel(el.dataset.created);
     });
 
-    // The board refreshes on its own, so what you typed or unticked has to
-    // outlive the swap.
-    var KEY = 'sprintFilter';
-    var q = document.querySelector('[data-sboard-filter]'), auto = document.querySelector('[data-sboard-auto]');
-    try {
-        var st = JSON.parse(sessionStorage.getItem(KEY) || '{}');
-        if (st.q) q.value = st.q;
-        if (st.auto === false) auto.checked = false;
-    } catch (e) {}
-    function apply() {
-        var text = q.value.trim().toLowerCase();
-        document.querySelectorAll('.slane').forEach(function (lane) {
-            var n = 0;
-            lane.querySelectorAll('.tcard').forEach(function (c) {
-                var hit = (!text || c.dataset.text.indexOf(text) !== -1) && (auto.checked || c.dataset.origin !== 'auto');
-                c.hidden = !hit;
-                if (hit) n++;
-            });
-            lane.querySelector('.slane__count').textContent = n;
-            lane.querySelector('.slane__empty').hidden = n > 0;
-        });
-        try { sessionStorage.setItem(KEY, JSON.stringify({ q: q.value, auto: auto.checked })); } catch (e) {}
-    }
-    q.addEventListener('input', apply);
-    auto.addEventListener('change', apply);
-    apply();
 })();
 </script>
