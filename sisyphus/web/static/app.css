@@ -350,55 +350,12 @@ a.line:hover, .sys .line--click:hover { color: var(--text); }
 .board-main { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .board-main > #tasks-list { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 
-/* ── Watch rail ──────────────────────────────────────────────────────── */
-/* Always holds its own space. Collapsing shrinks it to its leds instead of
-   hiding it: the point is ambient awareness, and an absent panel is not
-   ambient. */
-.watch {
-  flex: none; width: 280px; min-height: 0;
-  display: flex; flex-direction: column;
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: var(--r-lg); overflow: hidden;
-  transition: width var(--dur) ease;
-}
-.watch__head { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-5) var(--sp-6); border-bottom: 1px solid var(--border); }
-.watch__title { font-size: var(--fs-base); font-weight: var(--fw-bold); color: var(--text-2); white-space: nowrap; }
-.watch__toggle { margin-left: auto; padding: 1px var(--sp-4); line-height: var(--lh-tight); }
-.watch__body { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; }
-
-.watch-sec { border-bottom: 1px solid var(--border); padding: var(--sp-5) var(--sp-5) var(--sp-6); }
-.watch-sec:last-child { border-bottom: none; }
-.watch-sec__h { display: flex; align-items: baseline; gap: var(--sp-4); margin-bottom: var(--sp-3); font-size: var(--fs-3xs); font-weight: var(--fw-bold); letter-spacing: var(--ls-caps); text-transform: uppercase; color: var(--muted); }
-.watch-sec__h .c { margin-left: auto; font-family: var(--mono); font-size: var(--fs-2xs); color: var(--text-2); }
-
-/* The dashboard's live row is a wide three-column grid; in a 280px rail it
-   stacks instead of being squeezed. */
-.watch .live-row { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); padding: var(--sp-3) var(--sp-3); }
-.watch .live-row .role { min-width: 0; }
-.watch .live-row .badge { display: none; }
-.watch .live-row .goal { font-size: var(--fs-base); line-height: var(--lh-snug); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.watch .live-row .meta { text-align: left; }
-.watch .empty { padding: var(--sp-5) var(--sp-3); font-size: var(--fs-sm); }
-
-.watch-w { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-2) var(--sp-3); font-size: var(--fs-sm); }
-.watch-w .n { font-family: var(--mono); color: var(--text-2); white-space: nowrap; }
-.watch-w .s { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.watch-w .d { margin-left: auto; font-family: var(--mono); font-size: var(--fs-2xs); color: var(--text-2); white-space: nowrap; }
-
-.watch--min { width: 46px; }
-.watch--min .watch__title, .watch--min .watch-sec__h, .watch--min .watch-w .n,
-.watch--min .watch-w .s, .watch--min .watch-w .d, .watch--min .live-row .role,
-.watch--min .live-row .goal, .watch--min .live-row .meta, .watch--min .empty { display: none; }
-.watch--min .watch__head { justify-content: center; padding: var(--sp-5) 0; }
-.watch--min .watch__toggle { margin-left: 0; transform: rotate(180deg); }
-.watch--min .watch-sec { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); padding: var(--sp-4) 0; }
-.watch--min .watch-w, .watch--min .live-row { padding: var(--sp-1) 0; align-items: center; }
-.watch--min .watch-rows { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); }
-
-/* Under ~1000px the board columns need every pixel, and a 46px strip with no
-   room for labels tells you less than nothing — the rail steps aside entirely
-   rather than pretending to be useful. The dashboard still has the same rows. */
-@media (max-width: 1000px) { .watch { display: none; } }
+/* ── Background loops (runtime_loops.html) ───────────────────────────── */
+.loop { display: flex; align-items: center; gap: var(--sp-5); padding: var(--sp-3) 0; font-size: var(--fs-md); border-top: 1px solid var(--border); }
+.loop:first-of-type { border-top: none; }
+.loop__name { min-width: 8rem; font-family: var(--mono); color: var(--text-2); white-space: nowrap; }
+.loop__note { min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.loop__next { margin-left: auto; font-family: var(--mono); font-size: var(--fs-xs); color: var(--text-2); white-space: nowrap; }
 
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; }

@@ -11,6 +11,10 @@
         <div class="kpi kpi--violet"><div class="l">Workers in flight</div><div class="v">{{ process.workers_in_flight }}</div><div class="d">restart kills these</div></div>
     </div>
 </div>
+<div class="panel runtime__panel-margin">
+    <div class="result__label">Background loops</div>
+    {% include "runtime_loops.html" %}
+</div>
 {# The daemon's snapshots live with the daemon — Backups used to be a sidebar
    item of their own for something opened once a month. #}
 <div class="panel runtime__panel-margin" id="backups">

@@ -1225,11 +1225,11 @@ def test_runner_edit_keeps_required_fields_on_blank(db_path):
 # ── The board's watch rail ───────────────────────────────────────────────
 
 
-class TestWatchRail:
-    """The rail reports who is on duty. Every row must come from something the
-    system recorded — a live session or a heartbeat a loop stamped."""
+class TestDaemonLoops:
+    """The Daemon page reports the background loops. Every row must come from
+    a heartbeat a loop actually stamped. (This was the board's watch rail.)"""
 
-    def test_rail_reports_each_registered_watcher(self, db_path):
+    def test_each_registered_loop_is_reported(self, db_path):
         from core import heartbeat
         heartbeat.clear()
         heartbeat.register("dispatcher", kind="event", note="waiting for an event")
@@ -1238,44 +1238,21 @@ class TestWatchRail:
         heartbeat.register("forge poll", every=300)
         heartbeat.mark_off("forge poll", "forge_poll.enabled is false")
         try:
-            html = _make_client().get("/api/board/watch").text
+            html = _make_client().get("/runtime").text
         finally:
             heartbeat.clear()
-        # the depth is whatever the queue holds right now — assert the shape,
-        # not a number another test may have left behind
         assert "dispatcher" in html and "waiting · queue" in html
         assert "nothing stalled" in html
         assert "off · forge_poll.enabled is false" in html
-        assert "led dead" not in html          # nothing here is broken
 
-    def test_rail_is_honest_when_nothing_is_running(self, db_path):
-        from core import heartbeat, sessions
+    def test_it_is_honest_before_the_loops_start(self, db_path):
+        from core import heartbeat
         heartbeat.clear()
-        sessions.clear()
-        html = _make_client().get("/api/board/watch").text
-        assert "No agent is running." in html
-        assert "Product owner" not in html and "What next" not in html
-        assert "the daemon's loops have not started" in html
+        assert "the daemon's loops have not started" in _make_client().get("/runtime").text
 
-    def test_rail_lists_a_running_agent(self, db_path):
-        from core import heartbeat, sessions, store
-        heartbeat.clear()
-        sessions.clear()
-        t = store.create_task("Wire the rail", repo="sisyphus")
-        sessions.mint(t["id"], "engineer", instruction="add the panel",
-                      model="deepseek/v4", runner="opencode")
-        try:
-            html = _make_client().get("/api/board/watch").text
-        finally:
-            sessions.clear()
-        assert "engineer" in html and "add the panel" in html and "deepseek/v4" in html
-
-    def test_the_rail_is_unhooked_from_the_board_for_now(self, db_path):
-        """Temporarily off the board (2026-09-20) while the page is reworked.
-        The route still answers, so putting it back is a template change."""
-        html = _make_client().get("/tasks").text
-        assert 'id="watch"' not in html
-        assert _make_client().get("/api/board/watch").status_code == 200
+    def test_the_rail_is_gone(self, db_path):
+        assert _make_client().get("/api/board/watch").status_code == 404
+        assert 'id="watch"' not in _make_client().get("/tasks").text
 
 
 def test_a_cron_run_that_needs_you_stays_a_card(db_path):
