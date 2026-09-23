@@ -105,7 +105,7 @@ async def startup():
     _started = True
 
     # One call owns the schema: every init in order (daemon is self-sufficient —
-    # runners, agents, usage, MRs, autopilots, planner all seed
+    # runners, agents, usage, MRs, autopilots all seed
     # themselves), then a PRAGMA user_version stamp so a future non-additive
     # migration has something to compare against.
     from core.migrations import migrate_all
@@ -1689,112 +1689,6 @@ async def tasks_create(request: Request, goal: str = Form(...), repo: str = Form
     resp.headers["HX-Trigger"] = json.dumps({"taskCreated": {"quiet": True}})
     return resp
 
-# ── Mission Planner ─────────────────────────────────────────────────────
-
-@router.get("/plans", response_class=HTMLResponse)
-async def plans_page(request: Request):
-    return _tmpl().TemplateResponse(request, "plans.html", {"active_page": "plans"})
-
-def _plan_ctx(request, plan, flash=None, error=None):
-    from core import planner
-    from core.repos import list_repos
-    items = planner.list_items(plan["id"])
-    by = {x["id"]: x for x in items}
-    for it in items:
-        it["state"] = planner.item_state(it, by)
-    idx = {it["id"]: i + 1 for i, it in enumerate(items)}
-    for it in items:
-        it["after_nums"] = [idx[a] for a in it["after"] if a in idx]
-    brief = plan.get("brief_obj")
-    return {
-        "request": request, "plan": plan, "brief": brief, "items": items,
-        "messages": planner.list_messages(plan["id"]),
-        "dag": planner.steps_dag_mermaid(brief["steps"]) if brief and brief.get("steps") else "",
-        "repos": list_repos(), "plans": planner.list_plans(),
-        "has_launched": any(it["status"] == "launched" for it in items),
-        "generating": planner.is_generating(plan["id"]),
-        "flash": flash, "error": error or planner.pop_error(plan["id"]),
-    }
-
-def _plan_panel(request, plan, **kw):
-    return _tmpl().TemplateResponse(request, "plan_panel.html", _plan_ctx(request, plan, **kw))
-
-@router.get("/api/plans/panel", response_class=HTMLResponse)
-async def plans_panel_latest(request: Request):
-    from core import planner
-    return _plan_panel(request, planner.latest_plan() or planner.create_plan())
-
-@router.get("/api/plans/{pid}", response_class=HTMLResponse)
-async def plans_panel(request: Request, pid: str):
-    from core import planner
-    return _plan_panel(request, planner.get_plan(pid) or planner.latest_plan() or planner.create_plan())
-
-@router.get("/api/plans/{pid}/items", response_class=HTMLResponse)
-async def plans_items(request: Request, pid: str):
-    from core import planner
-    return _tmpl().TemplateResponse(request, "plan_items.html", _plan_ctx(request, planner.get_plan(pid) or planner.create_plan()))
-
-@router.post("/api/plans/new", response_class=HTMLResponse)
-async def plans_new(request: Request):
-    from core import planner
-    return _plan_panel(request, planner.create_plan())
-
-@router.post("/api/plans/{pid}/repo", response_class=HTMLResponse)
-async def plans_set_repo(request: Request, pid: str, repo: str = Form("")):
-    from core import planner
-    planner.update_plan(pid, repo=repo, brief="")  # a new project → drop the old brief
-    return _plan_panel(request, planner.get_plan(pid))
-
-@router.post("/api/plans/{pid}/toggle/{flag}", response_class=HTMLResponse)
-async def plans_toggle(request: Request, pid: str, flag: str):
-    from core import planner
-    if flag not in ("auto_release", "auto_merge"):
-        return _plan_panel(request, planner.get_plan(pid), error="unknown setting")
-    plan = planner.get_plan(pid)
-    new = 0 if (plan or {}).get(flag) else 1
-    planner.update_plan(pid, **{flag: new})
-    label = "Auto-release" if flag == "auto_release" else "Auto-merge"
-    return _plan_panel(request, planner.get_plan(pid),
-                       flash=f"{label} {'on' if new else 'off'}.")
-
-@router.post("/api/plans/{pid}/plan", response_class=HTMLResponse)
-async def plans_plan_turn(request: Request, pid: str, message: str = Form(...)):
-    from core import planner
-    if not message.strip():
-        return _plan_panel(request, planner.get_plan(pid), error="Describe the task first.")
-    planner.start_plan_turn(pid, message.strip())   # background; the panel polls
-    return _plan_panel(request, planner.get_plan(pid))
-
-@router.post("/api/plans/{pid}/convert", response_class=HTMLResponse)
-async def plans_convert(request: Request, pid: str):
-    from core import planner
-    try:
-        planner.convert_to_drafts(pid)
-        return _plan_panel(request, planner.get_plan(pid), flash="Converted to draft tasks.")
-    except Exception as exc:  # noqa: BLE001
-        return _plan_panel(request, planner.get_plan(pid), error=str(exc))
-
-@router.post("/api/plans/{pid}/launch/{iid}", response_class=HTMLResponse)
-async def plans_launch(request: Request, pid: str, iid: str):
-    from core import planner
-    try:
-        planner.launch_item(iid)
-        return _plan_panel(request, planner.get_plan(pid), flash="Launched.")
-    except Exception as exc:  # noqa: BLE001
-        return _plan_panel(request, planner.get_plan(pid), error=str(exc))
-
-@router.post("/api/plans/{pid}/item/{iid}/delete", response_class=HTMLResponse)
-async def plans_item_delete(request: Request, pid: str, iid: str):
-    from core import planner
-    planner.delete_item(iid)
-    return _plan_panel(request, planner.get_plan(pid))
-
-@router.post("/api/plans/{pid}/delete", response_class=HTMLResponse)
-async def plans_delete(request: Request, pid: str):
-    from core import planner
-    planner.delete_plan(pid)
-    return _plan_panel(request, planner.latest_plan() or planner.create_plan())
-
 @router.get("/tasks/{task_id}", response_class=HTMLResponse)
 async def task_page(request: Request, task_id: str):
     ctx = _task_ctx(task_id)
@@ -1981,7 +1875,7 @@ async def mr_merge(request: Request, mr_id: str, force: str = Form("")):
 @router.post("/api/mr/{mr_id}/merge-resolve", response_class=HTMLResponse)
 async def mr_merge_resolve(request: Request, mr_id: str, force: str = Form("")):
     """Merge an MR that conflicts, letting the local model resolve each conflicted
-    file (core.planner._ai_conflict_resolver) instead of sending the user off to
+    file (core.mergerequests.ai_conflict_resolver) instead of sending the user off to
     fix it by hand.
 
     Guarded to the case it exists for: only an MR that does NOT merge cleanly.
@@ -1994,7 +1888,7 @@ async def mr_merge_resolve(request: Request, mr_id: str, force: str = Form("")):
     leaves the target branch untouched the moment one file comes back unresolved,
     and this route then leaves the MR open and renders the reason.
     """
-    from core import mergerequests, planner, store
+    from core import mergerequests, store
     from fastapi.responses import Response
     mr = mergerequests.get_mr(mr_id)
     if not mr:
@@ -2018,7 +1912,7 @@ async def mr_merge_resolve(request: Request, mr_id: str, force: str = Form("")):
                         "for a merge git cannot do on its own")
         return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
 
-    res = mergerequests.merge_resolving(mr, mr["target_branch"], planner._ai_conflict_resolver)
+    res = mergerequests.merge_resolving(mr, mr["target_branch"], mergerequests.ai_conflict_resolver)
     if not res.get("ok"):
         ctx["error"] = (f"AI resolution failed: {res.get('error', 'unknown error')} — "
                         f"{mr['target_branch']} is untouched and nothing was merged")

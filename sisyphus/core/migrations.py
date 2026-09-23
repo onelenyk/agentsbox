@@ -18,7 +18,12 @@ logger = logging.getLogger(__name__)
 
 # Bump when the set of known migrations grows. 1 = every schema change up to
 # and including 2026-09 (16 guarded ALTERs across store/planner/mergerequests).
-CURRENT_VERSION = 1
+# 2 = the Mission Planner's tables retired with the planner (2026-09-23).
+CURRENT_VERSION = 2
+
+# Tables of features that are gone. Dropped on upgrade so a database does not
+# keep carrying — and a reader keep wondering about — data nothing reads.
+RETIRED_TABLES = ("plans", "plan_items", "plan_messages")
 
 
 def db_version() -> int:
@@ -42,7 +47,6 @@ def migrate_all() -> int:
     from core.usage import init_usage_table
     from core.mergerequests import init_mr_table
     from core.autopilot import init_autopilot_table
-    from core.planner import init_planner_tables
 
     before = db_version()
     init_db()
@@ -51,9 +55,10 @@ def migrate_all() -> int:
     init_usage_table()
     init_mr_table()
     init_autopilot_table()
-    init_planner_tables()
     conn = get_conn()
     try:
+        for table in RETIRED_TABLES:
+            conn.execute(f"DROP TABLE IF EXISTS {table}")
         conn.execute(f"PRAGMA user_version = {int(CURRENT_VERSION)}")
         conn.commit()
     finally:

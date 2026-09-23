@@ -66,7 +66,7 @@ def _attach(session, filename="", description="", **_):
 
 
 def _propose_subtasks(session, items=None, **_):
-    """A planner's structured fan-out proposal: one {repo, goal} per repo. Posts
+    """An explorer's structured fan-out proposal: one {repo, goal} per repo. Posts
     a 'plan' message the orchestrator turns into child tasks (spawn_task)."""
     items = items or []
     if not items:

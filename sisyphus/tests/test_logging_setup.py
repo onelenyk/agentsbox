@@ -66,7 +66,7 @@ class TestPollAccessFilter:
     def test_poll_get_200_is_dropped(self):
         from core.logging_setup import drop_poll_access
         for path in ("/api/inbox/view", "/api/dashboard/view", "/api/workers/live",
-                     "/api/tasks/list", "/api/v1/health", "/api/plans/plan-1",
+                     "/api/tasks/list", "/api/v1/health",
                      "/api/tasks/task-abc/detail"):
             assert drop_poll_access(self._rec(path=path)) is False, path
 

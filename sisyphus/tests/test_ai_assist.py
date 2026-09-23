@@ -71,8 +71,6 @@ class TestReadingJsonOutOfAModelsProse:
         assert ai_assist.find_json("use the {placeholder} syntax") is None
 
     def test_every_module_that_reads_a_model_uses_this_one(self):
-        from core import planner
         out = 'Sure:\n{"goal": "g", "meta": {"a": 1}}\nand {an aside}.'
         want = {"goal": "g", "meta": {"a": 1}}
-        assert planner._find_json(out) == want
         assert ai_assist._find_json(out) == want

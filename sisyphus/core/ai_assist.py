@@ -1,7 +1,8 @@
 """Quick one-shot AI helpers via the local runner (opencode) — no new model HTTP.
 
-Used by the planner: `run_prompt` runs `opencode run
-<prompt>` in a scratch dir, and `find_json` reads the JSON the model prints.
+Used by the AI conflict merge (mergerequests.ai_conflict_resolver): `run_prompt` runs
+`opencode run <prompt>` in a scratch dir, and `find_json` reads the JSON the
+model prints.
 """
 import json
 import logging

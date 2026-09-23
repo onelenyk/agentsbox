@@ -62,8 +62,7 @@ def test_an_old_database_upgrades_in_place(old_db):
     ).fetchall()}
     required_tables = {
         "tasks", "messages", "runners", "agents", "usage", "merge_requests",
-        "autopilots", "plans",
-        "plan_items", "plan_messages"
+        "autopilots",
     }
     assert required_tables.issubset(tables), f"Missing tables: {required_tables - tables}"
 
@@ -147,8 +146,7 @@ def test_a_current_database_just_gets_stamped(tmp_path, monkeypatch):
     ).fetchall()}
     required_tables = {
         "tasks", "messages", "runners", "agents", "usage", "merge_requests",
-        "autopilots", "plans",
-        "plan_items", "plan_messages"
+        "autopilots",
     }
     assert required_tables.issubset(tables)
     conn.close()

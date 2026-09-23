@@ -64,7 +64,7 @@ def setup_logging() -> Path:
 # every other path still log.
 _POLL_PATHS = (
     "/api/inbox/view", "/api/dashboard/view", "/api/workers/live",
-    "/api/tasks/list", "/api/v1/health", "/api/plans/",
+    "/api/tasks/list", "/api/v1/health",
 )
 
 

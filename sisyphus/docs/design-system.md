@@ -30,10 +30,8 @@ sidebar footer stores the choice per browser.
 A theme must retune **every** colour token. Any it skips keep their dark value,
 and the tests fail. A theme may not style selectors or invent tokens.
 
-Two things can't read a `var()`, so they carry their colour inside the token:
-- `--icon-search` is a data-URI SVG. Retune its stroke with `--muted`.
-- Mermaid diagrams read their colours from the tokens when they initialise
-  (`plans.html`).
+One thing can't read a `var()`, so it carries its colour inside the token:
+`--icon-search` is a data-URI SVG. Retune its stroke with `--muted`.
 
 ## Rules for new UI
 
