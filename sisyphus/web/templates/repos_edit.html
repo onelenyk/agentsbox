@@ -1,23 +1,18 @@
-<div class="modal-backdrop" onclick="if(event.target===this)this.remove()">
-    <div class="modal" onclick="event.stopPropagation()">
-        <div class="modal__head"><h2>Edit {{ repo.name }}</h2></div>
-        <form hx-post="/api/repos/{{ repo.name }}/edit" hx-target="#modal-container" hx-swap="outerHTML" hx-on:after-request="htmx.trigger('#repos-list', 'load')">
-            <div class="modal__body">
-                <div class="field"><label>Source</label><input type="text" name="source" value="{{ repo.source }}"></div>
-                <div class="field"><label>Branch</label><input type="text" name="branch" value="{{ repo.branch }}"></div>
-                <div class="field"><label>Platform</label>
-                    <select name="platform">
-                        <option value="" {% if not repo.platform %}selected{% endif %}>Auto-detect</option>
-                        <option value="local" {% if repo.platform == 'local' %}selected{% endif %}>Local</option>
-                        <option value="gitlab" {% if repo.platform == 'gitlab' %}selected{% endif %}>GitLab</option>
-                        <option value="github" {% if repo.platform == 'github' %}selected{% endif %}>GitHub</option>
-                    </select>
-                </div>
-            </div>
-            <div class="modal__actions">
-                <button type="button" class="btn btn--ghost" onclick="this.closest('.modal-backdrop').remove()">Cancel</button>
-                <button type="submit" class="btn btn--primary">Save</button>
-            </div>
-        </form>
+{% from "_ui.html" import modal %}
+{% set fa %}hx-post="/api/repos/{{ repo.name }}/edit" hx-target="#modal-container" hx-swap="outerHTML" hx-on:after-request="htmx.trigger('#repos-list', 'load')"{% endset %}
+{% call modal('Edit ' ~ repo.name, 'Save', fa) %}
+<div class="field"><label>Source</label><input type="text" name="source" value="{{ repo.source }}">
+    <span class="hint">Local path or git URL — a URL is cloned</span>
+</div>
+<div class="field-pair">
+    <div class="field"><label>Branch</label><input type="text" name="branch" value="{{ repo.branch }}"></div>
+    <div class="field"><label>Platform</label>
+        <select name="platform">
+            <option value="" {% if not repo.platform %}selected{% endif %}>Auto-detect</option>
+            <option value="local" {% if repo.platform == 'local' %}selected{% endif %}>Local</option>
+            <option value="gitlab" {% if repo.platform == 'gitlab' %}selected{% endif %}>GitLab</option>
+            <option value="github" {% if repo.platform == 'github' %}selected{% endif %}>GitHub</option>
+        </select>
     </div>
 </div>
+{% endcall %}

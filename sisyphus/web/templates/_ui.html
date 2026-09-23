@@ -294,3 +294,27 @@ hx-post="/api/tasks/{{ task_id }}/messages" hx-target="closest .askc" hx-swap="o
     <button type="button" class="fbar__clear" data-f-clear hidden>Clear filters</button>
 </div>
 {%- endmacro %}
+
+{# ── Create / edit dialog ─────────────────────────────────────────────────
+   One shape for every add and edit form: a title, the fields, and the actions
+   in a fixed order — an optional aside pushed left (a check the form can run),
+   then Cancel, then the one primary button. Clicking outside or Cancel closes
+   it. `form_attrs` carries the form's hx-* wiring verbatim; pass it built with
+   {% set %}…{% endset %} so any value inside it is escaped once. #}
+{% macro modal(title, submit, form_attrs, id='', size='', aside='') -%}
+<div{% if id %} id="{{ id }}"{% endif %} class="modal-backdrop" onclick="if(event.target===this)this.remove()">
+    <div class="modal{% if size %} {{ size }}{% endif %}" onclick="event.stopPropagation()">
+        <div class="modal__head"><h2>{{ title }}</h2></div>
+        <form {{ form_attrs|safe }}>
+            <div class="modal__body">
+                {{ caller() }}
+            </div>
+            <div class="modal__actions">
+                {% if aside %}<div class="modal__aside">{{ aside|safe }}</div>{% endif %}
+                <button type="button" class="btn btn--ghost" onclick="this.closest('.modal-backdrop').remove()">Cancel</button>
+                <button type="submit" class="btn btn--primary">{{ submit }}</button>
+            </div>
+        </form>
+    </div>
+</div>
+{%- endmacro %}

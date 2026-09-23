@@ -1,60 +1,64 @@
+{% from "_ui.html" import modal %}
 {% set a = ap or {} %}
-<div class="modal-backdrop" onclick="if(event.target===this)this.remove()">
-    <div class="modal" onclick="event.stopPropagation()">
-        <div class="modal__head"><h2>{{ 'Edit Autopilot' if ap else 'New Autopilot' }}</h2></div>
-        <form hx-post="{{ '/api/autopilots/' ~ a.id if ap else '/api/autopilots' }}"
-              hx-target="#autopilots-list" hx-swap="innerHTML"
-              hx-on::after-request="this.closest('.modal-backdrop').remove()">
-            <div class="modal__body">
-                <div class="field"><label>Name</label><input name="name" required value="{{ a.get('name','') }}" placeholder="Nightly repo scan"></div>
-                <div class="field"><label>Description</label><input name="description" value="{{ a.get('description','') }}" placeholder="What it does"></div>
+{% set fa %}hx-post="{{ '/api/autopilots/' ~ a.id if ap else '/api/autopilots' }}"
+      hx-target="#autopilots-list" hx-swap="innerHTML"
+      hx-on::after-request="this.closest('.modal-backdrop').remove()"{% endset %}
+{% call modal('Edit ' ~ a.get('name', '') if ap else 'New autopilot', 'Save' if ap else 'Add autopilot', fa) %}
+<div class="field"><label>Name</label><input name="name" required value="{{ a.get('name','') }}" placeholder="Nightly repo scan"></div>
 
-                <div class="field"><label>Trigger</label>
-                    <select name="trigger_type" onchange="apToggle(this.value)">
-                        <option value="schedule" {{ 'selected' if a.get('trigger_type','schedule')=='schedule' else '' }}>Schedule (cron or interval)</option>
-                        <option value="webhook" {{ 'selected' if a.get('trigger_type')=='webhook' else '' }}>Webhook (external event)</option>
-                        <option value="manual" {{ 'selected' if a.get('trigger_type')=='manual' else '' }}>Manual only</option>
-                    </select>
-                </div>
+<div class="field"><label>Task text</label><textarea name="goal_template" rows="2" placeholder="Scan repos for stuck MRs">{{ a.get('goal_template','') }}</textarea>
+    <span class="hint">What each run asks for. A webhook can fill in {{ '{{ }}' }} placeholders from its payload, e.g. {{ '{{ issue.key }}' }}.</span>
+</div>
 
-                <div id="ap-sched" class="ap-section">
-                    <div class="field"><label>Cron</label><input name="cron" value="{{ a.get('cron','') }}" placeholder="0 3 * * *  (min hour dom mon dow)"></div>
-                    <div class="field"><label>…or interval (seconds)</label><input type="number" name="interval_seconds" min="0" value="{{ a.get('interval_seconds',0) }}" placeholder="3600"></div>
-                </div>
-
-                <div id="ap-wh" class="ap-section">
-                    <div class="field"><label>Platform</label>
-                        <select name="webhook_platform">
-                            <option value="">—</option>
-                            {% for p in ['github','gitlab','jira'] %}<option value="{{ p }}" {{ 'selected' if a.get('webhook_platform')==p else '' }}>{{ p }}</option>{% endfor %}
-                        </select>
-                    </div>
-                    <div class="field"><label>Event filter (optional)</label><input name="webhook_event" value="{{ a.get('webhook_event','') }}" placeholder="issue.opened"></div>
-                </div>
-
-                <div class="field"><label>Goal template</label><textarea name="goal_template" rows="2" placeholder="Scan repos for stuck MRs  ·  supports {{ '{{ issue.key }}' }} from webhook payloads">{{ a.get('goal_template','') }}</textarea></div>
-
-                <div class="field"><label>Repo (optional)</label>
-                    <select name="repo">
-                        <option value="">— none —</option>
-                        {% for r in repos %}<option value="{{ r.name }}" {{ 'selected' if a.get('repo')==r.name else '' }}>{{ r.name }}</option>{% endfor %}
-                    </select>
-                </div>
-                <div class="field"><label>Agent</label>
-                    <select name="agent">
-                        <option value="">orchestrator (dispatches)</option>
-                        {% for ag in agents %}<option value="{{ ag.name }}" {{ 'selected' if a.get('agent')==ag.name else '' }}>{{ ag.name }} (solo)</option>{% endfor %}
-                    </select>
-                </div>
-                <label class="check"><input type="checkbox" name="skip_if_running" {{ 'checked' if a.get('skip_if_running',1) else '' }}> Skip if the previous run is still running</label>
-            </div>
-            <div class="modal__actions">
-                <button type="button" class="btn btn--ghost" onclick="this.closest('.modal-backdrop').remove()">Cancel</button>
-                <button type="submit" class="btn btn--primary">{{ 'Save' if ap else 'Create' }}</button>
-            </div>
-        </form>
+<div class="field-pair">
+    <div class="field"><label>Repo</label>
+        <select name="repo">
+            <option value="">— none —</option>
+            {% for r in repos %}<option value="{{ r.name }}" {{ 'selected' if a.get('repo')==r.name else '' }}>{{ r.name }}</option>{% endfor %}
+        </select>
+    </div>
+    <div class="field"><label>Agent</label>
+        <select name="agent">
+            <option value="">orchestrator (dispatches)</option>
+            {% for ag in agents %}<option value="{{ ag.name }}" {{ 'selected' if a.get('agent')==ag.name else '' }}>{{ ag.name }} (solo)</option>{% endfor %}
+        </select>
     </div>
 </div>
+
+<div class="field"><label>Trigger</label>
+    <select name="trigger_type" onchange="apToggle(this.value)">
+        <option value="schedule" {{ 'selected' if a.get('trigger_type','schedule')=='schedule' else '' }}>Schedule (cron or interval)</option>
+        <option value="webhook" {{ 'selected' if a.get('trigger_type')=='webhook' else '' }}>Webhook (external event)</option>
+        <option value="manual" {{ 'selected' if a.get('trigger_type')=='manual' else '' }}>Manual only</option>
+    </select>
+</div>
+
+<div id="ap-sched" class="ap-section field-pair">
+    <div class="field"><label>Cron</label><input name="cron" value="{{ a.get('cron','') }}" placeholder="0 3 * * *">
+        <span class="hint">min hour day month weekday, read in UTC</span>
+    </div>
+    <div class="field"><label>or every N seconds</label><input type="number" name="interval_seconds" min="0" value="{{ a.get('interval_seconds') or '' }}" placeholder="3600"></div>
+</div>
+
+<div id="ap-wh" class="ap-section field-pair">
+    <div class="field"><label>Platform</label>
+        <select name="webhook_platform">
+            <option value="">—</option>
+            {% for p in ['github','gitlab','jira'] %}<option value="{{ p }}" {{ 'selected' if a.get('webhook_platform')==p else '' }}>{{ p }}</option>{% endfor %}
+        </select>
+    </div>
+    <div class="field"><label>Event filter</label><input name="webhook_event" value="{{ a.get('webhook_event','') }}" placeholder="issue.opened">
+        <span class="hint">Blank fires on every event</span>
+    </div>
+</div>
+
+<label class="check"><input type="checkbox" name="skip_if_running" {{ 'checked' if a.get('skip_if_running',1) else '' }}> Skip if the previous run is still running</label>
+
+<details class="form-more"{{ ' open' if a.get('description') }}>
+    <summary>Advanced</summary>
+    <div class="field"><label>Description</label><input name="description" value="{{ a.get('description','') }}"></div>
+</details>
+{% endcall %}
 <script>
     function apToggle(v) {
         document.getElementById('ap-sched').hidden = (v !== 'schedule');

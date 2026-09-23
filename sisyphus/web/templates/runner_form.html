@@ -1,36 +1,23 @@
-{% from "_ui.html" import dsec, choice, probe %}
+{% from "_ui.html" import dsec, choice, probe, modal %}
 {# Add and edit share one form. The part below the runner type depends on the
    type — its sign-in, its models — so it is fetched per type and re-fetched
    when the type changes (runner_form_body.html). #}
-<div class="modal-backdrop" onclick="if(event.target===this)this.remove()">
-    <div class="modal modal--wide modal--tall" onclick="event.stopPropagation()">
-        <div class="modal__head modal__head--row">
-            <h2>{{ 'Edit ' ~ runner.name if runner else 'Add runner' }}</h2>
-            <button type="button" class="btn btn--ghost btn--sm" onclick="this.closest('.modal-backdrop').remove()">Close</button>
-        </div>
-        <form class="modal__form" hx-post="{{ '/api/runners/' ~ runner.id ~ '/edit' if runner else '/api/runners' }}" hx-swap="none"
-              hx-on::after-request="if (event.detail.elt === this && event.detail.successful) this.closest('.modal-backdrop').remove()">
-            <input type="hidden" name="runner_id" value="{{ runner.id if runner else '' }}">
-            <div class="modal__body">
-                {% call dsec('', 'Runner') %}
-                <div class="choices">
-                    {% for t in kinds %}
-                    {{ choice('type', t.id, t.id == selected, t.label,
-                              sub=probe(true if t.path else none,
-                                        ('v' ~ t.version if t.version else 'installed') if t.path else 'not found on this machine',
-                                        t.path or ''),
-                              attrs='hx-get="/api/runners/form-body" hx-include="[name=runner_id]" hx-target="#runner-body" hx-swap="innerHTML" hx-trigger="change"') }}
-                    {% endfor %}
-                </div>
-                {% endcall %}
-                <div id="runner-body" hx-get="/api/runners/form-body?type={{ selected }}&runner_id={{ runner.id if runner else '' }}" hx-trigger="load" hx-swap="innerHTML">
-                    {{ probe(none, 'Asking the runner what it can run…') }}
-                </div>
-            </div>
-            <div class="modal__actions">
-                <button type="button" class="btn btn--ghost" onclick="this.closest('.modal-backdrop').remove()">Cancel</button>
-                <button type="submit" class="btn btn--primary">{{ 'Save' if runner else 'Add runner' }}</button>
-            </div>
-        </form>
-    </div>
+{% set fa %}class="modal__form" hx-post="{{ '/api/runners/' ~ runner.id ~ '/edit' if runner else '/api/runners' }}" hx-swap="none"
+      hx-on::after-request="if (event.detail.elt === this && event.detail.successful) this.closest('.modal-backdrop').remove()"{% endset %}
+{% call modal('Edit ' ~ runner.name if runner else 'New runner', 'Save' if runner else 'Add runner', fa, size='modal--wide modal--tall') %}
+<input type="hidden" name="runner_id" value="{{ runner.id if runner else '' }}">
+{% call dsec('', 'Runner') %}
+<div class="choices">
+    {% for t in kinds %}
+    {{ choice('type', t.id, t.id == selected, t.label,
+              sub=probe(true if t.path else none,
+                        ('v' ~ t.version if t.version else 'installed') if t.path else 'not found on this machine',
+                        t.path or ''),
+              attrs='hx-get="/api/runners/form-body" hx-include="[name=runner_id]" hx-target="#runner-body" hx-swap="innerHTML" hx-trigger="change"') }}
+    {% endfor %}
 </div>
+{% endcall %}
+<div id="runner-body" hx-get="/api/runners/form-body?type={{ selected }}&runner_id={{ runner.id if runner else '' }}" hx-trigger="load" hx-swap="innerHTML">
+    {{ probe(none, 'Asking the runner what it can run…') }}
+</div>
+{% endcall %}
