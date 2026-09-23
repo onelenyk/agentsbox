@@ -197,6 +197,38 @@ def by_agent() -> list:
     return [dict(r) for r in rows]
 
 
+def roster() -> dict:
+    """What each agent has actually done, and who it works with.
+
+    `agents`: per agent — runs, cost, tasks it touched, last run.
+    `handoffs`: (from, to) -> how many times, within one task, one worker's
+    run was followed by another's. That is the real shape of the team —
+    engineer to reviewer, reviewer back to engineer on changes — read from
+    what happened rather than drawn from what was intended. The orchestrator
+    is left out of it: it sits between every pair.
+    """
+    conn = get_conn()
+    rows = conn.execute("SELECT task_id, agent, cost, created_at FROM usage ORDER BY id").fetchall()
+    conn.close()
+    agents, per_task = {}, {}
+    for r in rows:
+        a = agents.setdefault(r["agent"], {"runs": 0, "cost": 0.0, "tasks": set(), "last": ""})
+        a["runs"] += 1
+        a["cost"] += r["cost"] or 0
+        a["tasks"].add(r["task_id"])
+        a["last"] = max(a["last"], r["created_at"] or "")
+        per_task.setdefault(r["task_id"], []).append(r["agent"])
+    handoffs = {}
+    for seq in per_task.values():
+        workers = [a for a in seq if a != "orchestrator"]
+        for x, y in zip(workers, workers[1:]):
+            if x != y:
+                handoffs[(x, y)] = handoffs.get((x, y), 0) + 1
+    for a in agents.values():
+        a["tasks"] = len(a["tasks"])
+    return {"agents": agents, "handoffs": handoffs}
+
+
 def task_cost(task_id: str) -> float:
     """Total $ spent on a single task's runs — for the per-task budget guard."""
     conn = get_conn()

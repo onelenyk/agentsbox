@@ -1012,9 +1012,37 @@ async def agents_page(request: Request):
 async def agents_list_view(request: Request):
     from core.agents import list_agents
     from core.runners import list_runners
+    from core import sessions, usage
     runners = {r["id"]: r["name"] for r in list_runners()}
+    team = usage.roster()
+    stats, handoffs = team["agents"], team["handoffs"]
+    live = {s["role"] for s in sessions.list_active()}
+    agents = list_agents()
+    for a in agents:
+        n = a["name"]
+        a["stats"] = stats.get(n)
+        a["live"] = n in live
+        # First sentence of the persona: what it is for, in its own words.
+        sentences = [x.strip().rstrip(".") for x in
+                     (a.get("persona") or "").strip().split("\n")[0].split(". ") if x.strip()]
+        # "You are the Sisyphus orchestrator." names it; the next sentence says
+        # what it does — use that one.
+        if len(sentences) > 1 and sentences[0].startswith("You are") and len(sentences[0].split()) < 8:
+            sentences = sentences[1:]
+        a["role_line"] = (sentences[0] + ".") if sentences else ""
+        a["gives"] = sorted(((to, k) for (fr, to), k in handoffs.items() if fr == n), key=lambda x: -x[1])
+        a["takes"] = sorted(((fr, k) for (fr, to), k in handoffs.items() if to == n), key=lambda x: -x[1])
+    lead = [a for a in agents if a["kind"] == "orchestrator"]
+    # In the order work flows through them; anyone else after, busiest first.
+    flow = ["explorer", "engineer", "reviewer", "mr-reviewer"]
+    workers = sorted((a for a in agents if a["kind"] != "orchestrator"),
+                     key=lambda a: (flow.index(a["name"]) if a["name"] in flow else len(flow),
+                                    -((a["stats"] or {}).get("runs", 0))))
+    # The orchestrator hands every task to someone: how many tasks each got.
+    dispatch = [(w["name"], (w["stats"] or {}).get("tasks", 0)) for w in workers if w["stats"]]
     return _tmpl().TemplateResponse(request, "agents_list.html",
-                                    {"agents": list_agents(), "runners": runners})
+                                    {"lead": lead, "workers": workers, "dispatch": dispatch,
+                                     "runners": runners, "agents": agents})
 
 @router.get("/api/agents/new-form", response_class=HTMLResponse)
 async def agents_new_form(request: Request):

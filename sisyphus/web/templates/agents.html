@@ -2,7 +2,7 @@
 {% block title %}Agents — Sisyphus{% endblock %}
 {% import "_ui.html" as ui %}
 {% block content %}
-{% call ui.toolbar([{'label': 'Agents'}], 'who does the work, and with which tools') %}
+{% call ui.toolbar([{'label': 'Agents'}], 'who does the work, and who they hand it to') %}
 <button class="btn btn--primary btn--sm" hx-get="/api/agents/new-form" hx-target="body" hx-swap="beforeend">+ Agent</button>
 {% endcall %}
 <div id="agents-list" hx-get="/api/agents/list" hx-trigger="load, agentsUpdated from:body" hx-swap="innerHTML">
