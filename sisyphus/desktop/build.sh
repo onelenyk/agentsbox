@@ -23,6 +23,13 @@ rm -rf "$out"
 mkdir -p "$out/Contents/MacOS" "$out/Contents/Resources"
 cp "$bin" "$out/Contents/MacOS/Sisyphus"
 
+# The icon is drawn in code (Icon/make_icon.swift) — the same shapes as the
+# sidebar's mark — and packed into an .icns.
+iconset="$here/build/AppIcon.iconset"
+rm -rf "$iconset"
+swift "$here/Icon/make_icon.swift" "$iconset"
+iconutil -c icns "$iconset" -o "$out/Contents/Resources/AppIcon.icns"
+
 version="$(git -C "$root" rev-parse --short HEAD 2>/dev/null || echo dev)"
 cat > "$out/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -36,6 +43,10 @@ cat > "$out/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>2.0</string>
     <key>CFBundleVersion</key><string>$version</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>CFBundleIconName</key><string>AppIcon</string>
+    <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
+    <key>NSHumanReadableCopyright</key><string>© 2026 onelenyk</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSSupportsAutomaticGraphicsSwitching</key><true/>

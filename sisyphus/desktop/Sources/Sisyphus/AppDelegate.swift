@@ -106,6 +106,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateLater
     }
 
+    // MARK: - About
+
+    @objc func showAbout(_ sender: Any?) {
+        let credits = NSMutableAttributedString(
+            string: "Agents that build software, orchestrated from your own machine.\n\n",
+            attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.labelColor])
+        credits.append(NSAttributedString(
+            string: "Daemon \(daemon.base.absoluteString) · \(daemon.root.path)",
+            attributes: [.font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
+                         .foregroundColor: NSColor.secondaryLabelColor]))
+        let p = NSMutableParagraphStyle()
+        p.alignment = .center
+        credits.addAttribute(.paragraphStyle, value: p, range: NSRange(location: 0, length: credits.length))
+        NSApp.orderFrontStandardAboutPanel(options: [.credits: credits])
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     // MARK: -
 
     @MainActor
