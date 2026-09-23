@@ -256,6 +256,17 @@ async def notifications_poll():
                       "task_id": r["id"], "status": r["status"], "goal": r["goal"], "verb": verb})
     return {"items": items}
 
+def _loops() -> list:
+    """The daemon's background loops, each from a heartbeat it actually
+    stamped (core.heartbeat) — the dispatcher with its queue depth."""
+    from core import heartbeat, orchestrator
+    loops = heartbeat.list_all()
+    for w in loops:
+        if w["kind"] == "event":
+            w["depth"] = orchestrator.queue_depth()
+    return loops
+
+
 @router.get("/runtime", response_class=HTMLResponse)
 async def runtime_page(request: Request):
     import os
@@ -322,6 +333,7 @@ async def runtime_page(request: Request):
             "limits": {"worker_timeout": _worker.WORKER_TIMEOUT_SECONDS,
                        "worker_idle_timeout": _worker.WORKER_IDLE_TIMEOUT_SECONDS},
             "runner_store": _runner_store_view(),
+            "loops": _loops(),
         },
     )
 
@@ -984,23 +996,6 @@ async def stats_view(request: Request):
 async def workers_live(request: Request):
     return _tmpl().TemplateResponse(request, "workers_live.html",
                                     {"sessions": _enrich_sessions(sessions.list_active())})
-
-# ── Watch rail (board) ───────────────────────────────────────────────────
-
-@router.get("/api/board/watch", response_class=HTMLResponse)
-async def board_watch(request: Request):
-    """Who is on duty: the agents running right now and the daemon's background
-    loops. Every row is backed by something recorded — a
-    live session, or a heartbeat a loop actually stamped."""
-    from core import heartbeat, orchestrator
-    watchers = heartbeat.list_all()
-    for w in watchers:
-        if w["kind"] == "event":
-            w["depth"] = orchestrator.queue_depth()
-    return _tmpl().TemplateResponse(request, "watch_rail.html", {
-        "sessions": _enrich_sessions(sessions.list_active()),
-        "watchers": watchers,
-    })
 
 # ── Agents ──────────────────────────────────────────────────────────────
 

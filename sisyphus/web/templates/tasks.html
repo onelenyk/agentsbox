@@ -6,9 +6,6 @@
 {% import "_ui.html" as ui %}
 {% block content %}
 <div class="board-shell">
-    {# Watch rail temporarily unhooked from the board (2026-09-20) while the
-       page is reworked. Its route (/api/board/watch) and watch_rail.html are
-       untouched — putting it back is re-adding the aside below. #}
     <div class="board-main">
         {% call ui.toolbar([{'label': 'Tasks'}], 'every repo') %}
         {{ ui.view_switch() }}
