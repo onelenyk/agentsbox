@@ -437,3 +437,17 @@ class TestARepoWithItsOwnOpencodeConfig:
         (tmp_path / "wt").mkdir()
         d = rp.repo_declared_opencode(str(tmp_path / "wt"))
         assert d == {"mcp": [], "plugin": [], "files": []}
+
+
+class TestWorkerHome:
+    def test_opencode_gets_a_private_home(self, tmp_path):
+        from core import runner_profiles
+        assert runner_profiles.worker_home("opencode", str(tmp_path)) == \
+            str(tmp_path / "runner-home")
+
+    def test_claude_keeps_the_real_home(self, tmp_path):
+        """On macOS Claude Code's login is in the Keychain, which a substituted
+        HOME hides; its isolation comes from its own flags instead."""
+        from core import runner_profiles
+        assert runner_profiles.worker_home("claude-cli", str(tmp_path)) is None
+        assert not (tmp_path / "runner-home").exists()

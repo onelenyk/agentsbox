@@ -290,9 +290,11 @@ async def launch_agent(
     # A HOME of our own. opencode reads its config, cache and state from $HOME
     # ahead of every variable meant to move them, so this is the only place a
     # worker's tool roster can actually be decided rather than inherited — see
-    # core/runner_home.py for what is allowed through and why.
-    from .runner_home import build as _build_home
-    env["HOME"] = _build_home(WORKSPACE_ROOT)
+    # core/runner_home.py for what is allowed through and why. Claude Code keeps
+    # the real one: see runner_profiles.worker_home.
+    home = runner_profiles.worker_home(rtype, WORKSPACE_ROOT)
+    if home:
+        env["HOME"] = home
 
     env["WORKSPACE_ROOT"] = str(output_path / "wsroot")
     Path(env["WORKSPACE_ROOT"]).mkdir(parents=True, exist_ok=True)

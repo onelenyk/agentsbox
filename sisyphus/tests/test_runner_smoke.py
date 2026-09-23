@@ -150,3 +150,34 @@ class TestProbeUsesTheProductionPath:
             agent_name="sisyphus-smoke", model="some/model")
         cfg = json.loads((tmp_path / ".opencode" / "opencode.json").read_text())
         assert cfg["agent"]["sisyphus-smoke"]["model"] == "some/model"
+
+
+class TestProbeRunsUnderTheWorkersHome:
+    """The smoke test passed for Claude Code while every real run answered
+    "Not logged in": it ran under the daemon's HOME, the runs under the private
+    one. It must see the HOME the launcher would give the same runner."""
+
+    def _home_seen(self, monkeypatch, tmp_path, rtype):
+        from core import launcher
+        monkeypatch.setattr(launcher, "WORKSPACE_ROOT", str(tmp_path))
+        seen = {}
+
+        async def fake_exec(*a, **kw):
+            seen["home"] = kw["env"].get("HOME")
+            class P:
+                returncode = 0
+                async def communicate(self): return b"out", b""
+                def kill(self): pass
+                async def wait(self): return 0
+            return P()
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+        asyncio.run(runner_smoke.smoke_test(_runner(binary="/bin/sh", type=rtype), timeout=5))
+        return seen["home"]
+
+    def test_opencode_is_probed_under_the_private_home(self, monkeypatch, tmp_path):
+        assert self._home_seen(monkeypatch, tmp_path, "opencode") == \
+            str(tmp_path / "runner-home")
+
+    def test_claude_is_probed_under_the_real_home(self, monkeypatch, tmp_path):
+        import os
+        assert self._home_seen(monkeypatch, tmp_path, "claude-cli") == os.environ.get("HOME")
