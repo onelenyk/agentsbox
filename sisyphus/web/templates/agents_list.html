@@ -10,7 +10,7 @@
             <span class="ecard__glyph {{ 'violet' if a.kind == 'orchestrator' else '' }}">{{ agent_marks.get(a.name, [(a.name or '?')[:2]|upper])[0] }}</span>
             <h3 class="arow__name">{{ a.name }}</h3>
             <span class="arow__kind">{{ a.kind }}{{ ' · built-in' if a.is_builtin else ' · custom' }}</span>
-            <span class="arow__runtime">{{ runners.get(a.runner_id) or 'default runtime' }}{% if a.model %} · {{ a.model }}{% endif %}</span>
+            <span class="arow__runtime">{{ runners.get(a.runner_id) or 'default runner' }}{% if a.model %} · {{ a.model }}{% endif %}</span>
             <div class="acts">
                 <button class="btn btn--ghost btn--sm" hx-get="/api/agents/{{ a.name }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
                 {% if not a.is_builtin %}

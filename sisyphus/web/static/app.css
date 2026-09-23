@@ -230,15 +230,15 @@
 
   --text:      #1c1b19;
   --text-2:    #47453f;
-  --muted:     #7f7c74;
+  --muted:     #6e6b63;
 
   --accent:      #c47a06;
   --accent-hi:   #a86600;
   --accent-bg:   rgba(196, 122, 6, 0.10);
   --accent-bd:   rgba(196, 122, 6, 0.36);
 
-  --good: #1d9a55; --good-bg: rgba(29, 154, 85, 0.10);
-  --warn: #b27411; --warn-bg: rgba(178, 116, 17, 0.11);
+  --good: #13773f; --good-bg: rgba(29, 154, 85, 0.10);
+  --warn: #955f0a; --warn-bg: rgba(178, 116, 17, 0.11);
   --bad:  #d23d38; --bad-bg:  rgba(210, 61, 56, 0.09);
   --violet: #7a4bea; --violet-bg: rgba(122, 75, 234, 0.09);
 
@@ -785,6 +785,9 @@ a.line:hover, .sys .line--click:hover { color: var(--text); }
 /* a failed task's result is the reason it failed — colour it as such */
 .result--failed { border-left-color: var(--bad); }
 .result--failed .result__label { color: var(--bad); }
+/* On a plain panel the label is a section name, not an outcome — green is
+   kept for good news. */
+.panel > .result__label { color: var(--muted); }
 
 .task-goal-full { font-size: var(--fs-lg); line-height: var(--lh-relaxed); color: var(--text-2); margin-top: var(--sp-1); }
 
@@ -809,6 +812,8 @@ a.line:hover, .sys .line--click:hover { color: var(--text); }
 }
 .subtask:hover { border-color: var(--border-2); background: var(--hover); }
 .subtask .goal { font-size: var(--fs-body); color: var(--text); }
+.subtask__one { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subtask__more { display: inline-block; margin: var(--sp-2) 0 var(--sp-6); font-size: var(--fs-md); }
 
 /* ── Thread ──────────────────────────────────────────────────────────────
    A task thread is a conversation between agents and one human, and the
@@ -1202,6 +1207,7 @@ a.ev:hover .txt { color: var(--text); }
    ignored on an inline box, so without it every bar renders at zero size. */
 .bar-fill { display: block; height: 100%; background: var(--accent); border-radius: var(--r-pill); min-width: 2px; }
 .bar-fill.good { background: var(--good); }
+.bar-fill.is-zero { min-width: 0; }
 .bar-row .val { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* Columns must stretch to the track: with align-items:flex-end they collapse to
@@ -1217,7 +1223,7 @@ a.ev:hover .txt { color: var(--text); }
 .statline .val { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* ── Entity cards (agents / runtimes / repos) ────────────────────────── */
-.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: var(--sp-6); }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: var(--sp-6); }
 .ecard {
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg);
   padding: var(--sp-7) var(--sp-8); display: flex; flex-direction: column; gap: var(--sp-5);
@@ -1843,7 +1849,10 @@ body.has-overlay { overflow: hidden; }
 .ecard__health { font-size: var(--fs-xs); margin-top: var(--sp-1); }
 .ecard__note { font-size: var(--fs-xs); color: var(--muted); overflow-wrap: anywhere; }
 .ecard__note--bad { color: var(--bad); }
-.ecard__foot .acts--start { margin-left: 0; }
+.ecard__note--warn { color: var(--warn); }
+.ecard__foot .acts--start { margin-left: 0; flex: 1 1 auto; flex-wrap: nowrap; }
+/* The destructive action is always last and set apart from the rest. */
+.ecard__foot .acts .btn--danger { margin-left: auto; }
 .choice__sub .probe { flex-wrap: wrap; row-gap: var(--sp-1); }
 .choice__sub .probe__detail { flex-basis: 100%; padding-left: var(--sp-7); }
 
@@ -2022,20 +2031,8 @@ body.has-overlay { overflow: hidden; }
   color: var(--text-2);
 }
 
-.repos-list__actions {
-  margin-left: auto;
-}
 
 /* repos_detail.html component styles */
-.repos-detail__breadcrumb {
-  gap: var(--sp-4);
-}
-
-.repos-detail__heading {
-  font-size: var(--fs-2xl);
-  font-weight: var(--fw-medium);
-}
-
 .repos-detail__actions {
   flex-wrap: wrap;
   gap: var(--sp-3);
@@ -2214,7 +2211,7 @@ body.has-overlay { overflow: hidden; }
 .apcard__sentence { font-size: var(--fs-xl); font-weight: var(--fw-semibold); color: var(--text); }
 .apcard__raw { font-family: var(--mono); font-size: var(--fs-2xs); color: var(--muted); }
 .apcard__facts { display: flex; flex-direction: column; gap: var(--sp-2); }
-.apcard__goal { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.apcard__goal { font-family: var(--mono); font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .apcard .meta-line .v { min-width: 0; }
 
 /* ── "Wants you" cards (_ui.html ask_card) ───────────────────────────────
@@ -2230,6 +2227,7 @@ body.has-overlay { overflow: hidden; }
 .zone__notify::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .zone__notify.is-on { color: var(--text-2); cursor: default; }
 .zone__notify.is-on::before { background: var(--good); }
+
 
 .askc {
   --ask: var(--info);
@@ -2337,7 +2335,7 @@ a.state__rest:hover { color: var(--text-2); }
 .arow__head .acts { display: flex; gap: var(--sp-3); }
 .arow__persona {
   margin: var(--sp-4) 0 0; max-width: 80ch; font-size: var(--fs-body); line-height: var(--lh-relaxed); color: var(--text-2);
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .arow__tools { margin: var(--sp-4) 0 0; font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted); }
 

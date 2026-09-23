@@ -6,7 +6,7 @@
             <div class="ecard__glyph green">{{ r.name[:2]|upper }}</div>
             <div>
                 <div class="ecard__name"><a href="/repos/{{ r.name }}">{{ r.name }}</a></div>
-                <div class="ecard__sub">⎇ {{ r.branch }}{% if r.task_total %} · {{ r.task_done }}/{{ r.task_total }} tasks{% endif %}</div>
+                <div class="ecard__sub">⎇ {{ r.branch }}{% if r.task_total %} · {{ r.task_done }} of {{ r.task_total }} tasks done{% endif %}</div>
             </div>
             {% if r.reach == 'ok' %}<span class="status status--done right">ready</span>
             {% elif r.reach == 'remote' %}<span class="status status--active right">remote</span>
@@ -17,13 +17,13 @@
            ever dialled it. The check below is the part that actually tries. #}
         <div id="repo-check-{{ loop.index0 }}"></div>
         <div class="ecard__foot">
-            <a class="btn btn--ghost btn--sm" href="/repos/{{ r.name }}">Open</a>
-            <div class="acts repos-list__actions">
+            <div class="acts acts--start">
+                <a class="btn btn--ghost btn--sm" href="/p/{{ r.name }}" title="This project's task board">Board</a>
                 <button class="btn btn--ghost btn--sm" hx-post="/api/repos/{{ r.name }}/check"
                         hx-target="#repo-check-{{ loop.index0 }}" hx-swap="innerHTML"
                         hx-disabled-elt="this"
                         hx-on:htmx:before-request="this.textContent='Checking…'"
-                        hx-on:htmx:after-request="this.textContent='Check connection'">Check connection</button>
+                        hx-on:htmx:after-request="this.textContent='Check'">Check</button>
                 <button class="btn btn--ghost btn--sm" hx-get="/api/repos/{{ r.name }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
                 <button class="btn btn--ghost btn--sm" hx-post="/api/repos/{{ r.name }}/update" hx-swap="none">Fetch</button>
                 <button class="btn btn--danger btn--sm" hx-delete="/api/repos/{{ r.name }}" hx-confirm="Delete {{ r.name }}?" hx-swap="none" hx-on:after-request="htmx.trigger('#repos-list', 'load')">Delete</button>
