@@ -13,6 +13,20 @@ from . import usage as _usage
 from .db import get_conn
 
 
+_LEADS = ("[done]", "[spawn_worker]", "APPROVED: APPROVE.", "APPROVED: APPROVE", "APPROVED:", "CHANGES REQUESTED:")
+
+
+def _headline(text: str) -> str:
+    """One line a person can read in a feed: the first line, without the
+    machine prefixes ("[done]", "APPROVED: APPROVE.") the verdict parser needs."""
+    line = next((l.strip() for l in (text or "").splitlines() if l.strip()), "")
+    for lead in _LEADS:
+        if line.startswith(lead):
+            line = line[len(lead):].strip()
+            break
+    return line
+
+
 def dashboard() -> dict:
     """Live operational snapshot for the Mission Control dashboard: the KPI/usage
     overview plus what's active right now, the queue, and recent activity."""
@@ -35,8 +49,24 @@ def dashboard() -> dict:
     waiting = [dict(r) for r in conn.execute(
         "SELECT id, goal, repo FROM tasks WHERE status = 'waiting' ORDER BY updated_at DESC LIMIT 6")]
 
+    # The daemon's own bookkeeping ("reviewer finished") is noise in a feed a
+    # person reads; what agents and people said is the news.
     recent = [dict(r) for r in conn.execute(
-        "SELECT task_id, author, kind, text FROM messages ORDER BY id DESC LIMIT 10")]
+        "SELECT m.task_id, m.author, m.kind, m.text, m.created_at, t.key AS task_key "
+        "FROM messages m LEFT JOIN tasks t ON t.id = m.task_id WHERE m.author != 'system' "
+        "ORDER BY m.id DESC LIMIT 200")]
+    # One row per task — its latest word. Three rows of one task's chatter
+    # pushed everything else off the feed.
+    seen, feed = set(), []
+    for m in recent:
+        if m["task_id"] in seen:
+            continue
+        seen.add(m["task_id"])
+        m["text"] = _headline(m["text"])
+        feed.append(m)
+        if len(feed) == 10:
+            break
+    recent = feed
 
     conn.close()
     return {"ov": ov, "active": active, "waiting": waiting, "recent": recent}

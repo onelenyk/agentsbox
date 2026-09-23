@@ -57,8 +57,8 @@ def test_dashboard_page_and_view(db_path):
     assert c.get("/dashboard").status_code == 200
     v = c.get("/api/dashboard/view")
     assert v.status_code == 200
-    assert "Now" in v.text
-    assert "Spend by agent" in v.text
+    assert "Lately" in v.text
+    assert "Spend by agent" not in v.text      # that chart lives on Statistics
 
 
 def test_dashboard_data_shape(db_path):

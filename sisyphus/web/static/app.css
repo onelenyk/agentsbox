@@ -1125,12 +1125,6 @@ select { cursor: pointer; appearance: none;
 .check input { width: auto; }
 
 /* ── Dashboard (Mission Control) ─────────────────────────────────────── */
-.liveflag {
-  display: inline-flex; align-items: center; gap: var(--sp-3);
-  font-family: var(--mono); font-size: var(--fs-base); color: var(--good);
-  background: var(--good-bg); border: 1px solid var(--good-bd);
-  padding: var(--sp-3) var(--sp-6); border-radius: var(--r-pill);
-}
 .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-6); margin-bottom: var(--sp-7); }
 .kpi { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--sp-7) var(--sp-8);  }
 .kpi .l { font-size: var(--fs-md); color: var(--muted); }
@@ -1160,6 +1154,9 @@ select { cursor: pointer; appearance: none;
 .feed { display: flex; flex-direction: column; }
 .ev { display: flex; align-items: flex-start; gap: var(--sp-5); padding: var(--sp-4) var(--sp-6); border-top: 1px solid var(--border); }
 .ev:first-child { border-top: none; }
+a.ev { color: inherit; }
+a.ev:hover { background: var(--tint-2); }
+a.ev:hover .txt { color: var(--text); }
 .av {
   flex: none;
   width: 38px; height: 38px; border-radius: 50%;
@@ -1172,7 +1169,9 @@ select { cursor: pointer; appearance: none;
 .av--human        { background: var(--accent-bg); }
 .av--worker       { background: var(--good-bg); }
 .av--external     { background: var(--warn-bg); }
-.ev .txt { font-size: var(--fs-md); color: var(--text-2); }
+.ev .txt { flex: 1 1 auto; min-width: 0; font-size: var(--fs-md); color: var(--text-2); }
+.ev .txt .tkey { margin-right: var(--sp-2); }
+.ev__when { flex: none; font-family: var(--mono); font-size: var(--fs-2xs); color: var(--muted); white-space: nowrap; }
 .ev .txt small { color: var(--muted); font-family: var(--mono); }
 
 /* panel header variant used by dashboard */
@@ -1871,7 +1870,6 @@ body.has-overlay { overflow: hidden; }
   padding: var(--sp-6) var(--sp-7);
 }
 
-.dashboard__bar-fill {
   width: var(--w, 100%);
 }
 
@@ -2286,6 +2284,7 @@ body.has-overlay { overflow: hidden; }
 .state__l { font-size: var(--fs-md); color: var(--muted); }
 .state__item.is-live .state__n { color: var(--good); }
 .state__item.is-wanted .state__n { color: var(--warn); }
+a.state__rest:hover { color: var(--text-2); }
 .state__rest { margin-left: auto; display: flex; flex-direction: column; gap: var(--sp-1); text-align: right; font-size: var(--fs-sm); color: var(--muted); }
 
 .sect { margin-bottom: var(--sp-10); }
@@ -2297,8 +2296,6 @@ body.has-overlay { overflow: hidden; }
 .sect__meta { margin-left: auto; font-weight: var(--fw-normal); color: var(--muted); font-size: var(--fs-sm); }
 .sect__body { display: flex; flex-direction: column; gap: var(--sp-4); }
 .sect__quiet { margin: 0; padding: var(--sp-5) 0; font-size: var(--fs-md); color: var(--muted); }
-.dash-past { align-items: start; gap: var(--sp-11); }
-.dash-past__h { margin-top: var(--sp-9); }
 @media (max-width: 900px) { .state__rest { margin-left: 0; text-align: left; } }
 
 /* ── The agent roster: a list you can read, not a grid of equal cards ─── */
