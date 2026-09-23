@@ -8,7 +8,6 @@
     <span class="toolbar__note toolbar__note--good mono">✓ {{ finished.text|truncate(40) }} · {{ finished.mins }}m ago</span>
     {% endif %}
     {% if task.status in ("done", "failed") %}
-    <button class="btn btn--sm" hx-post="/api/tasks/{{ task.id }}/reopen" hx-swap="none">Reopen</button>
     <button class="btn btn--sm" hx-post="/api/tasks/{{ task.id }}/retry"
             hx-confirm="Retry from scratch? This starts a brand-new task with the same goal — its thread and branch are deliberately ignored, so it begins with a clean history."
             hx-swap="none">Retry</button>
@@ -18,13 +17,12 @@
             hx-confirm="Stop this task? Its running worker is killed; the task parks as waiting and a reply resumes it."
             hx-swap="none">Stop</button>
     {% endif %}
-    {# What each worker's CLI actually printed. When a worker ends without
-       reporting, this is where the reason is. #}
+    {# What the running worker's CLI is printing right now. Finished runs
+       keep their logs in the "Logs" fold below. #}
+    {% if working %}
     <button class="btn btn--sm" hx-get="/api/tasks/{{ task.id }}/logs"
-            hx-target="#modal-container" hx-swap="innerHTML">Logs</button>
-    <button class="btn btn--danger btn--sm" hx-post="/api/tasks/{{ task.id }}/delete"
-            hx-confirm="Delete this task and its whole thread? This can't be undone."
-            hx-swap="none">Delete</button>
+            hx-target="#modal-container" hx-swap="innerHTML">Live log</button>
+    {% endif %}
 {% endcall %}
 <div class="task-detail">
   {% macro diffstat_table(text) -%}
@@ -66,21 +64,6 @@
     {% if parent %}
     <div class="breadcrumb">↑ Part of <a href="/tasks/{{ parent.id }}">{{ task_display_title(parent) }}</a></div>
     {% endif %}
-
-    {# ── IN: what was asked ─────────────────────────────────────────────── #}
-    {% call ui.dsec('in', 'Request', 'asked by ' ~ asked_by.who ~ ' · ' ~ (task.created_at|when)) %}
-    <div class="doc">
-        {% if task.goal|length <= 400 %}
-        <div class="msg__body--md">{{ task.goal | md }}</div>
-        {% else %}
-        {# hx-preserve keeps it open across the refresh #}
-        <details class="goal-fold" hx-preserve="true" id="goal-fold">
-            <summary><span class="goal-fold__preview">{{ task.goal[:320] }}… </span><span class="goal-fold__more">show all</span><span class="goal-fold__less">show less</span></summary>
-            <div class="msg__body--md">{{ task.goal | md }}</div>
-        </details>
-        {% endif %}
-    </div>
-    {% endcall %}
 
     {# ── OUT: what came back ────────────────────────────────────────────── #}
     {% set o = outcome %}
@@ -126,6 +109,45 @@
                 {% if mr %}<button type="button" class="btn btn--ghost btn--sm" hx-get="/api/mr/{{ mr.id }}/view" hx-target="#modal-container" hx-swap="innerHTML">Merge request</button>{% endif %}
             </span>
         </div>
+        {% endif %}
+        {% if files.produced %}
+        <div class="files outcome__files">
+            {% for f in files.produced %}{{ ui.file_row(task.id, f, '📄' if f.kind == 'report' else '📎') }}{% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    {% endcall %}
+
+    {# A reply is how a parked task resumes — and, on a finished one, how it
+       reopens: the reply route does both, so the box says so. #}
+    {% if task.status in ('done', 'failed') %}
+    <details class="reopen" hx-preserve="true" id="reopen-fold">
+        <summary>This task is {{ task.status }}. <span class="reopen__cta">Reopen and reply</span> — your note wakes the orchestrator on the same thread.</summary>
+    {% endif %}
+    <form id="reply-composer" hx-preserve="true" class="composer{{ ' composer--wanted' if task.status == 'waiting' }}"
+          hx-post="/api/tasks/{{ task.id }}/messages" hx-swap="none"
+          onsubmit="setTimeout(() => this.reset(), 0)">
+        <textarea name="text" required rows="2"
+                  placeholder="{% if task.status == 'waiting' %}Answer — this resumes the task{% elif task.status in ('done', 'failed') %}What should happen next? Sending reopens the task{% else %}Add a note, or steer the work…{% endif %}"
+                  onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter'){event.preventDefault();this.form.requestSubmit();}"></textarea>
+        <div class="composer__foot">
+            <span class="taskbox__hint"><kbd>⌘↵</kbd> sends · the orchestrator reads it on the next pass</span>
+            <button type="submit" class="btn btn--primary btn--sm">{{ 'Reopen and send' if task.status in ('done', 'failed') else 'Reply' }}</button>
+        </div>
+    </form>
+    {% if task.status in ('done', 'failed') %}</details>{% endif %}
+
+    {# ── IN: what was asked ─────────────────────────────────────────────── #}
+    {% call ui.dsec('in', 'Request', 'asked by ' ~ asked_by.who ~ ' · ' ~ (task.created_at|when)) %}
+    <div class="doc">
+        {% if task.goal|length <= 240 %}
+        <div class="msg__body--md">{{ task.goal | md }}</div>
+        {% else %}
+        {# hx-preserve keeps it open across the refresh #}
+        <details class="goal-fold" hx-preserve="true" id="goal-fold">
+            <summary><span class="goal-fold__preview">{{ task.goal[:200] }}… </span><span class="goal-fold__more">show all</span><span class="goal-fold__less">show less</span></summary>
+            <div class="msg__body--md">{{ task.goal | md }}</div>
+        </details>
         {% endif %}
     </div>
     {% endcall %}
@@ -229,35 +251,15 @@
     {% endcall %}
     {% endif %}
 
-    {# ── what it left behind ────────────────────────────────────────────── #}
-    {% if files.count %}
-    {% call ui.dsec('', 'Attachments', files.count ~ ' file' ~ ('' if files.count == 1 else 's')) %}
-    <div class="files">
-        {% for f in files.produced %}{{ ui.file_row(task.id, f, '📄' if f.kind == 'report' else '📎') }}{% endfor %}
-        {% if files.logs %}<div class="files__group">Run logs</div>{% for f in files.logs %}{{ ui.file_row(task.id, f, '▤') }}{% endfor %}{% endif %}
-        {% if files.recovered %}<div class="files__group">Recovered uncommitted work</div>{% for f in files.recovered %}{{ ui.file_row(task.id, f, '⤺') }}{% endfor %}{% endif %}
-    </div>
-    {% endcall %}
-    {% endif %}
-
-    {# A reply is how a parked task resumes — and, on a finished one, how it
-       reopens: the reply route does both, so the box says so. #}
-    {% if task.status in ('done', 'failed') %}
-    <details class="reopen" hx-preserve="true" id="reopen-fold">
-        <summary>This task is {{ task.status }}. <span class="reopen__cta">Reopen and reply</span> — your note wakes the orchestrator on the same thread.</summary>
-    {% endif %}
-    <form id="reply-composer" hx-preserve="true" class="composer{{ ' composer--wanted' if task.status == 'waiting' }}"
-          hx-post="/api/tasks/{{ task.id }}/messages" hx-swap="none"
-          onsubmit="setTimeout(() => this.reset(), 0)">
-        <textarea name="text" required rows="2"
-                  placeholder="{% if task.status == 'waiting' %}Answer — this resumes the task{% elif task.status in ('done', 'failed') %}What should happen next? Sending reopens the task{% else %}Add a note, or steer the work…{% endif %}"
-                  onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter'){event.preventDefault();this.form.requestSubmit();}"></textarea>
-        <div class="composer__foot">
-            <span class="taskbox__hint"><kbd>⌘↵</kbd> sends · the orchestrator reads it on the next pass</span>
-            <button type="submit" class="btn btn--primary btn--sm">{{ 'Reopen and send' if task.status in ('done', 'failed') else 'Reply' }}</button>
+    {% if files.logs or files.recovered %}
+    <details class="rawthread" hx-preserve="true" id="files-fold">
+        <summary>Logs{{ ' & recovered work' if files.recovered }} <span class="chip">{{ files.logs|length + files.recovered|length }}</span></summary>
+        <div class="files">
+            {% for f in files.logs %}{{ ui.file_row(task.id, f, '▤') }}{% endfor %}
+            {% if files.recovered %}<div class="files__group">Recovered uncommitted work</div>{% for f in files.recovered %}{{ ui.file_row(task.id, f, '⤺') }}{% endfor %}{% endif %}
         </div>
-    </form>
-    {% if task.status in ('done', 'failed') %}</details>{% endif %}
+    </details>
+    {% endif %}
 
     {# Everything above is read from the thread; the thread itself stays one
        fold away, so nothing the page does not recognise is ever lost. #}
@@ -355,21 +357,10 @@
         <div class="rail-h">Properties</div>
         <div class="prop"><span class="k">Repo</span><span class="v">{{ task.repo or '—' }}</span></div>
         <div class="prop"><span class="k">Asked by</span><span class="v"{% if asked_by.about %} title="{{ asked_by.about }}"{% endif %}>{{ ('↻ ' ~ asked_by.who) if asked_by.auto else asked_by.who }}</span></div>
-        <div class="prop"><span class="k">Handled by</span><span class="v">{{ task.agent ~ ' (solo)' if task.agent else 'orchestrator' }}</span></div>
-        {% if trail %}<div class="prop"><span class="k">Worked</span><span class="v trail">{% for a in trail %}{{ agent_mark(a) }}{% endfor %}</span></div>{% endif %}
-        {% if parent %}<div class="prop"><span class="k">Parent</span><a class="v" href="/tasks/{{ parent.id }}">{{ parent.key or parent.id }}</a></div>{% endif %}
+        <div class="prop"><span class="k">Worked</span><span class="v rail-trail">{% for a in trail %}{{ agent_mark(a) }}{% endfor %}{% if task.agent %} <span class="muted">{{ task.agent }} (solo)</span>{% elif not trail %}<span class="muted">orchestrator, not yet</span>{% endif %}</span></div>
+        {% if mr %}<div class="prop"><span class="k">Branch</span><span class="v mono">{{ mr.source_branch }}</span></div>{% endif %}
     </div>
 
-    {% if mr %}
-    <div class="rail-sec">
-        <div class="rail-h">Change</div>
-        <div class="prop"><span class="k">Branch</span><span class="v mono">{{ mr.source_branch }}</span></div>
-        <div class="prop"><span class="k">Merge request</span>
-            <a class="v" href="#" hx-get="/api/mr/{{ mr.id }}/view" hx-target="#modal-container" hx-swap="innerHTML" onclick="return false">{{ mr.status }}{% if mr.merge_sha %} · {{ mr.merge_sha[:8] }}{% endif %}</a></div>
-        {% if change and change.check %}<div class="prop"><span class="k">Check</span><span class="v {{ 'is-good' if change.check.passed else 'is-bad' }}">{{ 'passed' if change.check.passed else 'failed' }}{% if change.check.tests %} · {{ change.check.tests }}{% endif %}</span></div>{% endif %}
-        <div class="prop"><span class="k">Review</span><span class="v {{ 'is-good' if mr.review_status == 'approved' else ('is-bad' if mr.review_status == 'changes_requested' else '') }}">{{ (mr.review_status or 'none').replace('_', ' ') }}{% if change and change.approvals > 1 %} ×{{ change.approvals }}{% endif %}</span></div>
-    </div>
-    {% endif %}
 
     {% if review_of and review_of.mr %}
     <div class="rail-sec">
@@ -402,6 +393,9 @@
         {% if usage.cache_read %}<div class="prop"><span class="k">Cached</span><span class="v mono">{{ '{:,}'.format(usage.cache_read) }}</span></div>{% endif %}
     </details>
     {% endif %}
+    <button class="btn btn--danger btn--sm rail-delete" hx-post="/api/tasks/{{ task.id }}/delete"
+            hx-confirm="Delete this task and its whole thread? This can't be undone."
+            hx-swap="none">Delete task</button>
   </aside>
 
 </div>
