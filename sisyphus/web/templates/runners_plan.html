@@ -44,6 +44,7 @@
                     <span class="plan__what"><span class="plan__runner">{{ o.runner }}</span> <span class="mono muted">{{ o.shown_model }}</span></span>
                     {% if o.in_use %}<span class="badge badge--accent">in use</span>
                     {% elif o.state == 'limit' %}<span class="badge badge--bad">limit · back {{ o.until|when }}</span>
+                    {% elif o.state == 'cooldown' %}<span class="badge badge--warn" title="Its last run never reached the model">set aside · back {{ o.until|when }}</span>
                     {% elif o.state == 'disabled' %}<span class="badge badge--warn">runner disabled</span>
                     {% elif o.state == 'gone' %}<span class="badge badge--warn">runner deleted</span>
                     {% else %}<span class="badge badge--mono">standby</span>{% endif %}

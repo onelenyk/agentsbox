@@ -268,12 +268,33 @@ class TestDeciderRetry:
                 for s in list(sessions._SESSIONS.values()):
                     if s["task_id"] == task["id"]:
                         s["decision"] = {"action": "note", "why": "ok"}
-            return AgentResult(status="completed", summary="ok")
+            # The model ran (a step was billed) but skipped the decide tool.
+            return AgentResult(status="completed", summary="ok", usage=_ONE_STEP)
 
         with patch("core.worker.launch_agent", AsyncMock(side_effect=flaky)):
             dec = await spawn_decider(task["id"], "orchestrator", "thread")
         assert dec == {"action": "note", "why": "ok"}
         assert calls["n"] == 2   # retried once
+
+    @pytest.mark.asyncio
+    async def test_a_run_that_never_reached_the_model_is_not_retried_there(
+            self, db_path, tmp_path, monkeypatch):
+        """Retrying on a provider that answered 402 fails the same way; the
+        provider is set aside so the caller's next attempt picks another."""
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+        from core import limits
+        from core.worker import spawn_decider
+        task = store.create_task("x", repo="sisyphus")
+        dead = AsyncMock(return_value=AgentResult(status="completed", raw_stdout="402 Payment Required"))
+        with patch("core.worker.launch_agent", dead):
+            assert await spawn_decider(task["id"], "orchestrator", "thread") is None
+        assert dead.await_count == 1
+        provider = limits.provider_of(__import__("core.runners", fromlist=["x"]).get_default_runner())
+        assert limits.cooldown_until(provider) is not None
+
+
+_ONE_STEP = {"input_tokens": 1, "output_tokens": 1, "reasoning_tokens": 0, "cache_read": 0,
+             "cache_write": 0, "total_tokens": 2, "cost": 0.0, "steps": 1}
 
 
 class TestModelOverride:

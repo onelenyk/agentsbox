@@ -592,13 +592,29 @@ async def spawn_worker(
     # session is still active — that's the crash/timeout fallback signal.
     if sessions.resolve(token) is not None:
         sessions.revoke(token)
-        store.post_message(task_id, author="system", kind="worker_finished",
-                           text=worker_end_message(role, result, task_id))
+        text = worker_end_message(role, result, task_id)
+        text += _set_aside_note(provider, result)
+        store.post_message(task_id, author="system", kind="worker_finished", text=text)
         # Deferred import: core.orchestrator imports spawn_worker from this
         # module at its top level, so importing it back here at module load
         # time would be circular. By call time both modules are fully loaded.
         from .orchestrator import emit
         emit(task_id, "worker_finished")
+
+
+def _set_aside_note(provider: str, result) -> str:
+    """Set the provider aside if the run never reached its model, and say so
+    in the thread — the next run then goes to the next option in the class."""
+    from . import limits
+    fault = limits.provider_fault(result)
+    if not fault:
+        return ""
+    until = limits.cooldown(provider, fault)
+    if not until:
+        return ""
+    return (f" The {provider} runner is set aside until {until:%H:%M} UTC: its run "
+            f"never reached the model. The next run goes to the next option in the "
+            f"agent's class.")
 
 
 def _build_decider_prompt(agent: dict, thread_text: str, roster: list,
@@ -687,6 +703,11 @@ async def spawn_decider(task_id: str, agent_name: str, thread_text: str,
         session = sessions.resolve(token)
         decision = session.get("decision") if session else None
         if decision:
+            break
+        # A run that never reached the model will not reach it on a retry
+        # either: set the provider aside and hand back, so the caller's next
+        # attempt picks the next option in the class.
+        if _set_aside_note(provider, result):
             break
 
     sessions.revoke(token)

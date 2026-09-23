@@ -36,7 +36,11 @@ logger = logging.getLogger(__name__)
 SUBSCRIPTION_PROVIDERS = ("claude", "opencode-go")
 
 # Display order and names for the windows, whichever provider reports them.
-WINDOWS = {"5h": "5 hours", "week": "week", "month": "month"}
+# "cooldown" is ours, not the provider's: set aside after it failed a run
+# (provider_fault), so the next spawn goes to the next option in its class.
+WINDOWS = {"5h": "5 hours", "week": "week", "month": "month", "cooldown": "set aside"}
+
+DEFAULT_COOLDOWN_SECONDS = 900
 
 # A window this full is treated as spent: the next run would likely be cut off
 # part-way, which wastes the run and leaves the task half-done.
@@ -150,14 +154,65 @@ def blocked_until(provider: str) -> Optional[datetime]:
     rejected outright) AND its reset is still ahead — a full window whose reset
     has passed is stale, not spent. Several full windows: the latest reset is
     the one that frees it."""
-    if not is_subscription(provider):
-        return None
     now, limit, until = _now(), threshold(), None
     for w in windows(provider):
+        # A key-billed provider has no windows of its own; only a cool-down
+        # after a fault can set it aside.
+        if not is_subscription(provider) and w["span"] != "cooldown":
+            continue
         full = w["status"] == "rejected" or w["percent"] >= limit
         resets = _parse_ts(w["resets_at"])
         if full and resets and resets > now:
             until = resets if until is None or resets > until else until
+    return until
+
+
+def cooldown_until(provider: str) -> Optional[datetime]:
+    for w in windows(provider):
+        resets = _parse_ts(w["resets_at"])
+        if w["span"] == "cooldown" and resets and resets > _now():
+            return resets
+    return None
+
+
+# ── faults: a run that never reached the model ──────────────────────────
+
+def provider_fault(result) -> Optional[str]:
+    """Why a finished run counts against its PROVIDER rather than the agent, or
+    None.
+
+    The line is "no model step was billed". Then the run never reached the
+    model: a 402 from an empty balance, a lost login, a provider that hung
+    before its first answer. Re-running on the same provider fails the same
+    way — five tasks sat 21 hours on one DeepSeek 402 — so the next run should
+    go to the next option in the class instead. A run that took real steps and
+    then went quiet is left alone: from the runner's output a model stuck
+    mid-answer cannot be told from a long silent command.
+    """
+    status = getattr(result, "status", "") or ""
+    if status == "cancelled":
+        return None
+    steps = ((getattr(result, "usage", None) or {}).get("steps") or 0)
+    if steps:
+        return None
+    error = (getattr(result, "error", "") or "").strip()
+    if status == "timeout":
+        return f"no answer before the timeout ({error or 'timed out'})"
+    stdout = (getattr(result, "raw_stdout", "") or "").strip()
+    stderr = (getattr(result, "raw_stderr", "") or "").strip()
+    return f"no model step billed ({(error or stderr or stdout)[:160] or 'no output'})"
+
+
+def cooldown(provider: str, reason: str) -> Optional[datetime]:
+    """Set *provider* aside for a while after a fault. Returns until when."""
+    from datetime import timedelta
+    from .config import get_config
+    secs = int(get_config("limits.fault_cooldown_seconds", DEFAULT_COOLDOWN_SECONDS) or 0)
+    if not provider or secs <= 0:
+        return None
+    until = _now() + timedelta(seconds=secs)
+    record(provider, "cooldown", 100, until.isoformat(), "rejected")
+    logger.warning("limits: %s set aside until %s — %s", provider, until.isoformat(), reason)
     return until
 
 
@@ -253,7 +308,8 @@ def poll_opencode_go() -> Optional[str]:
 
 
 def providers_in_use() -> list:
-    """Subscription providers some enabled runner or model-class option spends."""
+    """Providers to show: subscriptions some runner or class option spends,
+    and any provider currently set aside after a fault."""
     from . import model_classes
     from .runners import list_runners
     runners = {r["id"]: r for r in list_runners() if r.get("enabled", 1)}
@@ -265,7 +321,8 @@ def providers_in_use() -> list:
             r = runners.get(opt.get("runner_id"))
             if r:
                 found.add(provider_of(r, opt.get("model", "")))
-    return [p for p in SUBSCRIPTION_PROVIDERS if p in found]
+    shown = [p for p in SUBSCRIPTION_PROVIDERS if p in found]
+    return shown + sorted(p for p in found if p not in shown and cooldown_until(p))
 
 
 # ── parking and resuming ────────────────────────────────────────────────
@@ -347,7 +404,9 @@ def view() -> list:
     out = []
     for provider in providers_in_use():
         label, source = PROVIDER_LABELS.get(provider, (provider, ""))
-        spans = windows(provider)
+        # A cool-down that has run out is history, not a window.
+        spans = [w for w in windows(provider)
+                 if w["span"] != "cooldown" or cooldown_until(provider)]
         for w in spans:
             w["tone"] = tone(w["percent"], w["status"])
         until = blocked_until(provider)
