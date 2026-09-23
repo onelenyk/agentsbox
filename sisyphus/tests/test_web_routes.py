@@ -565,6 +565,7 @@ def test_a_row_carries_what_you_filter_by(db_path):
            "cache_write": 0, "total_tokens": 2, "cost": 0.01, "steps": 1}
     record_run(t["id"], "engineer", "m", run, 1000)
     record_run(t["id"], "reviewer", "m", run, 1000)
+    store.create_task("other work", repo="other-repo")      # a repo filter needs a choice
     html = _make_client().get("/api/tasks/list").text
     row = html.split(t["id"], 1)[0].rsplit("<li", 1)[1] + html.split(t["id"], 1)[1].split("</li>", 1)[0]
     assert 'data-repo="test-repo"' in row
@@ -1738,11 +1739,19 @@ def test_a_notification_says_which_kind_of_wait_it_is(db_path):
 def test_both_views_offer_the_same_filter(db_path):
     from core import store
     store.create_task("filterable", "test-repo")
+    store.create_task("elsewhere", "other-repo")
     for url in ("/api/tasks/list", "/api/tasks/list?view=sprint"):
         html = _make_client().get(url).text
         assert 'data-f-field="repo"' in html, url
         assert 'data-f-field="origin"' in html, url
         assert "data-filter-item" in html and "data-filter-group" in html, url
+
+
+def test_one_repo_offers_no_repo_filter(db_path):
+    """A choice of one is not a choice — a project board is one repo already."""
+    from core import store
+    store.create_task("only here", "test-repo")
+    assert 'data-f-field="repo"' not in _make_client().get("/api/tasks/list").text
 
 
 def test_the_sprint_board_lets_you_answer_where_the_list_does(db_path):

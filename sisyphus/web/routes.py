@@ -1175,12 +1175,14 @@ async def project_page(request: Request, name: str):
     """One repo's board: the same columns as /tasks, narrowed to this repo, with
     a task box that needs no repo picker because the page already is one."""
     from core.repos import get_repo
-    from core.autopilot import list_autopilots
+    from core.autopilot import describe_schedule, list_autopilots
     repo = get_repo(name)
     if not repo:
         return _tmpl().TemplateResponse(request, "not_found.html", {"path": f"/p/{name}"},
                                         status_code=404)
     autopilots = [a for a in list_autopilots() if a.get("repo") == name]
+    for a in autopilots:
+        a["explained"] = describe_schedule(a)
     return _tmpl().TemplateResponse(request, "project.html", {
         "active_page": f"project:{name}", "repo": repo, "autopilots": autopilots,
     })
@@ -1518,6 +1520,10 @@ def _row(t: dict, kind: str, facts: dict, mr: Optional[dict] = None,
         "trail": trail, "live": t.get("live_role"),
         "why": _why(t, kind, mr, facts, auto=bool(origin), review=review),
         "when": t.get("updated_at") or t.get("created_at"),
+        # Pipeline progress, when this task has any (core routes._enrich_now_card):
+        # the list draws it on its in-flight card, the sprint board on the card
+        # in its In progress lane — same work, same picture.
+        "stages": t.get("stages"), "stage_now": t.get("stage_now"),
     }
 
 

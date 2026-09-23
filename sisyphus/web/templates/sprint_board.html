@@ -10,7 +10,7 @@
    data-text="{{ (r.key ~ ' ' ~ r.title ~ ' ' ~ r.repo ~ ' ' ~ (r.origin.name if r.origin else '') ~ ' ' ~ (r.why.text if r.why else '') ~ ' ' ~ r.trail|join(' '))|lower }}">
     <div class="tcard__top">
         <span class="tkey">{{ r.key }}</span>
-        {% if r.repo and not repo %}<span class="tcard__repo">{{ r.repo }}</span>{% endif %}
+        {% if r.repo and not repo and repo_names()|length > 1 %}<span class="tcard__repo">{{ r.repo }}</span>{% endif %}
         <span class="tcard__when reltime" data-created="{{ r.when }}"></span>
     </div>
     <div class="tcard__title"{% if r.full %} title="{{ r.full }}"{% endif %}>{{ r.title }}{% if r.runs > 1 %} <span class="trow__runs tnum">×{{ r.runs }}</span>{% endif %}</div>
@@ -34,7 +34,7 @@
         {% if r.origin %}<span class="tag tag--origin{{ ' tag--bad' if r.origin.broken }}{{ ' tag--idle' if r.origin.paused }}" title="Created by the automation “{{ r.origin.name }}” — {{ r.origin.about }}">↻ {{ r.origin.short }}</span>{% endif %}
         {% if r.kids %}<span class="chip" title="subtasks done">⑂ {{ r.kids_done }}/{{ r.kids }}</span>{% endif %}
         {% if r.carried %}<span class="tag tcard__carried" title="Still open from an earlier sprint">↪ {{ r.carried }}</span>{% endif %}
-        {% if r.kind in ('shipped', 'not-merged', 'to-merge') %}<span class="tag tag--state tag--{{ r.kind }}">{{ r.word }}</span>{% endif %}
+        {% if r.kind in ('not-merged', 'to-merge') %}<span class="tag tag--state tag--{{ r.kind }}">{{ r.word }}</span>{% endif %}
     </div>
 </a>
 {%- endmacro %}
@@ -44,7 +44,7 @@
         <div class="sboard__name">
             <h2>{{ sprint.label }}</h2>
             <span class="sboard__span">{{ sprint.span }}</span>
-            <span class="sboard__left">{{ 'last day' if days_left == 0 else days_left ~ ' days left' }}</span>
+            <span class="sboard__left{{ ' sboard__left--warn' if days_left <= 1 }}">{{ 'last day' if days_left == 0 else days_left ~ ' days left' }}</span>
         </div>
         <span class="zone__new" data-new hidden>
             <span class="zone__new-n tnum" data-new-count>0</span> new since you last looked
@@ -57,7 +57,7 @@
     </header>
 
     {% set picks = [
-        {'field': 'repo', 'label': 'Repo', 'any': 'any repo', 'options': repos},
+        {'field': 'repo', 'label': 'Repo', 'any': 'any repo', 'options': repos if repos|length > 1 else []},
         {'field': 'who', 'label': 'Worked by', 'any': 'anyone', 'options': whos},
         {'field': 'origin', 'label': 'Asked by', 'any': 'anyone',
          'options': [('you', 'you'), ('auto', 'an automation')]},
