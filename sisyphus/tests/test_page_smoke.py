@@ -36,7 +36,7 @@ def _text(resp):
 
 # Every screen, including the partials htmx swaps in — those carry the numbers.
 PAGES = [
-    "/dashboard", "/tasks", "/plans", "/repos", "/runners", "/agents",
+    "/dashboard", "/tasks", "/repos", "/runners", "/agents",
     "/autopilots", "/stats", "/runtime", "/backups",
     "/api/dashboard/view", "/api/tasks/list", "/api/repos/list",
     "/api/stats/view", "/api/inbox/view",

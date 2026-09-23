@@ -1,6 +1,6 @@
 """AI-assisted conflict resolution for a merge request, from the MR view.
 
-The resolver (core.planner._ai_conflict_resolver) has worked for a long time but
+The resolver (core.mergerequests.ai_conflict_resolver) has worked for a long time but
 was reachable only from plan-branch integration, so an ordinary conflicting MR
 had no path to it — which is how a real bug in merge_resolving survived. These
 tests exercise the route, never a model: the resolver is monkeypatched.
@@ -9,7 +9,7 @@ import subprocess
 
 from fastapi.testclient import TestClient
 
-from core import mergerequests, planner, store
+from core import mergerequests, store
 from web.app import app
 
 
@@ -66,7 +66,7 @@ def _resolver(monkeypatch, result="MERGED\n"):
         assert "<<<<<<<" in text          # the route hands over real conflicted content
         return result
 
-    monkeypatch.setattr(planner, "_ai_conflict_resolver", fake)
+    monkeypatch.setattr(mergerequests, "ai_conflict_resolver", fake)
     return calls
 
 
@@ -94,7 +94,7 @@ class TestResolveRoute:
 
     def test_unresolvable_file_leaves_target_untouched(self, db_path, tmp_path, monkeypatch):
         mr, src = _mr(tmp_path)
-        monkeypatch.setattr(planner, "_ai_conflict_resolver", lambda p, t: None)
+        monkeypatch.setattr(mergerequests, "ai_conflict_resolver", lambda p, t: None)
         r = TestClient(app).post(f"/api/mr/{mr['id']}/merge-resolve")
         assert r.status_code == 200
         assert mergerequests.get_mr(mr["id"])["status"] == "open"      # not merged

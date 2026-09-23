@@ -11,6 +11,7 @@ per-task bare clone (`bare_path`); `source_path` is the user's real repo that th
 Land/Merge actions touch.
 """
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -20,6 +21,8 @@ from typing import List, Optional
 from uuid import uuid4
 
 from .db import get_conn
+
+logger = logging.getLogger(__name__)
 
 MR_STATUSES = ("open", "merged", "closed")
 
@@ -137,6 +140,31 @@ def merge_branch(mr: dict, target: str) -> dict:
     finally:
         _run(["git", "-C", real, "worktree", "remove", "--force", wt])
         shutil.rmtree(wt, ignore_errors=True)
+
+
+def ai_conflict_resolver(path: str, text: str) -> Optional[str]:
+    """Merge one conflicted file with the local model, preserving both sides.
+    Returns the resolved content, or None if it couldn't (markers remain / empty)
+    so the caller aborts and leaves the conflict for a human."""
+    from core import ai_assist
+    prompt = (
+        "You are resolving ONE git merge conflict. The file below contains conflict "
+        "markers (<<<<<<<, =======, >>>>>>>). Produce the correct merged file that "
+        "PRESERVES the intent of BOTH sides — never drop either side's changes — and "
+        "removes every conflict marker. Respond with ONLY a JSON object: "
+        '{"resolved": "<the complete merged file content>"}.\n\n'
+        f"File: {path}\n\n{text}")
+    try:
+        obj = ai_assist.find_json(ai_assist.run_prompt(prompt, timeout=150))
+    except Exception as e:  # noqa: BLE001
+        logger.debug("ai_conflict_resolver: AI resolution failed for %s: %s", path, e)
+        return None
+    if not isinstance(obj, dict) or "resolved" not in obj:
+        return None
+    out = str(obj["resolved"])
+    if "<<<<<<<" in out or ">>>>>>>" in out or not out.strip():
+        return None
+    return out if out.endswith("\n") else out + "\n"
 
 
 def merge_resolving(mr: dict, target: str, resolve_fn) -> dict:
@@ -309,7 +337,7 @@ def diff_range(mr: dict) -> dict:
 # ── The merge gate ──────────────────────────────────────────────────────
 #
 # One statement of "may this branch land", because there are three merge call
-# sites (the MR modal, the AI-conflict merge, the planner's auto-merge) and they
+# sites (the MR modal and the AI-conflict merge) and they
 # had each written their own — a denylist of ('pending', 'changes_requested').
 # review_status NULL means NOBODY EVER REVIEWED, and it sailed through all three:
 # twelve of the twenty-six merges in the ledger carry no verdict at all. A gate

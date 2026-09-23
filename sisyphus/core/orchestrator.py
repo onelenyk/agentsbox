@@ -515,15 +515,6 @@ async def _terminate(task_id: str, status: str, reason: str = "") -> None:
     except Exception:
         logger.exception("cleanup failed for task %s", task_id)
 
-    # Advance the Mission Planner: if this task was launched from a plan item,
-    # mark it done/failed (unblocks its dependents). Run in a thread to avoid
-    # blocking the event loop on git subprocesses and AI conflict resolution.
-    try:
-        from . import planner
-        await asyncio.to_thread(planner.on_task_terminal, task_id, status)
-    except Exception:
-        logger.exception("planner advance failed for task %s", task_id)
-
     # Roll up to a fan-out parent: a finishing child notifies its parent's
     # thread and wakes it, exactly as a worker posts worker_finished and wakes
     # its task. The parent's next pass re-reads the thread and re-decides.

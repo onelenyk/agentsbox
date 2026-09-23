@@ -42,11 +42,12 @@ your local runner.
   **webhook** (jira/github/gitlab) and create tasks; `{{payload}}` templating.
 - **Guardrails** — restart recovery, total/idle timeouts, a global worker-concurrency
   cap, per-task & daily **budget caps**, circuit breakers, and a startup preflight.
-- **Observability** — Mission Control dashboard, a **watch rail** on the board
-  (who is running right now, and a per-loop heartbeat for the daemon's
-  background watchers), per-task token/cost, statistics, rotating logs, a live
-  health heartbeat, and browser notifications.
-- **Backups** — one-click SQLite snapshots (`VACUUM INTO`) with a reversible restore.
+- **Observability** — a Home page with what needs you and what just happened,
+  per-task token/cost, statistics, an Agents page that shows who hands work to
+  whom (counted from real runs), rotating logs, a live health heartbeat, and
+  browser notifications.
+- **Backups** — one-click SQLite snapshots (`VACUUM INTO`) with a reversible
+  restore, on the Daemon page.
 - **Four surfaces** — Web UI, JSON API (`/api/v1`), MCP server (agent tools), and a
   `sisyphus` CLI.
 
@@ -73,7 +74,7 @@ your local runner.
 - **Task** `{id, goal, repo, status, parent_id, agent}` + a **Thread** of
   append-only messages — the only two domain entities.
 - **Agents** are DB-backed `{name, persona, tools[], runner, kind}` (worker or
-  orchestrator). **Runtimes** are CLI-backend configs (opencode, model, key).
+  orchestrator). **Runners** are CLI-backend configs (opencode or Claude Code, model, key).
 - The orchestrator's *decisions are themselves MCP tool calls* it makes as an
   agent — there is no direct model HTTP anywhere.
 

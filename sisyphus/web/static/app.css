@@ -371,7 +371,6 @@ a.line:hover, .sys .line--click:hover { color: var(--text); }
 .watch-sec__h { display: flex; align-items: baseline; gap: var(--sp-4); margin-bottom: var(--sp-3); font-size: var(--fs-3xs); font-weight: var(--fw-bold); letter-spacing: var(--ls-caps); text-transform: uppercase; color: var(--muted); }
 .watch-sec__h .c { margin-left: auto; font-family: var(--mono); font-size: var(--fs-2xs); color: var(--text-2); }
 
-
 /* The dashboard's live row is a wide three-column grid; in a 280px rail it
    stacks instead of being squeezed. */
 .watch .live-row { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); padding: var(--sp-3) var(--sp-3); }
@@ -940,7 +939,6 @@ a.line:hover, .sys .line--click:hover { color: var(--text); }
   padding: var(--sp-3) var(--sp-6); font-family: var(--mono); font-size: var(--fs-base);
   color: var(--good); border-left-color: var(--good);
 }
-
 
 /* markdown-rendered dialogue bodies (render_md output) */
 .msg__body--md { white-space: normal; }
@@ -1654,112 +1652,6 @@ body.has-overlay { overflow: hidden; }
 .taskbox__open:hover { color: var(--accent); }
 @media (max-width: 640px) { .taskbox__hint { display: none; } }
 
-/* ── Chips ─── */
-.chip-btn { font: inherit; font-size: var(--fs-base); font-weight: var(--fw-strong); padding: var(--sp-2) var(--sp-5); border-radius: var(--r-pill); border: 1px solid var(--border-2); background: var(--panel-2); color: var(--text-2); cursor: pointer; transition: color var(--dur), background var(--dur), border-color var(--dur); }
-.chip-btn:hover { color: var(--text); background: var(--hover); }
-.chip-btn.is-on { color: var(--accent-hi); background: var(--accent-bg); border-color: var(--accent-bd); }
-
-/* ── Chat message + composer (the planner's) ───────────────────────── */
-.cp-msg { font-size: var(--fs-body); line-height: var(--lh-normal); padding: var(--sp-4) var(--sp-6); border-radius: var(--r); max-width: 92%; white-space: pre-wrap; word-break: break-word; }
-.cp-input { display: flex; gap: var(--sp-4); padding: var(--sp-6) var(--sp-7); border-top: 1px solid var(--border); align-items: flex-end; }
-.cp-input textarea { flex: 1; resize: none; }
-
-
-/* ── Mission Planner ─────────────────────────────────────────────────── */
-.plan-switch { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin-bottom: var(--sp-7); }
-.brief { margin-top: var(--sp-8); display: flex; flex-direction: column; gap: var(--sp-7); border-top: 1px solid var(--border); padding-top: var(--sp-7); }
-.brief-sec { }
-.brief-text { font-size: var(--fs-body); color: var(--text-2); white-space: pre-wrap; line-height: var(--lh-normal); }
-.brief-list { margin: var(--sp-2) 0 0 var(--sp-8); font-size: var(--fs-body); color: var(--text-2); line-height: var(--lh-relaxed); }
-.brief .mermaid { background: var(--inset); border: 1px solid var(--border); border-radius: var(--r); padding: var(--sp-6); overflow-x: auto; text-align: center; }
-.brief .mermaid.mermaid-failed { text-align: left; padding: var(--sp-5) var(--sp-6); }
-.mermaid-fallback { font-size: var(--fs-sm); color: var(--muted); margin-bottom: var(--sp-3); }
-.mermaid-src { font-family: var(--mono); font-size: var(--fs-sm); color: var(--text-2); white-space: pre-wrap; word-break: break-word; margin: 0; }
-.plan-item { display: flex; align-items: flex-start; gap: var(--sp-5); padding: var(--sp-5) var(--sp-6); background: var(--panel-2); border: 1px solid var(--border); border-left: 2px solid var(--border-2); border-radius: var(--r); margin-bottom: var(--sp-4); }
-.plan-item--ready   { border-left-color: var(--good); }
-.plan-item--blocked { opacity: .6; }
-.plan-item--launched{ border-left-color: var(--accent); }
-.plan-item--done    { border-left-color: var(--good); opacity: .75; }
-.plan-item--failed  { border-left-color: var(--bad); }
-.pi-num { flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--inset); border: 1px solid var(--border); display: inline-flex; align-items: center; justify-content: center; font-size: var(--fs-xs); font-family: var(--mono); color: var(--muted); margin-top: 1px; }
-.pi-main { flex: 1; min-width: 0; }
-.pi-goal { font-size: var(--fs-body); color: var(--text); }
-.pi-meta { display: flex; flex-wrap: wrap; gap: var(--sp-5); align-items: baseline; font-size: var(--fs-xs); margin-top: var(--sp-2); }
-.pi-state { font-size: var(--fs-3xs); font-weight: var(--fw-heavy); text-transform: uppercase; letter-spacing: var(--ls-wide); padding: var(--sp-1) var(--sp-3); border-radius: var(--r-pill); }
-.pi-state--ready    { color: var(--good); background: var(--good-bg); }
-.pi-state--blocked  { color: var(--muted); background: var(--panel-2); border: 1px solid var(--border); }
-.pi-state--launched { color: var(--accent); background: var(--accent-bg); }
-.pi-state--done     { color: var(--good); background: var(--good-bg); }
-.pi-state--failed   { color: var(--bad); background: var(--bad-bg); }
-.plan-item .acts { flex: none; }
-
-/* ── Planner: indeterminate progress ─────────────────────────────────── */
-.plan-progress { margin: var(--sp-8) 0 var(--sp-2); }
-.progress-bar { height: 5px; background: var(--inset); border: 1px solid var(--border); border-radius: var(--r-pill); overflow: hidden; position: relative; }
-.progress-bar span { position: absolute; top: 0; bottom: 0; width: 32%; background: var(--accent); border-radius: var(--r-pill); animation: prog var(--dur-ambient) ease-in-out infinite; }
-@keyframes prog { 0% { left: -32%; } 100% { left: 100%; } }
-@media (prefers-reduced-motion: reduce) { .progress-bar span { animation: none; width: 100%; left: 0; opacity: .5; } }
-
-/* ── Co-Plan Canvas — conversation (left) + live artifacts (right) ────── */
-.coplan-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-7); flex-wrap: wrap; margin-bottom: var(--sp-7); }
-.coplan-head .plan-switch { margin-bottom: 0; }
-.chip-btn--ghost { border-style: dashed; color: var(--muted); }
-.coplan { display: grid; grid-template-columns: minmax(340px, 5fr) 7fr; gap: var(--sp-8); align-items: stretch; }
-@media (max-width: 1020px) { .coplan { grid-template-columns: 1fr; } }
-
-.cp-chat { display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; min-height: 520px; max-height: calc(100vh - 190px); }
-.cp-thread { flex: 1; overflow-y: auto; padding: var(--sp-8); display: flex; flex-direction: column; gap: var(--sp-7); }
-.cp-intro { padding: var(--sp-4) var(--sp-1) var(--sp-2); }
-.cp-intro-h { font-size: var(--fs-2xl); font-weight: var(--fw-bold); color: var(--text); margin-bottom: var(--sp-3); }
-.cp-intro p { font-size: var(--fs-body); line-height: var(--lh-relaxed); margin: 0 0 var(--sp-6); }
-.cp-starters { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
-
-.cp-msg { display: flex; gap: var(--sp-4); align-items: flex-start; max-width: 100%; }
-.cp-av { flex: none; width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: var(--fs-xl); background: var(--inset); border: 1px solid var(--border); }
-.cp-bubble { font-size: var(--fs-body); line-height: var(--lh-normal); padding: var(--sp-4) var(--sp-6); border-radius: var(--r-lg); white-space: pre-wrap; word-break: break-word; }
-.cp-msg--assistant .cp-bubble { background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-top-left-radius: var(--r-xs); }
-.cp-msg--user { flex-direction: row-reverse; }
-.cp-msg--user .cp-bubble { background: var(--accent-bg); border: 1px solid var(--accent-bd); color: var(--accent-hi); border-top-right-radius: var(--r-xs); }
-.cp-msg--user .cp-av { background: var(--accent-bg); border-color: var(--accent-bd); }
-
-.cp-typing { display: inline-flex; gap: var(--sp-2); align-items: center; }
-.cp-typing span { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: cptype var(--dur-ambient) infinite ease-in-out; }
-.cp-typing span:nth-child(2) { animation-delay: .15s; }
-.cp-typing span:nth-child(3) { animation-delay: .3s; }
-@keyframes cptype { 0%, 60%, 100% { opacity: .3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
-@media (prefers-reduced-motion: reduce) { .cp-typing span { animation: none; opacity: .6; } }
-
-.cp-questions { border-top: 1px solid var(--border); padding: var(--sp-5) var(--sp-7); background: var(--panel-2); }
-.cp-q-h { font-size: var(--fs-3xs); font-weight: var(--fw-heavy); text-transform: uppercase; letter-spacing: var(--ls-wide); color: var(--muted); margin-bottom: var(--sp-3); }
-.cp-q-chips { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
-.q-chip { font: inherit; font-size: var(--fs-base); text-align: left; padding: var(--sp-2) var(--sp-5); border-radius: var(--r); border: 1px solid var(--border-2); background: var(--panel); color: var(--text-2); cursor: pointer; transition: color var(--dur), border-color var(--dur); }
-.q-chip:hover { color: var(--accent-hi); border-color: var(--accent-bd); }
-
-.cp-composer { display: flex; gap: var(--sp-4); align-items: flex-end; padding: var(--sp-6) var(--sp-7); border-top: 1px solid var(--border); background: var(--panel); }
-.cp-composer textarea { flex: 1; resize: none; }
-.cp-composer .btn { flex: none; }
-
-.cp-canvas { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--sp-8); overflow-y: auto; max-height: calc(100vh - 190px); }
-.cp-canvas .brief { margin-top: 0; border-top: none; padding-top: 0; }
-.cp-canvas-empty, .cp-skeleton { padding: var(--sp-10) var(--sp-4); }
-.cp-canvas-empty { text-align: center; }
-.cpe-mark { font-size: var(--fs-display); margin-bottom: var(--sp-5); opacity: .8; }
-.cp-canvas-empty .muted { font-size: var(--fs-body); line-height: var(--lh-relaxed); max-width: 380px; margin: 0 auto; }
-.sk-line { height: 11px; border-radius: var(--r-xs); background: var(--inset); margin-bottom: var(--sp-6); animation: skpulse var(--dur-ambient) ease-in-out infinite; }
-.sk-block { height: 120px; border-radius: var(--r); background: var(--inset); margin: var(--sp-7) 0; animation: skpulse var(--dur-ambient) ease-in-out infinite; }
-@keyframes skpulse { 0%, 100% { opacity: .5; } 50% { opacity: .85; } }
-@media (prefers-reduced-motion: reduce) { .sk-line, .sk-block { animation: none; } }
-.cp-drafts { margin-top: var(--sp-8); border-top: 1px solid var(--border); padding-top: var(--sp-7); }
-.cp-drafts-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-5); flex-wrap: wrap; margin-bottom: var(--sp-5); }
-.cp-drafts-head .section-title { margin: 0; }
-.cp-autonomy { display: flex; gap: var(--sp-3); }
-.toggle-chip { display: inline-flex; align-items: center; gap: var(--sp-3); font-size: var(--fs-sm); padding: var(--sp-2) var(--sp-4); border-radius: var(--r-pill); background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); cursor: pointer; white-space: nowrap; }
-.toggle-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border-2); transition: background var(--dur); }
-.toggle-chip:hover { border-color: var(--border-2); color: var(--text-2); }
-.toggle-chip.is-on { background: var(--good-bg); border-color: var(--good); color: var(--good); }
-.toggle-chip.is-on .dot { background: var(--good); }
-
-
 /* ── Inbox (needs-you feed) ─────────────────────────────────────────── */
 .inbox-group { margin-bottom: var(--sp-7); }
 .inbox-row { display: flex; align-items: center; gap: var(--sp-5); padding: var(--sp-3) var(--sp-5); border-radius: var(--r-md); }
@@ -1915,7 +1807,6 @@ body.has-overlay { overflow: hidden; }
   font-size: var(--fs-4xl);
 }
 
-
 /* ─ backups_list.html ──────────────────────────────────────────────────────  */
 
 .runtime__label-act { margin-left: auto; text-transform: none; letter-spacing: normal; }
@@ -2031,7 +1922,6 @@ body.has-overlay { overflow: hidden; }
   color: var(--text-2);
 }
 
-
 /* repos_detail.html component styles */
 .repos-detail__actions {
   flex-wrap: wrap;
@@ -2060,29 +1950,7 @@ body.has-overlay { overflow: hidden; }
   margin: 0;
 }
 
-/* ── Planner, task detail, modals, task box: pieces that used to be inline styles ─────────────── */
-/* ── plan_panel.html ─────────────────────────────────────────────────── */
-
-/* Controls row: flex-shrink for tightness, consistent gap */
-.plan__controls { flex-shrink: 0; gap: var(--sp-4); }
-
-/* Form display: inline for repo selector */
-.plan__form { display: inline; }
-
-/* Repo select with min width */
-.plan__repo-select { width: auto; min-width: 140px; }
-
-/* Button with top margin for convert action */
-.plan__convert-btn { margin-top: var(--sp-4); }
-
-/* Skeleton loading lines with specific widths */
-.sk-line--40 { width: 40%; }
-.sk-line--70 { width: 70%; }
-.sk-line--55 { width: 55%; }
-
-/* Planning canvas skeleton note with custom margin and font size */
-.cp-skeleton__note { margin-top: var(--sp-7); font-size: var(--fs-md); }
-
+/* ── Task detail, modals, task box: pieces that used to be inline styles ─────────────── */
 /* ── task_detail_content.html ────────────────────────────────────────── */
 
 /* Toolbar note with success color */
@@ -2117,7 +1985,6 @@ body.has-overlay { overflow: hidden; }
 .toast[hidden] { display: none; }
 
 /* ── Dynamic height textarea (from _task_box.html) ───────────────────── */
-
 
 /* ── Segmented switch: one choice out of a few, always visible ───────── */
 .seg { display: inline-flex; padding: var(--sp-1); gap: var(--sp-1); border: 1px solid var(--border-2); border-radius: var(--r); background: var(--inset); }
@@ -2227,7 +2094,6 @@ body.has-overlay { overflow: hidden; }
 .zone__notify::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .zone__notify.is-on { color: var(--text-2); cursor: default; }
 .zone__notify.is-on::before { background: var(--good); }
-
 
 .askc {
   --ask: var(--info);

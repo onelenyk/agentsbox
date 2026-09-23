@@ -34,7 +34,7 @@ TIERS = {
         "test_agent_mcp", "test_agents_api", "test_api", "test_auth",
         "test_git_ops", "test_goal_report", "test_mcp_server",
         "test_mr_actions", "test_mr_resolve",
-        "test_page_smoke", "test_planner", "test_providers", "test_repo_check",
+        "test_page_smoke", "test_providers", "test_repo_check",
         "test_setup_hook", "test_stats", "test_task_lifecycle", "test_verify",
         "test_web_routes", "test_webhook_auth", "test_webhooks", "test_worker",
         "test_worktree", "test_worktree_utils",
