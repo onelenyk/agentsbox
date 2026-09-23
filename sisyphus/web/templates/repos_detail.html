@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% block title %}{{ repo.name }} — Sisyphus{% endblock %}
+{% import "_ui.html" as ui %}
 {% block content %}
-<div class="page-head">
-    <h1 class="row repos-detail__breadcrumb"><a href="/repos" class="muted repos-detail__heading">Repos</a><span class="muted">/</span><span class="repos-detail__heading">{{ repo.name }}</span></h1>
-</div>
+{% call ui.toolbar([{'label': 'Projects', 'href': '/repos'}, {'label': repo.name}]) %}
+<a class="btn btn--ghost btn--sm" href="/p/{{ repo.name }}">Board</a>
+{% endcall %}
 
 <div class="task-detail">
   <div class="panel task-main">
@@ -17,15 +18,19 @@
        connection fills that slot with what was actually proved. #}
     <div id="repo-check-detail"></div>
 
-    <div class="section-title">Tasks <span class="chip">{{ done }}/{{ tasks|length }} done</span></div>
-    {% for t in tasks %}
+    {# The newest few, one line each — the whole history is the project's
+       board, one click on. This list used to print every goal in full and ran
+       to twenty thousand pixels. #}
+    <div class="section-title">Latest tasks <span class="chip">{{ done }} of {{ tasks|length }} done</span></div>
+    {% for t in tasks[:8] %}
     <a class="subtask" href="/tasks/{{ t.id }}">
-        <span class="goal">{{ t.goal }}</span>
+        <span class="goal subtask__one">{{ task_display_title(t) }}</span>
         <span class="status status--{{ t.status }}">{{ t.status }}</span>
     </a>
     {% else %}
-    <div class="empty">No tasks for this repo yet.</div>
+    <div class="empty">No tasks for this project yet.</div>
     {% endfor %}
+    {% if tasks|length > 8 %}<a class="subtask__more" href="/p/{{ repo.name }}">All {{ tasks|length }} on the board →</a>{% endif %}
 
     <div class="section-title">Agent context <span class="chip">what the AI reads</span></div>
     {% if resources %}

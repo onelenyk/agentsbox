@@ -6,11 +6,10 @@
     {% set x = a.explained %}
     <div class="ecard apcard{{ ' is-off' if not a.enabled else '' }}">
         <div class="ecard__head">
-            <div class="ecard__glyph">{{ 'WH' if x.icon == '🔔' else ('RUN' if x.icon == '▶' else 'CRN') }}</div>
             <div>
                 <div class="ecard__name">{{ a.name }}</div>
             </div>
-            <span class="badge {{ 'badge--accent' if a.enabled else '' }} right">{{ 'active' if a.enabled else 'paused' }}</span>
+            <span class="badge {{ 'badge--ok' if a.enabled else '' }} right">{{ ('on' if a.enabled else 'paused') }}</span>
         </div>
         {% if a.description %}<div class="ecard__persona">{{ a.description }}</div>{% endif %}
 

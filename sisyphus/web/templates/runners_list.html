@@ -20,7 +20,7 @@
         {# Same column carries a fatal reason and a harmless note (see
            core.runners.health_check) — colour by status, or a healthy runner's
            note reads as a failure. #}
-        {% if r.health_error %}<div class="ecard__note{{ ' ecard__note--bad' if r.health_status == 'unhealthy' }}">{{ r.health_error[:160] }}</div>{% endif %}
+        {% if r.health_error %}<div class="ecard__note {{ 'ecard__note--bad' if r.health_status == 'unhealthy' else 'ecard__note--warn' }}">{{ r.health_error[:160] }}</div>{% endif %}
         <div class="ecard__foot">
             <div class="acts acts--start">
                 <button class="btn btn--ghost btn--sm" hx-post="/api/runners/{{ r.id }}/health" hx-swap="none">Check</button>

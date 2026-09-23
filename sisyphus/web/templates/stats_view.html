@@ -2,8 +2,8 @@
 <div class="stat-grid">
     <div class="stat"><div class="label">Tasks</div><div class="value">{{ t.total }}</div><div class="sub">{{ t.done }} done · {{ t.failed }} failed</div></div>
     <div class="stat"><div class="label">Success rate</div><div class="value good">{{ t.completion_rate if t.completion_rate is not none else '—' }}{{ '%' if t.completion_rate is not none else '' }}</div><div class="sub">{{ t.done }} done · {{ t.failed }} failed</div></div>
-    <div class="stat"><div class="label">Avg time to done</div><div class="value">{{ (t.avg_seconds_to_done // 60) }}<span class="stats__unit">m</span></div><div class="sub">wall-clock</div></div>
-    <div class="stat"><div class="label">Total cost</div><div class="value accent">${{ '%.4f'|format(u.totals.cost) }}</div><div class="sub">{{ u.totals.runs }} agent run(s)</div></div>
+    <div class="stat"><div class="label">Avg time to done</div>{% set mins = t.avg_seconds_to_done // 60 %}<div class="value">{% if mins >= 90 %}{{ '%.1f'|format(mins / 60) }}<span class="stats__unit">h</span>{% else %}{{ mins }}<span class="stats__unit">m</span>{% endif %}</div><div class="sub">wall-clock</div></div>
+    <div class="stat"><div class="label">Total cost</div><div class="value accent" title="${{ '%.4f'|format(u.totals.cost) }}">${{ '%.2f'|format(u.totals.cost) }}</div><div class="sub">{{ u.totals.runs }} agent runs</div></div>
     <div class="stat"><div class="label">Tokens</div><div class="value">{{ '{:,}'.format(u.totals.tokens) }}</div><div class="sub">{{ '{:,}'.format(u.totals.cache_read) }} cached</div></div>
     <div class="stat"><div class="label">Commits · MRs</div><div class="value">{{ a.commits }} · {{ a.merge_requests }}</div><div class="sub">{{ a.worker_runs }} worker runs</div></div>
 </div>
@@ -18,7 +18,7 @@
             {% set n = t.by_status.get(name, 0) %}
             <div class="bar-row">
                 <span class="cap">{{ name }}</span>
-                <span class="bar-track"><span class="bar-fill bar-fill--tone stats__bar-fill" style="--w:{{ (100*n/tmax)|round }}%;--c:{{ col }}"></span></span>
+                <span class="bar-track"><span class="bar-fill bar-fill--tone stats__bar-fill{{ " is-zero" if n == 0 }}" style="--w:{{ (100*n/tmax)|round }}%;--c:{{ col }}"></span></span>
                 <span class="val">{{ n }}</span>
             </div>
             {% endfor %}
@@ -40,7 +40,7 @@
             <div class="bar-row">
                 <span class="cap">{{ r.agent or '—' }}</span>
                 <span class="bar-track"><span class="bar-fill stats__bar-fill" style="--w:{{ (100*r.cost/amax)|round }}%"></span></span>
-                <span class="val">${{ '%.4f'|format(r.cost) }} · {{ r.runs }}×</span>
+                <span class="val">${{ '%.2f'|format(r.cost) }} · {{ r.runs }} runs</span>
             </div>
             {% endfor %}
         </div>
@@ -54,7 +54,7 @@
         <div class="bars stats__bars-top">
             {% for r in s.per_repo %}
             <div class="bar-row">
-                <span class="cap">{{ r.repo }}</span>
+                <span class="cap">{{ r.repo if r.repo and r.repo != '(none)' else 'no repo' }}</span>
                 <span class="bar-track"><span class="bar-fill good stats__bar-fill" style="--w:{{ (100*r.n/rmax)|round }}%"></span></span>
                 <span class="val">{{ r.n }}</span>
             </div>
@@ -66,7 +66,7 @@
 
 {% if s.created_by_day %}
 <div class="panel stats__section-top">
-    <div class="result__label">Tasks created — last {{ s.created_by_day|length }} day(s)</div>
+    <div class="result__label">Tasks created — last {{ s.created_by_day|length }} days</div>
     {% set dmax = (s.created_by_day|map(attribute='n')|list|max) or 1 %}
     <div class="spark stats__spark-top">
         {% for d in s.created_by_day %}
