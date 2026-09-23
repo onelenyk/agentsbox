@@ -21,7 +21,7 @@ def ensure_review_task(mr: dict) -> Optional[dict]:
 
     # Dedup: a non-terminal review task for this MR already exists?
     for t in store.list_tasks():
-        if t["status"] not in ("active", "waiting"):
+        if t["status"] not in ("active", "waiting", "paused"):
             continue
         if t.get("agent") != "mr-reviewer":
             continue

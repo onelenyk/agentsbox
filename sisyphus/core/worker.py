@@ -159,6 +159,16 @@ def _prepare_repo(task_id: str, repo_name: Optional[str]):
 
 
 
+def _pick_runner(agent: dict):
+    """(runner name, model override, provider) for a run of *agent*, or raise
+    NoRunner when every option in its class is at its limit."""
+    from . import model_classes
+    choice = model_classes.choose(agent)
+    if choice.runner is None and choice.source == "class":
+        raise model_classes.NoRunner(model_classes.class_of(agent), choice)
+    return choice.runner_name, (choice.model or None), choice.provider
+
+
 def _effective_model(model_override: Optional[str], runner_name: Optional[str]) -> str:
     """The model this run will actually use: the agent's override, else the
     runner row's. opencode needs it written into the generated agent config —
@@ -269,6 +279,7 @@ WORKER_IDLE_TIMEOUT_SECONDS = 300   # silence before the run is abandoned
 # whether a run merely stopped or genuinely produced nothing. Shared so the two
 # sides cannot drift apart.
 STOPPED_MARKER = "STOPPED BY A HUMAN"
+DAEMON_STOPPED_MARKER = "was stopped before it reported"
 
 
 def was_stopped_by_a_human(thread: list) -> bool:
@@ -282,7 +293,10 @@ def was_stopped_by_a_human(thread: list) -> bool:
     """
     for m in reversed(thread):
         if m.get("kind") == "worker_finished":
-            return STOPPED_MARKER in (m.get("text") or "")
+            text = m.get("text") or ""
+            # The daemon stopping a run (Sisyphus closed) is an interruption
+            # too, not a run that produced nothing.
+            return STOPPED_MARKER in text or DAEMON_STOPPED_MARKER in text
         if m.get("kind") in ("result", "worker_started"):
             return False
     return False
@@ -319,7 +333,7 @@ def worker_end_message(role: str, result, task_id: str = "") -> str:
         if why:
             # The daemon stopped it, not a person — say which, or the thread
             # accuses a human of something they did not do.
-            return (f"{role} was stopped before it reported: {why}. This is not a "
+            return (f"{role} {DAEMON_STOPPED_MARKER}: {why}. This is not a "
                     f"failure and nothing is known to be wrong with the work.")
         return (f"{role} was {STOPPED_MARKER} before it reported. This is not a "
                 f"failure and nothing is known to be wrong with the work — the "
@@ -467,14 +481,9 @@ async def spawn_worker(
     if not task:
         raise ValueError(f"unknown task {task_id}")
 
-    # An agent may pin a specific CLI runtime; NULL runner_id → default runner.
-    runner_name = None
-    if role_def.get("runner_id"):
-        from .runners import get_runner
-        r = get_runner(role_def["runner_id"])
-        runner_name = r["name"] if r else None
-
-    model_override = role_def.get("model") or None
+    # The agent's model class picks the runner and model: the first option
+    # whose subscription still has room (core.model_classes).
+    runner_name, model_override, provider = _pick_runner(role_def)
 
     requested_repo = repo_name or task.get("repo")
     worktree_path, setup_result = await asyncio.to_thread(
@@ -574,7 +583,10 @@ async def spawn_worker(
         cancellation.unregister(task_id, role)
 
     from .usage import record_run
-    record_run(task_id, role, result.model, result.usage, result.duration_ms)
+    record_run(task_id, role, result.model, result.usage, result.duration_ms,
+               provider=provider)
+    from . import limits
+    limits.observe_run(provider, result.raw_stdout)
 
     # If the worker never called finish()/approve()/request_changes(), its
     # session is still active — that's the crash/timeout fallback signal.
@@ -626,13 +638,7 @@ async def spawn_decider(task_id: str, agent_name: str, thread_text: str,
     if not agent:
         return None
 
-    runner_name = None
-    if agent.get("runner_id"):
-        from .runners import get_runner
-        r = get_runner(agent["runner_id"])
-        runner_name = r["name"] if r else None
-
-    model_override = agent.get("model") or None
+    runner_name, model_override, provider = _pick_runner(agent)
 
     ws = os.environ.get("WORKSPACE_ROOT", "/workspace")
     scratch = f"{ws}/scratch/{task_id}-orch"
@@ -674,7 +680,10 @@ async def spawn_decider(task_id: str, agent_name: str, thread_text: str,
             model_override=model_override, mcp_config=mcp_config,
             on_output=lambda: sessions.note_output(task_id),
         )
-        record_run(task_id, agent_name, result.model, result.usage, result.duration_ms)
+        record_run(task_id, agent_name, result.model, result.usage, result.duration_ms,
+                   provider=provider)
+        from . import limits
+        limits.observe_run(provider, result.raw_stdout)
         session = sessions.resolve(token)
         decision = session.get("decision") if session else None
         if decision:

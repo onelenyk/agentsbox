@@ -57,7 +57,7 @@ class TestStop:
 
         assert r.status_code == 200
         assert event.is_set(), "the running worker was never told to stop"
-        assert store.get_task(task["id"])["status"] == "waiting"
+        assert store.get_task(task["id"])["status"] == "paused"
         assert any("stopped by the human" in m["text"]
                    for m in store.get_thread(task["id"]))
 
@@ -67,7 +67,7 @@ class TestStop:
         task = store.create_task("idle but active")
         r = _client().post(f"/api/tasks/{task['id']}/stop")
         assert r.status_code == 200
-        assert store.get_task(task["id"])["status"] == "waiting"
+        assert store.get_task(task["id"])["status"] == "paused"
 
     def test_stopping_a_finished_task_is_refused(self, db_path):
         task = store.create_task("already done")
@@ -90,8 +90,8 @@ class TestStop:
         assert _client().post(f"/api/tasks/{parent['id']}/stop").status_code == 200
 
         assert ev_a.is_set() and ev_b.is_set(), "children kept working"
-        assert store.get_task(kid_a["id"])["status"] == "waiting"
-        assert store.get_task(kid_b["id"])["status"] == "waiting"
+        assert store.get_task(kid_a["id"])["status"] == "paused"
+        assert store.get_task(kid_b["id"])["status"] == "paused"
         assert any("parent" in m["text"] for m in store.get_thread(kid_a["id"]))
 
     def test_stopping_a_parent_leaves_finished_children_alone(self, db_path):
@@ -180,7 +180,7 @@ class TestResumeAfterStop:
         cancellation.clear()
         task = store.create_task("stop then resume", repo="sisyphus")
         _client().post(f"/api/tasks/{task['id']}/stop")
-        assert store.get_task(task["id"])["status"] == "waiting"
+        assert store.get_task(task["id"])["status"] == "paused"
 
         with patch("core.orchestrator.emit") as mock_emit:
             r = _client().post(f"/api/tasks/{task['id']}/messages",
@@ -188,6 +188,7 @@ class TestResumeAfterStop:
         assert r.status_code == 200
         mock_emit.assert_called_once_with(task["id"], "human_replied")
         assert any(m["author"] == "human" for m in store.get_thread(task["id"]))
+        assert store.get_task(task["id"])["status"] == "active"
 
 
 class TestCancelledIsNotFailed:

@@ -277,9 +277,16 @@ async def _decide(task: dict, thread_text: str) -> Decision:
     cheap next to that. Only exhausted retries reach the old fallbacks."""
     from .worker import spawn_decider
 
+    from .model_classes import NoRunner
+
     malformed: Optional[str] = None
     for attempt in range(1, DECIDER_ATTEMPTS + 1):
-        raw = await spawn_decider(task["id"], orchestrator_agent_name(), thread_text)
+        try:
+            raw = await spawn_decider(task["id"], orchestrator_agent_name(), thread_text)
+        except NoRunner as exc:
+            # Not a question for a human: a window will reset on its own.
+            _park_for_limits(task["id"], orchestrator_agent_name(), str(exc))
+            return Decision(action="noop", why="waiting for a subscription window to reset")
         if not raw:
             malformed = None
             logger.warning("decider attempt %d/%d for %s produced no decision",
@@ -459,7 +466,7 @@ def _mr_review(task_id: str) -> dict:
         return {"verdict": "", "running": False}
     verdict = (mr.get("review_status") or "").strip()
     running = any(
-        t["status"] in ("active", "waiting")
+        t["status"] in ("active", "waiting", "paused")
         and t.get("agent") == "mr-reviewer"
         and (reviews.parse_review_marker(t.get("goal") or "") or {}).get("mr_id") == mr["id"]
         for t in store.list_tasks()
@@ -670,9 +677,7 @@ async def _handle_single_agent(task: dict) -> tuple:
     stopped = was_stopped_by_a_human(thread)
     if stopped:
         store.set_status(task_id, "active")
-        bg = asyncio.create_task(
-            _spawn_worker_safe(task_id, task["agent"], task["goal"], task.get("repo"))
-        )
+        bg = _start_worker(task_id, task["agent"], task["goal"], task.get("repo"))
         return Decision(
             action="spawn_worker", role=task["agent"],
             why=f"single-agent task — re-running {task['agent']} after a human stop"), bg
@@ -698,9 +703,7 @@ async def _handle_single_agent(task: dict) -> tuple:
     runs = _runs_ended_since_human(task_id)
     if runs < SINGLE_AGENT_ATTEMPTS:
         store.set_status(task_id, "active")
-        bg = asyncio.create_task(
-            _spawn_worker_safe(task_id, task["agent"], task["goal"], task.get("repo"))
-        )
+        bg = _start_worker(task_id, task["agent"], task["goal"], task.get("repo"))
         if runs:
             why = (f"{task['agent']} ended without a result — retrying "
                    f"(attempt {runs + 1} of {SINGLE_AGENT_ATTEMPTS})")
@@ -726,20 +729,90 @@ async def _handle_single_agent(task: dict) -> tuple:
                     why="single-agent failure"), None
 
 
-async def _spawn_worker_safe(task_id: str, role: str, instruction: str, repo_name):
+_PAUSE_NOTES = {
+    "closed": "It resumes on its own when Sisyphus opens again.",
+    "limits": "It resumes on its own once a window resets.",
+    "stopped": "Press Resume (or reply) to continue.",
+}
+
+
+def pause(task_id: str, kind: str, reason: str) -> None:
+    """Interrupt a task without asking anyone anything (store.PAUSE_KINDS
+    says what resumes each kind). Not `waiting`: that is a question for a
+    human, and a paused task on the Wants-you surface got answered with
+    "Huh?" — twice, which resumed it twice."""
+    store.set_status(task_id, "paused", cause=reason, pause_kind=kind)
+    store.post_message(task_id, "system", kind="note",
+                       text=f"paused — {reason}. {_PAUSE_NOTES[kind]}")
+
+
+def resume(task_id: str, why: str) -> bool:
+    """Put a paused task back to work. False if it was not paused — a second
+    Resume, or one racing an automatic resume, is a no-op rather than a
+    second worker."""
+    task = store.get_task(task_id)
+    if not task or task["status"] != "paused":
+        return False
+    store.set_status(task_id, "active", cause=why)
+    store.post_message(task_id, "system", kind="note", text=f"resumed — {why}")
+    emit(task_id, "continue")
+    return True
+
+
+def _park_for_limits(task_id: str, agent_name: str, reason: str) -> None:
+    """Hold a task whose agent has no usable runner until a subscription
+    window resets; core.limits.poll_forever resumes it."""
+    from . import limits
+    limits.park(task_id, agent_name)
+    pause(task_id, "limits", f"[limits] {reason}")
+
+
+def _queue_worker(task_id: str, role: str) -> bool:
+    """Mark a worker as queued — synchronously, before anything awaits — or
+    pause the task if the worker has no runner to go to. Returns whether to go
+    on and run it.
+
+    Synchronous on purpose. Posted from inside the spawned coroutine, the
+    marker landed only after the event loop got round to it, and two human
+    replies a few seconds apart each drove a pass that saw "no worker in
+    flight" and started one: two engineers on one worktree (task-cf2a500f).
+    """
+    from . import agents, model_classes
+    # A run with no runner is not a run: it must not spend one of a pinned
+    # task's attempts or look like a worker in flight.
+    choice = model_classes.choose(role)
+    if choice.runner is None and choice.source == "class":
+        cls = model_classes.class_of(agents.get_agent(role) or {})
+        _park_for_limits(task_id, role, choice.why_none(cls))
+        return False
+    # Bound total concurrency: the run waits for a free slot. The marker keeps
+    # the wait visible — to the human, and to the decider, whose passes would
+    # otherwise see "no worker in flight" and spawn duplicates (a live failure:
+    # 8 phantom spawns while two other tasks held both slots). _worker_in_flight
+    # treats a trailing worker_queued as in flight.
+    store.post_message(task_id, "system", kind="worker_queued",
+                       text=f"{role} queued — waiting for a free worker slot; do not spawn again")
+    return True
+
+
+def _start_worker(task_id: str, role: str, instruction: str, repo_name) -> Optional[asyncio.Task]:
+    """Queue a worker now and run it in the background; None if the task was
+    paused instead."""
+    if not _queue_worker(task_id, role):
+        return None
+    return asyncio.create_task(
+        _spawn_worker_safe(task_id, role, instruction, repo_name, queued=True))
+
+
+async def _spawn_worker_safe(task_id: str, role: str, instruction: str, repo_name,
+                             queued: bool = False):
     """Run a worker, but never let a startup failure (an unknown/hallucinated
     agent name, a clone error, …) vanish into a lost background task and leave
     the task stalled 'active'. Any exception before the worker reports is turned
     into a worker_finished + event, so the orchestrator re-decides."""
+    if not queued and not _queue_worker(task_id, role):
+        return
     try:
-        # Bound total concurrency: wait for a free slot before launching the
-        # subprocess. The queued marker keeps the wait visible — to the human,
-        # and to the decider, whose passes would otherwise see "no worker in
-        # flight" and spawn duplicates (a live failure: 8 phantom spawns while
-        # two other tasks held both slots). _worker_in_flight treats a trailing
-        # worker_queued as in flight.
-        store.post_message(task_id, "system", kind="worker_queued",
-                           text=f"{role} queued — waiting for a free worker slot; do not spawn again")
         gate = _get_worker_gate()
         await gate.acquire(high=_is_review_role(role))
         try:
@@ -764,10 +837,8 @@ async def _execute(task_id: str, decision: Decision):
         # had already stopped.
         from . import cancellation
         cancellation.register(task_id, decision.role or "")
-        return asyncio.create_task(
-            _spawn_worker_safe(task_id, decision.role, decision.instruction or "",
-                               task.get("repo") if task else None)
-        )
+        return _start_worker(task_id, decision.role, decision.instruction or "",
+                             task.get("repo") if task else None)
     if decision.action == "spawn_task":
         # Fan out: one child task per repo, each running the normal loop. The
         # parent stays active and waits for their child_finished roll-ups.
@@ -827,6 +898,14 @@ def reconcile_on_boot() -> int:
         orphans.reap()
     except Exception:  # noqa: BLE001
         logger.exception("orphan reaper failed — surviving workers may still be running")
+
+    # Work that closing Sisyphus interrupted picks up where it stopped. A pause
+    # of any other kind is still owed what it was waiting for.
+    for task in store.list_tasks(status="paused"):
+        if task.get("pause_kind") == "closed":
+            store.set_status(task["id"], "active", cause="Sisyphus opened again")
+            store.post_message(task["id"], "system", kind="note",
+                               text="resumed — Sisyphus opened again")
 
     n = 0
     for task in store.list_tasks(status="active"):
@@ -888,9 +967,9 @@ def pass_blocked_by(task: dict, spontaneous: bool = False,
     # signal) may restart it. Without this, stopping a task cannot hold: the
     # cancelled worker posts worker_finished on its way out, that event drives
     # a pass, and the orchestrator immediately spawns the next worker.
-    if (not spontaneous and task["status"] == "waiting"
+    if (not spontaneous and task["status"] in ("waiting", "paused")
             and event_type is not None and event_type not in RESUMES_A_PARKED_TASK):
-        return f"parked for a human — {event_type!r} does not resume it"
+        return f"parked as {task['status']} — {event_type!r} does not resume it"
     if _worker_in_flight(task["id"]):
         return "worker already in flight"
     if _children_pending(task["id"]):

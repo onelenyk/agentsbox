@@ -11,10 +11,12 @@
     <button class="btn btn--sm" hx-post="/api/tasks/{{ task.id }}/retry"
             hx-confirm="Retry from scratch? This starts a brand-new task with the same goal — its thread and branch are deliberately ignored, so it begins with a clean history."
             hx-swap="none">Retry</button>
+    {% elif task.status == "paused" %}
+    <button class="btn btn--sm btn--primary" hx-post="/api/tasks/{{ task.id }}/resume" hx-swap="none" hx-disabled-elt="this">Resume</button>
     {% else %}
     {# the only way to stop work; without it a human had to find the pid #}
     <button class="btn btn--sm" hx-post="/api/tasks/{{ task.id }}/stop"
-            hx-confirm="Stop this task? Its running worker is killed; the task parks as waiting and a reply resumes it."
+            hx-confirm="Stop this task? Its running worker is killed and the task is paused; Resume continues it."
             hx-swap="none">Stop</button>
     {% endif %}
     {# What the running worker's CLI is printing right now. Finished runs
@@ -128,7 +130,7 @@
           hx-post="/api/tasks/{{ task.id }}/messages" hx-swap="none"
           onsubmit="setTimeout(() => this.reset(), 0)">
         <textarea name="text" required rows="2"
-                  placeholder="{% if task.status == 'waiting' %}Answer — this resumes the task{% elif task.status in ('done', 'failed') %}What should happen next? Sending reopens the task{% else %}Add a note, or steer the work…{% endif %}"
+                  placeholder="{% if task.status in ('waiting', 'paused') %}Answer — this resumes the task{% elif task.status in ('done', 'failed') %}What should happen next? Sending reopens the task{% else %}Add a note, or steer the work…{% endif %}"
                   onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter'){event.preventDefault();this.form.requestSubmit();}"></textarea>
         <div class="composer__foot">
             <span class="taskbox__hint"><kbd>⌘↵</kbd> sends · the orchestrator reads it on the next pass</span>
@@ -345,7 +347,7 @@
         {% else %}
         <div class="empty">No messages yet.</div>
         {% endfor %}
-        {% if ns.run %}{{ machinery_run(ns.run, preserve=(task.status not in ('active', 'waiting'))) }}{% endif %}
+        {% if ns.run %}{{ machinery_run(ns.run, preserve=(task.status not in ('active', 'waiting', 'paused'))) }}{% endif %}
     </div>
 
     </details>

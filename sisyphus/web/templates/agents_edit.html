@@ -2,15 +2,23 @@
 {% set fa %}hx-post="/api/agents/{{ agent.name }}/edit" hx-target="#editAgentModal" hx-swap="outerHTML"{% endset %}
 {% set picked = catalog|select('in', agent.tools or [])|list|length %}
 {% call modal('Edit ' ~ agent.name, 'Save', fa, id='editAgentModal') %}
-<div class="field-pair">
-    <div class="field"><label>Runner</label>
+<div class="field-pair" style="--cols:3">
+    <div class="field"><label>Model class</label>
+        <select name="model_class">
+            <option value="">{{ agent.kind }} (its kind)</option>
+            {% for c in classes %}<option value="{{ c }}" {% if c == agent.model_class %}selected{% endif %}>{{ c }}</option>{% endfor %}
+        </select>
+        <span class="hint">Picks the runner at each run — see Runners</span>
+    </div>
+    <div class="field"><label>Pin to runner</label>
         <select name="runner_id">
-            <option value="">default runner</option>
+            <option value="">none — follow the class</option>
             {% for r in runners %}<option value="{{ r.id }}" {% if r.id == agent.runner_id %}selected{% endif %}>{{ r.name }}</option>{% endfor %}
         </select>
+        <span class="hint">A pin skips the class and never switches</span>
     </div>
-    <div class="field"><label>Model</label><input name="model" value="{{ agent.model or '' }}">
-        <span class="hint">Blank uses the runner's model</span>
+    <div class="field"><label>Pinned model</label><input name="model" value="{{ agent.model or '' }}">
+        <span class="hint">Used only with a pin; blank uses the runner's</span>
     </div>
 </div>
 <div class="field"><label>Persona</label><textarea name="persona" rows="3">{{ agent.persona }}</textarea></div>

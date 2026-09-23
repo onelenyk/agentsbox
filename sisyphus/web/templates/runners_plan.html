@@ -1,0 +1,78 @@
+{# What runs the agents: how much of each subscription is left, and the two
+   model classes that pick a runner from it. Swapped whole on every change. #}
+<div id="runners-plan" class="plan" hx-get="/api/runners/plan" hx-trigger="runnersUpdated from:body" hx-swap="outerHTML">
+    {% if error %}<div class="ecard__note ecard__note--bad plan__error">{{ error }}</div>{% endif %}
+
+    {% if subscriptions %}
+    <div class="card-grid plan__grid">
+        {% for s in subscriptions %}
+        <div class="panel">
+            <div class="result__label">{{ s.label }}
+                {% if s.blocked_until %}<span class="badge badge--bad">at its limit until {{ s.blocked_until|when }}</span>{% endif %}
+                {% if s.polled %}<button class="btn btn--ghost btn--sm plan__act" hx-post="/api/limits/refresh" hx-target="#runners-plan" hx-swap="outerHTML" hx-disabled-elt="this">Refresh</button>{% endif %}
+            </div>
+            {% for w in s.windows %}
+            <div class="bar-row plan__bar">
+                <span class="cap">{{ w.label }}</span>
+                <span class="bar-track"><span class="bar-fill plan__fill {{ w.tone }}{{ ' is-zero' if w.percent < 1 }}" style="--w:{{ w.percent|round|int }}%"></span></span>
+                <span class="val">{{ w.percent|round|int }}%{% if w.resets_at %} · resets {{ w.resets_at|when }}{% endif %}</span>
+            </div>
+            {% else %}
+            <p class="muted plan__note">No reading yet.</p>
+            {% endfor %}
+            <p class="muted plan__note">{{ s.source }}{% if s.checked_at %} · last read {{ s.checked_at|when }}{% endif %}</p>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="card-grid plan__grid">
+        {% for c in classes %}
+        <div class="panel">
+            <div class="result__label">{{ c.name|capitalize }} class
+                {% if c.exhausted %}<span class="badge badge--bad">every option at its limit</span>{% endif %}
+            </div>
+            <p class="plan__note">{{ c.role|capitalize }}.
+                {% if c.agents %}Drives {{ c.agents|join(', ') }}.{% else %}Drives no agent yet.{% endif %}
+                {% if c.pinned %}<span class="muted">{{ c.pinned|join(', ') }} {{ 'is' if c.pinned|length == 1 else 'are' }} pinned to a runner of {{ 'its' if c.pinned|length == 1 else 'their' }} own and never switch.</span>{% endif %}
+            </p>
+            {% if c.options %}
+            <ol class="plan__opts">
+                {% for o in c.options %}
+                <li class="plan__opt{{ ' is-live' if o.in_use }}">
+                    <span class="plan__n">{{ loop.index }}</span>
+                    <span class="plan__what"><span class="plan__runner">{{ o.runner }}</span> <span class="mono muted">{{ o.shown_model }}</span></span>
+                    {% if o.in_use %}<span class="badge badge--accent">in use</span>
+                    {% elif o.state == 'limit' %}<span class="badge badge--bad">limit · back {{ o.until|when }}</span>
+                    {% elif o.state == 'disabled' %}<span class="badge badge--warn">runner disabled</span>
+                    {% elif o.state == 'gone' %}<span class="badge badge--warn">runner deleted</span>
+                    {% else %}<span class="badge badge--mono">standby</span>{% endif %}
+                    <span class="plan__moves">
+                        {% set base = '/api/classes/' ~ c.name ~ '/' ~ o.index %}
+                        <button class="btn btn--ghost btn--sm" title="Try earlier" hx-post="{{ base }}/up" hx-target="#runners-plan" hx-swap="outerHTML" {{ 'disabled' if loop.first }}>↑</button>
+                        <button class="btn btn--ghost btn--sm" title="Try later" hx-post="{{ base }}/down" hx-target="#runners-plan" hx-swap="outerHTML" {{ 'disabled' if loop.last }}>↓</button>
+                        <button class="btn btn--ghost btn--sm" title="Remove" hx-post="{{ base }}/remove" hx-target="#runners-plan" hx-swap="outerHTML">✕</button>
+                    </span>
+                </li>
+                {% endfor %}
+            </ol>
+            {% else %}
+            <p class="muted plan__note">No options — its agents run on the default runner.</p>
+            {% endif %}
+            {% if runners %}
+            <form class="plan__add" hx-post="/api/classes/{{ c.name }}/add" hx-target="#runners-plan" hx-swap="outerHTML">
+                <select name="runner_id" aria-label="Runner" onchange="this.form.elements.model.setAttribute('list', 'plan-models-' + this.value)">
+                    {% for r in runners %}<option value="{{ r.id }}">{{ r.name }}</option>{% endfor %}
+                </select>
+                <input name="model" list="plan-models-{{ runners[0].id }}" placeholder="model — blank uses the runner's own" aria-label="Model">
+                <button class="btn btn--ghost btn--sm" type="submit">+ Add</button>
+            </form>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+
+    {% for r in runners %}
+    <datalist id="plan-models-{{ r.id }}">{% for m in suggestions.get(r.id, []) %}<option value="{{ m }}">{% endfor %}</datalist>
+    {% endfor %}
+</div>

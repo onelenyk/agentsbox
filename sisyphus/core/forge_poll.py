@@ -387,7 +387,7 @@ def _deliver(mr: dict, url: str, summaries: List[str]) -> Optional[str]:
         return None
     for text in summaries:
         store.post_message(task["id"], "system", kind="external", text=text)
-    if task["status"] in ("done", "failed", "waiting"):
+    if task["status"] in ("done", "failed", "waiting", "paused"):
         store.set_status(task["id"], "active")
     emit(task["id"], "external")
     return task["id"]
