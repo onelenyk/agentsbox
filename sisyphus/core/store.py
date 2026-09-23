@@ -20,7 +20,16 @@ from uuid import uuid4
 from .db import get_conn
 
 # A task's whole lifecycle. No transition table — the orchestrator owns it.
-VALID_STATUSES = ("active", "waiting", "done", "failed")
+#   waiting  parked for a HUMAN: a question, a budget, a stuck runner.
+#   paused   interrupted, with nothing asked of anyone — see PAUSE_KINDS.
+VALID_STATUSES = ("active", "waiting", "paused", "done", "failed")
+
+# Why a task is paused, and so what resumes it:
+#   closed   Sisyphus was closed mid-run — resumes when it opens again.
+#   limits   every runner its agent may use is at a subscription limit —
+#            resumes when a window resets (core.limits).
+#   stopped  you pressed Stop — resumes when you press Resume (or reply).
+PAUSE_KINDS = ("closed", "limits", "stopped")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -90,6 +99,8 @@ def _migrate(conn) -> None:
         conn.execute("ALTER TABLE tasks ADD COLUMN base_branch TEXT")
     if "title" not in cols:
         conn.execute("ALTER TABLE tasks ADD COLUMN title TEXT")
+    if "pause_kind" not in cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN pause_kind TEXT")
     if "key" not in cols:
         # A task the human can say out loud. "task-8466db18" is a machine's
         # name: unreadable, unrepeatable, and impossible to tell from the one
@@ -232,15 +243,20 @@ def list_children(parent_id: str) -> List[dict]:
     return [dict(r) for r in rows]
 
 
-def set_status(task_id: str, status: str, cause: Optional[str] = None) -> None:
+def set_status(task_id: str, status: str, cause: Optional[str] = None,
+               pause_kind: Optional[str] = None) -> None:
     """Move a task to *status*, and record the move when it is one. Setting a
-    task to the status it already has is not an event and leaves no trace."""
+    task to the status it already has is not an event and leaves no trace.
+    A pause carries its kind (PAUSE_KINDS); any other status clears it."""
     if status not in VALID_STATUSES:
         raise ValueError(f"invalid status {status!r}; must be one of {VALID_STATUSES}")
+    if status == "paused" and pause_kind not in PAUSE_KINDS:
+        raise ValueError(f"a pause needs its kind, one of {PAUSE_KINDS}; got {pause_kind!r}")
     now = _now()
     conn = get_conn()
     row = conn.execute("SELECT status FROM tasks WHERE id = ?", (task_id,)).fetchone()
-    conn.execute("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?", (status, now, task_id))
+    conn.execute("UPDATE tasks SET status = ?, updated_at = ?, pause_kind = ? WHERE id = ?",
+                 (status, now, pause_kind if status == "paused" else None, task_id))
     if row is not None and row["status"] != status:
         conn.execute(
             "INSERT INTO task_events (task_id, at, from_status, to_status, cause) VALUES (?, ?, ?, ?, ?)",

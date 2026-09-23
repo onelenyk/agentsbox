@@ -42,8 +42,12 @@ async def test_a_running_worker_is_stopped_and_its_task_parked(db_path):
     out = await lifecycle.shutdown(reason="Sisyphus was closed", grace=2)
     await running
     assert out["parked"] == [t["id"]]
-    assert store.get_task(t["id"])["status"] == "waiting"
-    assert "stopped — Sisyphus was closed. Reply to resume." in store.get_thread(t["id"])[-1]["text"]
+    task = store.get_task(t["id"])
+    # Paused, not waiting: closing Sisyphus asks nobody anything, and the next
+    # boot picks it back up.
+    assert (task["status"], task["pause_kind"]) == ("paused", "closed")
+    assert any("paused — Sisyphus was closed. It resumes on its own when Sisyphus opens again."
+               in m["text"] for m in store.get_thread(t["id"]))
 
 
 async def test_no_process_the_daemon_owns_outlives_it(db_path):

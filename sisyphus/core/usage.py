@@ -36,6 +36,11 @@ def init_usage_table() -> None:
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_usage_task ON usage(task_id)")
+    # Whose limits the run spent (core.limits.provider_of). A subscription's
+    # cost is notional — its windows are the real limit — so the dollar
+    # budgets count only the rest. Blank on rows from before the column.
+    if "provider" not in {r[1] for r in conn.execute("PRAGMA table_info(usage)")}:
+        conn.execute("ALTER TABLE usage ADD COLUMN provider TEXT NOT NULL DEFAULT ''")
     conn.commit()
     conn.close()
 
@@ -151,7 +156,8 @@ def parse_usage(stdout: str) -> dict:
     return agg
 
 
-def record_run(task_id: str, agent: str, model: str, usage: dict, duration_ms: float = 0) -> None:
+def record_run(task_id: str, agent: str, model: str, usage: dict, duration_ms: float = 0,
+               provider: str = "") -> None:
     """Persist one agent run's usage. No-op if nothing was reported (steps == 0)
     — don't clutter stats with empty rows from crashed/usage-less runs."""
     if not usage or usage.get("steps", 0) == 0:
@@ -160,12 +166,12 @@ def record_run(task_id: str, agent: str, model: str, usage: dict, duration_ms: f
     conn.execute(
         """INSERT INTO usage (task_id, agent, model, input_tokens, output_tokens,
            reasoning_tokens, cache_read, cache_write, total_tokens, cost, steps,
-           duration_ms, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           duration_ms, created_at, provider)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (task_id, agent, model, usage["input_tokens"], usage["output_tokens"],
          usage["reasoning_tokens"], usage["cache_read"], usage["cache_write"],
          usage["total_tokens"], usage["cost"], usage["steps"], duration_ms,
-         datetime.now(timezone.utc).isoformat()),
+         datetime.now(timezone.utc).isoformat(), provider or ""),
     )
     conn.commit()
     conn.close()
@@ -229,11 +235,20 @@ def roster() -> dict:
     return {"agents": agents, "handoffs": handoffs}
 
 
+def _billed_clause() -> str:
+    """SQL excluding runs that spent a subscription window, not dollars."""
+    from .limits import SUBSCRIPTION_PROVIDERS
+    names = ", ".join(f"'{p}'" for p in SUBSCRIPTION_PROVIDERS)
+    return f"provider NOT IN ({names})"
+
+
 def task_cost(task_id: str) -> float:
-    """Total $ spent on a single task's runs — for the per-task budget guard."""
+    """$ billed for a single task's runs — for the per-task budget guard.
+    Subscription runs are left out: their cost is notional."""
     conn = get_conn()
     row = conn.execute(
-        "SELECT COALESCE(SUM(cost),0) c FROM usage WHERE task_id = ?", (task_id,)
+        f"SELECT COALESCE(SUM(cost),0) c FROM usage WHERE task_id = ? AND {_billed_clause()}",
+        (task_id,),
     ).fetchone()
     conn.close()
     return float(row["c"])
@@ -254,12 +269,14 @@ def task_usage(task_id: str) -> dict:
 
 
 def today_cost() -> float:
-    """Total $ spent today (UTC) across all runs — for the daily budget guard."""
+    """$ billed today (UTC) across all runs — for the daily budget guard.
+    Subscription runs are left out: their cost is notional."""
     from datetime import datetime, timezone
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     conn = get_conn()
     row = conn.execute(
-        "SELECT COALESCE(SUM(cost),0) c FROM usage WHERE substr(created_at,1,10) = ?",
+        "SELECT COALESCE(SUM(cost),0) c FROM usage WHERE substr(created_at,1,10) = ? "
+        f"AND {_billed_clause()}",
         (today,),
     ).fetchone()
     conn.close()

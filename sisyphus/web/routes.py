@@ -178,6 +178,11 @@ async def startup():
     from core import runner_store
     lifecycle.start_loop(runner_store.prune_forever(), "runner-store")
 
+    # How much of each subscription is left, and the tasks waiting on a window
+    # to reset (core.limits).
+    from core import limits
+    lifecycle.start_loop(limits.poll_forever(), "limits")
+
     # Started by the desktop app: end with it, even when it cannot say so.
     parent = os.environ.get("SISYPHUS_PARENT_PID")
     if parent and parent.isdigit():
@@ -698,6 +703,68 @@ async def runners_list_view(request: Request):
     runners = [{**r, "mode": auth_mode(r)} for r in list_runners()]
     return _tmpl().TemplateResponse(request, "runners_list.html", {"runners": runners})
 
+async def _runners_plan_response(request: Request, error: str = ""):
+    """What runs the agents: subscription limits and the model classes."""
+    # A cold model catalog spawns the runner's CLI (~8s for opencode); off the
+    # event loop, or every other page waits on it.
+    ctx = await asyncio.to_thread(_runners_plan_context, error)
+    return _tmpl().TemplateResponse(request, "runners_plan.html", ctx)
+
+def _runners_plan_context(error: str = "") -> dict:
+    from core import limits, model_classes, runner_catalog
+    from core.runners import list_runners
+    runners = list_runners()
+    # Model suggestions per runner, for the "add an option" field.
+    suggestions = {}
+    for r in runners:
+        try:
+            groups = runner_catalog.models(r.get("type") or "opencode", r.get("binary") or "")
+            suggestions[r["id"]] = [m["id"] for g in groups for m in g["models"]]
+        except Exception:  # noqa: BLE001 — suggestions only; typing a model still works
+            suggestions[r["id"]] = []
+    return {
+        "subscriptions": limits.view(),
+        "classes": model_classes.view(),
+        "runners": runners,
+        "suggestions": suggestions,
+        "error": error,
+    }
+
+@router.get("/api/runners/plan", response_class=HTMLResponse)
+async def runners_plan_view(request: Request):
+    return await _runners_plan_response(request)
+
+@router.post("/api/limits/refresh", response_class=HTMLResponse)
+async def limits_refresh(request: Request):
+    from core import limits
+    err = await asyncio.to_thread(limits.poll_opencode_go)
+    return await _runners_plan_response(request, error=f"OpenCode Go: {err}" if err else "")
+
+@router.post("/api/classes/{name}/add", response_class=HTMLResponse)
+async def classes_add(request: Request, name: str, runner_id: str = Form(...), model: str = Form("")):
+    from core import model_classes
+    try:
+        model_classes.add(name, runner_id, model.strip())
+    except ValueError as exc:
+        return await _runners_plan_response(request, error=str(exc))
+    return await _runners_plan_response(request)
+
+@router.post("/api/classes/{name}/{index}/{op}", response_class=HTMLResponse)
+async def classes_edit(request: Request, name: str, index: int, op: str):
+    from core import model_classes
+    try:
+        if op == "up":
+            model_classes.move(name, index, -1)
+        elif op == "down":
+            model_classes.move(name, index, 1)
+        elif op == "remove":
+            model_classes.remove(name, index)
+        else:
+            return await _runners_plan_response(request, error=f"unknown change {op!r}")
+    except ValueError as exc:
+        return await _runners_plan_response(request, error=str(exc))
+    return await _runners_plan_response(request)
+
 def _runner_error(message: str):
     """A 400 the runners page can actually show.
 
@@ -1016,6 +1083,7 @@ async def agents_list_view(request: Request):
     from core.agents import list_agents
     from core.runners import list_runners
     from core import sessions, usage
+    from core.model_classes import class_of
     runners = {r["id"]: r["name"] for r in list_runners()}
     team = usage.roster()
     stats, handoffs = team["agents"], team["handoffs"]
@@ -1025,6 +1093,7 @@ async def agents_list_view(request: Request):
         n = a["name"]
         a["stats"] = stats.get(n)
         a["live"] = n in live
+        a["class"] = class_of(a)
         # First sentence of the persona: what it is for, in its own words.
         sentences = [x.strip().rstrip(".") for x in
                      (a.get("persona") or "").strip().split("\n")[0].split(". ") if x.strip()]
@@ -1074,16 +1143,21 @@ async def agents_edit_form(request: Request, name: str):
     agent = get_agent(name)
     if not agent:
         return HTMLResponse("not found", status_code=404)
+    from core.model_classes import CLASSES
     return _tmpl().TemplateResponse(request, "agents_edit.html",
-                                    {"agent": agent,
+                                    {"agent": agent, "classes": CLASSES,
                                      "catalog": list(TOOLS), "runners": list_runners()})
 
 @router.post("/api/agents/{name}/edit")
 async def agents_edit(name: str, persona: str = Form(""), model: str = Form(""),
-                      runner_id: str = Form(""), tools: List[str] = Form([])):
+                      runner_id: str = Form(""), model_class: str = Form(""),
+                      tools: List[str] = Form([])):
     from core.agents import update_agent
     from fastapi.responses import Response
-    update_agent(name, persona=persona, model=model, runner_id=runner_id or None, tools=tools)
+    # A blank runner is a choice ("follow the class"), not a missing field: it
+    # has to clear a pin, which passing None would silently leave in place.
+    update_agent(name, persona=persona, model=model, runner_id=runner_id or "",
+                 model_class=model_class, tools=tools)
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "agentsUpdated"
     return resp
@@ -1143,6 +1217,20 @@ def _enrich_now_card(t, mr, status):
     t["cost"] = f"${cost:.2f}" if cost else None
 
 
+_PAUSED_BECAUSE = {
+    "closed": ("Sisyphus was closed", "resumes when Sisyphus opens"),
+    "limits": ("subscription limits", "resumes when a window resets"),
+    "stopped": ("you stopped it", ""),
+}
+
+
+def _enrich_paused(t: dict) -> None:
+    """Why a paused card is paused, and whether it comes back by itself."""
+    kind = t.get("pause_kind") or "stopped"
+    why, auto = _PAUSED_BECAUSE.get(kind, ("paused", ""))
+    t["pause_why"], t["pause_auto"] = why, auto
+
+
 def _runner_line(agent_name: str) -> dict:
     """Which runner and model an agent runs on — what a stuck card names so you
     know where to look."""
@@ -1180,6 +1268,8 @@ def board_column(task, mr):
         return "in-progress"
     if status == "waiting":
         return "needs-you"
+    if status == "paused":
+        return "paused"
     if status == "done":
         if mr is not None:
             if mr.get("status") == "merged":
@@ -1234,7 +1324,7 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = "", vi
     # asks, and a snippet of the goal beyond the title line.
     live_by_task = {s["task_id"]: s for s in _enrich_sessions(sessions.list_active())}
 
-    cols = ("in-progress", "needs-you", "to-merge", "shipped", "done", "not-merged", "failed")
+    cols = ("in-progress", "paused", "needs-you", "to-merge", "shipped", "done", "not-merged", "failed")
     columns = {c: [] for c in cols}
     kids_by_parent = store.child_counts()
     for status in store.VALID_STATUSES:
@@ -1264,8 +1354,10 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = "", vi
                 t["live_mins"] = live["elapsed_mins"]
 
             col = board_column(t, mr)
-            if col in ("in-progress", "needs-you", "to-merge"):
+            if col in ("in-progress", "paused", "needs-you", "to-merge"):
                 _enrich_now_card(t, mr, status)
+            if col == "paused":
+                _enrich_paused(t)
             columns[col].append(t)
 
     from core import autopilot as _autopilot
@@ -1314,7 +1406,7 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = "", vi
     from core import reviews
     facts = _row_facts()
     rows, by_id, reviewing = [], {}, {}
-    for col in ("shipped", "done", "not-merged", "failed", "in-progress", "needs-you", "to-merge"):
+    for col in ("shipped", "done", "not-merged", "failed", "in-progress", "paused", "needs-you", "to-merge"):
         for t in columns[col]:
             marker = reviews.parse_review_marker(t.get("goal") or "")
             row = _row(t, col, facts, mr=task_latest_mr.get(t["id"]),
@@ -1396,13 +1488,14 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = "", vi
 
     return _tmpl().TemplateResponse(request, "tasks_list.html", {
         "needs_you": needs_you, "running": running, "queued": queued,
+        "paused": columns["paused"],
         "sprints": sprints, "repo": repo,
         "repos": sorted({r["repo"] for r in rows if r["repo"]}),
         "whos": sorted({a for r in rows for a in r["trail"]}),
     })
 
 
-_KIND_WORD = {"in-progress": "in flight", "needs-you": "wants you", "not-merged": "not merged",
+_KIND_WORD = {"in-progress": "in flight", "paused": "paused", "needs-you": "wants you", "not-merged": "not merged",
               "to-merge": "to merge", "shipped": "shipped",
               "done": "done", "failed": "failed"}
 
@@ -1580,12 +1673,14 @@ def sprint_board(top: list, running_ids: set, today=None) -> dict:
     now = _sprint_of(today.isoformat())
     lanes = {key: [] for key, _, _ in SPRINT_LANES}
     for r in top:
-        still_open = r["kind"] in ("in-progress", "needs-you", "to-merge")
+        still_open = r["kind"] in ("in-progress", "paused", "needs-you", "to-merge")
         this_week = r["sprint"]["id"] == now["id"]
         if not (still_open or this_week):
             continue
         if r["kind"] == "in-progress":
             lane = "running" if (r["id"] in running_ids or r.get("live")) else "queued"
+        elif r["kind"] == "paused":
+            lane = "queued"
         elif r["kind"] in ("needs-you", "to-merge"):
             lane = "you"
         elif r["kind"] == "failed":
@@ -2105,6 +2200,10 @@ async def task_reply(task_id: str, text: str = Form(...), from_card: str = Form(
         # nothing said so. Replying IS reopening — do both, in that order.
         store.set_status(task_id, "waiting", cause="reopened by your reply")
         store.post_message(task_id, "system", kind="note", text="reopened by the human with a reply")
+    if task["status"] == "paused":
+        # A reply to a paused task is also a Resume; the reply's own event
+        # drives the pass, so no second `continue` is queued beside it.
+        store.set_status(task_id, "active", cause="resumed by your reply")
     store.post_message(task_id, "human", kind="answer", text=text)
     emit(task_id, "human_replied")
     if from_card:
@@ -2123,12 +2222,11 @@ async def task_reply(task_id: str, text: str = Form(...), from_card: str = Form(
 
 @router.post("/api/tasks/{task_id}/stop")
 async def task_stop(task_id: str):
-    """Stop a running task: signal its worker to die, then park it as *waiting*.
+    """Stop a running task: signal its worker to die, then pause it.
 
-    Parking as `waiting` rather than `failed` is deliberate — the work did not
-    fail, a human interrupted it, and a human decides what happens next. It is
-    also the state a reply resumes, so stop/resume is symmetric with every other
-    human interruption.
+    Paused rather than `failed` — the work did not fail, a human interrupted
+    it — and rather than `waiting`, which would put it among the questions
+    asked of you when nothing was asked. Resume (or a reply) continues it.
 
     The cancelled worker still posts its own worker_finished on the way out
     (spawn_worker's "ended without reporting" path), so the thread marker closes
@@ -2155,7 +2253,7 @@ async def task_stop(task_id: str):
         signalled += cancellation.request(tid)
         t = store.get_task(tid)
         if t and t["status"] not in ("done", "failed"):
-            store.set_status(tid, "waiting", cause="stopped by you")
+            store.set_status(tid, "paused", cause="stopped by you", pause_kind="stopped")
             if tid != task_id:
                 store.post_message(
                     tid, "system", kind="note",
@@ -2167,10 +2265,32 @@ async def task_stop(task_id: str):
               + (f"{signalled} worker(s) signalled to stop. " if signalled
                  else "no worker was running. ")
               + (f"{len(tree) - 1} child task(s) stopped too. " if len(tree) > 1 else "")
-              + "Reply below to resume."),
+              + "Press Resume (or reply) to continue."),
     )
     logger.info("task %s stopped by the human (%d worker(s) across %d task(s))",
                 task_id, signalled, len(tree))
+    resp = Response(status_code=200)
+    resp.headers["HX-Trigger"] = "taskUpdated"
+    return resp
+
+
+@router.post("/api/tasks/{task_id}/resume")
+async def task_resume(task_id: str):
+    """Put a paused task back to work — the Resume button. A task that is not
+    paused (already resumed, or never paused) answers 409, so a double click
+    cannot start a second worker."""
+    from core import orchestrator, store
+    from fastapi.responses import Response
+
+    task = store.get_task(task_id)
+    if not task:
+        return Response(status_code=404)
+    tree = [tid for tid in store.task_tree(task_id)
+            if (store.get_task(tid) or {}).get("status") == "paused"]
+    if task_id not in tree:
+        return Response(status_code=409)
+    for tid in tree:
+        orchestrator.resume(tid, "resumed by you")
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "taskUpdated"
     return resp

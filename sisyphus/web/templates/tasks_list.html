@@ -60,11 +60,11 @@
     {% endif %}
 
     {# ── in flight ───────────────────────────────────────────────────── #}
-    {% if running or queued %}
+    {% if running or queued or paused %}
     <section class="zone zone--run">
         <header class="zone__head">
             <h2>In flight</h2>
-            <span class="zone__count tnum">{{ running|length + queued|length }}</span>
+            <span class="zone__count tnum">{{ running|length + queued|length + paused|length }}</span>
         </header>
         <div class="runs">
             {% for t in running %}
@@ -99,6 +99,18 @@
                 <span class="queued__state">queued · waiting for the orchestrator</span>
                 <span class="queued__age"><span class="reltime" data-created="{{ t.created_at }}"></span></span>
             </a>
+            {% endfor %}
+            {# Paused: interrupted, nothing asked of you. It says why, and either
+               that it comes back by itself or that Resume brings it back. #}
+            {% for t in paused %}
+            <div class="paused-run">
+                <a class="paused-run__link" draggable="false" href="/tasks/{{ t.id }}" hx-get="/api/tasks/{{ t.id }}/panel" hx-target="#overlay-body" hx-swap="innerHTML" hx-push-url="/tasks/{{ t.id }}">
+                    <span class="tkey">{{ t.key }}</span>
+                    <span class="queued__title">{{ task_display_title(t) }}</span>
+                </a>
+                <span class="paused-run__why">paused · {{ t.pause_why }}{% if t.pause_auto %} · {{ t.pause_auto }}{% endif %}</span>
+                <button type="button" class="btn btn--sm paused-run__resume" hx-post="/api/tasks/{{ t.id }}/resume" hx-swap="none" hx-disabled-elt="this">Resume</button>
+            </div>
             {% endfor %}
         </div>
     </section>

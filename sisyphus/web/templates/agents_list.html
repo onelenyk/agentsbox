@@ -24,7 +24,8 @@
 
 {% macro foot(a) -%}
 <div class="agent__foot">
-    <span class="agent__runner" title="Runner · model">{{ runners.get(a.runner_id) or 'default runner' }}{% if a.model %} · {{ a.model }}{% endif %}</span>
+    {% if a.runner_id %}<span class="agent__runner" title="Pinned to a runner — never switched">{{ runners.get(a.runner_id) or 'deleted runner' }}{% if a.model %} · {{ a.model }}{% endif %} · pinned</span>
+    {%- else %}<span class="agent__runner" title="Runner picked from the class at each run — see Runners">{{ a.class }} class</span>{% endif %}
     <span class="agent__tools" title="{{ a.tools|join(', ') }}">{{ a.tools|length }} tool{{ '' if a.tools|length == 1 else 's' }}</span>
     <span class="agent__acts">
         <button class="btn btn--ghost btn--sm" hx-get="/api/agents/{{ a.name }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>

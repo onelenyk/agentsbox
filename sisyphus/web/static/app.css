@@ -414,6 +414,7 @@ a.line:hover, .sys .line--click:hover { color: var(--text); }
 .status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .status--active  { color: var(--accent); background: var(--accent-bg); }
 .status--waiting { color: var(--warn);   background: var(--warn-bg); }
+.status--paused  { color: var(--text-2); background: var(--panel-2); }
 .status--done    { color: var(--good);   background: var(--good-bg); }
 .status--failed  { color: var(--bad);    background: var(--bad-bg); }
 
@@ -527,6 +528,18 @@ a.line:hover, .sys .line--click:hover { color: var(--text); }
   background: var(--panel); border: 1px dashed var(--border); border-radius: var(--r);
 }
 .queued:hover { color: var(--text); border-color: var(--border-2); }
+/* paused: interrupted with nothing asked of you — a queued row with its reason
+   and a way back. */
+.paused-run {
+  display: flex; align-items: center; gap: var(--sp-5); padding: var(--sp-3) var(--sp-4) var(--sp-3) var(--sp-7);
+  font-size: var(--fs-body); color: var(--text-2);
+  background: var(--panel); border: 1px dashed var(--border-2); border-radius: var(--r);
+}
+.paused-run__link { display: flex; align-items: center; gap: var(--sp-5); min-width: 0; color: inherit; text-decoration: none; }
+.paused-run__link:hover { color: var(--text); }
+.paused-run__why { flex: none; font-size: var(--fs-xs); color: var(--muted); }
+.paused-run__resume { margin-left: auto; flex: none; }
+.trow__state--paused, .tag--paused { color: var(--text-2); background: var(--panel-2); border-color: var(--border-2); }
 .queued__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .queued__state { flex: none; font-size: var(--fs-xs); color: var(--muted); }
 .queued__age { margin-left: auto; flex: none; font-size: var(--fs-xs); color: var(--muted); }
@@ -2246,3 +2259,34 @@ a.state__rest:hover { color: var(--text-2); }
    of the summary line. */
 .modal__aside { margin-right: auto; display: flex; gap: var(--sp-4); }
 .form-more .checks { margin-top: var(--sp-2); }
+
+/* ─ runners_plan.html ─────────────────────────────────────────────────────
+   Subscription limits over the model classes that spend them. A window's bar
+   is coloured by how close it is to the point where spawns move on. */
+.plan { display: flex; flex-direction: column; gap: var(--sp-6); margin-bottom: var(--sp-10); }
+.plan__error { margin: 0; }
+/* Two panels side by side should share the row, not leave a third of it. */
+.plan__grid { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+.plan .badge { white-space: nowrap; }
+.plan .result__label { flex-wrap: wrap; }
+.plan__act { margin-left: auto; }
+.plan__bar { margin-bottom: var(--sp-4); }
+.plan__fill { width: var(--w, 0%); }
+.bar-fill.warn { background: var(--warn); }
+.bar-fill.bad { background: var(--bad); }
+.plan__note { font-size: var(--fs-base); color: var(--text-2); margin-top: var(--sp-4); }
+.plan__note.muted { color: var(--muted); }
+.plan__opts { list-style: none; margin: var(--sp-6) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+.plan__opt {
+  display: flex; align-items: center; gap: var(--sp-5);
+  padding: var(--sp-3) var(--sp-5); border: 1px solid var(--border); border-radius: var(--r);
+  font-size: var(--fs-body);
+}
+.plan__opt.is-live { border-color: var(--accent-bd); background: var(--accent-bg); }
+.plan__n { color: var(--muted); font-variant-numeric: tabular-nums; }
+.plan__what { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan__runner { font-weight: var(--fw-semibold); }
+.plan__moves { display: flex; gap: var(--sp-2); }
+.plan__add { display: flex; gap: var(--sp-4); margin-top: var(--sp-6); }
+.plan__add select { flex: 0 0 auto; width: auto; }
+.plan__add input { flex: 1 1 auto; min-width: 0; }

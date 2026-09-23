@@ -152,7 +152,7 @@ def sisyphus_create_task(goal: str, repo: str) -> dict[str, Any]:
 
 
 def sisyphus_list_tasks(status: str = "") -> dict[str, Any]:
-    """List tasks, optionally filtered by status (active, waiting, done, failed)."""
+    """List tasks, optionally filtered by status (active, waiting, paused, done, failed)."""
     return _daemon("GET", "/api/v1/tasks", params={"status": status})
 
 
@@ -438,13 +438,13 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     },
     {
         "name": "sisyphus_list_tasks",
-        "description": "List tasks, optionally filtered by status (active, waiting, done, failed)",
+        "description": "List tasks, optionally filtered by status (active, waiting, paused, done, failed)",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "status": {
                     "type": "string",
-                    "description": "Filter by status: active, waiting, done, or failed",
+                    "description": "Filter by status: active, waiting, paused, done, or failed",
                     "default": "",
                 },
             },

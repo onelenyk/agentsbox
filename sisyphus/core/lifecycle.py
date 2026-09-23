@@ -9,7 +9,7 @@ ordered thing:
 
   1. no new work: cancel every loop, the dispatcher first among them;
   2. every task with a worker running is signalled the way the Stop button
-     signals it (core.cancellation) and parked as ``waiting`` with a line
+     signals it (core.cancellation) and paused as ``closed`` with a line
      that says why — a reply resumes it, exactly as after a Stop;
   3. the workers get a grace period to exit through the launcher's own
      SIGTERM → SIGKILL path, which closes their thread markers cleanly;
@@ -78,9 +78,10 @@ async def shutdown(reason: Optional[str] = None, grace: float = WORKER_GRACE_SEC
         cancellation.request(task_id, why=reason)
         t = store.get_task(task_id)
         if t and t["status"] not in ("done", "failed"):
-            store.set_status(task_id, "waiting", cause=reason)
-            store.post_message(task_id, "system", kind="note",
-                               text=f"stopped — {reason}. Reply to resume.")
+            # Paused, not waiting: nobody is being asked anything, and the
+            # next boot resumes it (orchestrator.reconcile_on_boot).
+            from core.orchestrator import pause
+            pause(task_id, "closed", reason)
             parked.append(task_id)
 
     # 3. Let them go through the launcher's own exit path.

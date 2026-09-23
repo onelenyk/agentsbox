@@ -6,6 +6,7 @@
 <button class="btn btn--ghost btn--sm" hx-get="/api/runners/detect" hx-target="#modal-container" hx-swap="innerHTML">⌖ Detect</button>
 <button class="btn btn--primary btn--sm" hx-get="/api/runners/new-form" hx-target="body" hx-swap="beforeend">+ Runner</button>
 {% endcall %}
+<div id="runners-plan" hx-get="/api/runners/plan" hx-trigger="load" hx-swap="outerHTML"></div>
 <div id="runners-list" hx-get="/api/runners/list" hx-trigger="load, runnersUpdated from:body" hx-swap="innerHTML">
     <div class="empty">Loading…</div>
 </div>

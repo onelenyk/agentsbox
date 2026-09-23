@@ -49,6 +49,9 @@ def init_agents_table() -> None:
             updated_at TEXT NOT NULL
         )
     """)
+    # Which model class drives the agent (core.model_classes); blank = its kind.
+    if "model_class" not in {r[1] for r in conn.execute("PRAGMA table_info(agents)")}:
+        conn.execute("ALTER TABLE agents ADD COLUMN model_class TEXT NOT NULL DEFAULT ''")
     conn.commit()
     if conn.execute("SELECT COUNT(*) FROM agents WHERE kind = 'worker'").fetchone()[0] == 0:
         _seed_workers(conn)
@@ -208,7 +211,7 @@ def add_agent(name: str, persona: str = "", tools: Optional[list] = None,
 
 
 def update_agent(name: str, **fields) -> Optional[dict]:
-    allowed = {"persona", "tools", "runner_id", "model", "kind", "enabled"}
+    allowed = {"persona", "tools", "runner_id", "model", "kind", "enabled", "model_class"}
     updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
     if "tools" in updates and isinstance(updates["tools"], list):
         updates["tools"] = json.dumps(updates["tools"])

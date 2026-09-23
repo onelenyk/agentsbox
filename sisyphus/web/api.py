@@ -493,7 +493,7 @@ async def receive_webhook(platform: str, request: Request):
         task = store.find_task_by_mr(mr_url)
         if task:
             store.post_message(task["id"], "system", kind="external", text=summary)
-            if task["status"] in ("done", "failed", "waiting"):
+            if task["status"] in ("done", "failed", "waiting", "paused"):
                 store.set_status(task["id"], "active")
             emit(task["id"], "external")
             result["task_id"] = task["id"]
