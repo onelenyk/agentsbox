@@ -341,6 +341,37 @@
         b.addEventListener("htmx:afterSwap", function (e) { restoreFilters(e.detail.target); });
         restoreFilters();
 
+        // ── "New since you last looked" ─────────────────────────────────
+        // Work that finished while you were away is the one thing an archive
+        // sorted by date cannot show. The mark only ever moves when you say
+        // so: a board that marked itself read on load would mean missing a
+        // result by glancing at the page. Shared by every view, over
+        // [data-filter-item] elements carrying data-when.
+        var SEEN = "tasksSeenAt";
+        function seenAt() { try { return localStorage.getItem(SEEN) || ""; } catch (e) { return ""; } }
+        function paintNew() {
+            var since = seenAt(), n = 0;
+            document.querySelectorAll("[data-filter-item][data-when]").forEach(function (item) {
+                var fresh = since ? item.dataset.when > since : false;
+                item.classList.toggle("is-new", fresh);
+                if (fresh) n++;
+            });
+            document.querySelectorAll("[data-new]").forEach(function (box) {
+                box.hidden = n === 0;
+                var c = box.querySelector("[data-new-count]");
+                if (c) c.textContent = n;
+            });
+        }
+        document.addEventListener("click", function (e) {
+            var btn = e.target.closest && e.target.closest("[data-seen]");
+            if (!btn) return;
+            try { localStorage.setItem(SEEN, new Date().toISOString()); } catch (err) {}
+            paintNew();
+        });
+        b.addEventListener("htmx:afterSwap", paintNew);
+        if (!seenAt()) { try { localStorage.setItem(SEEN, new Date().toISOString()); } catch (e) {} }
+        paintNew();
+
         // Model pickers (_ui.html model_picker): filter as you type — a group
         // with a match opens, one without hides — and keep the current pick in
         // view when a picker arrives.

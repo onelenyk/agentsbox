@@ -6,20 +6,16 @@
 <div class="board-shell">
     <div class="board-main">
         {% call ui.toolbar([{'label': 'Tasks', 'href': '/tasks'}, {'label': repo.name}]) %}
-        <span class="toolbar__note mono">{{ repo.source }}{% if repo.branch %} · {{ repo.branch }}{% endif %}</span>
+        <span class="toolbar__note mono" title="{{ repo.source }}">{{ repo.branch or '' }}</span>
+        {% for a in autopilots %}
+        <a href="/autopilots" class="tag tag--origin{{ ' tag--idle' if not a.enabled }}" title="Autopilot {{ a.name }}{{ ' (paused)' if not a.enabled }}">↻ {{ a.explained }}</a>
+        {% endfor %}
         {{ ui.view_switch() }}
         <a class="btn btn--ghost btn--sm" href="/repos/{{ repo.name }}" title="Resources, setup, edit">⚙ Settings</a>
         {% endcall %}
         {% set fixed_repo = repo.name %}
+        {% set compact = true %}
         {% include "_task_box.html" %}
-        {% if autopilots %}
-        <div class="project-autopilots">
-            <span class="muted">Autopilot:</span>
-            {% for a in autopilots %}
-            <a href="/autopilots" class="{{ '' if a.enabled else 'muted' }}">{{ a.name }}{% if a.cron %} <code class="mono">{{ a.cron }}</code>{% endif %}{% if not a.enabled %} (paused){% endif %}</a>{% if not loop.last %} · {% endif %}
-            {% endfor %}
-        </div>
-        {% endif %}
         <div id="tasks-list" hx-get="/api/tasks/list?repo={{ repo.name|urlencode }}"
              hx-vals='js:{view: boardMode()}' hx-trigger="load, boardModeChanged from:body, taskCreated from:body, taskUpdated from:body, dataChanged from:body, every 300s[boardIdle()]" hx-swap="innerHTML transition:true">
             <div class="empty">Loading…</div>

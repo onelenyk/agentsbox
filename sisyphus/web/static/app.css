@@ -502,8 +502,6 @@ a.line:hover, .sys .line--click:hover { color: var(--text); }
   font-family: var(--mono); font-size: var(--fs-xs); color: var(--col, var(--muted));
   background: var(--col-bg, var(--panel-2)); border-radius: var(--r-pill); padding: 1px var(--sp-4);
 }
-.zone__empty { font-size: var(--fs-md); color: var(--muted); }
-.zone--quiet .zone__head h2 { color: var(--muted); }
 
 /* the key you can say out loud, everywhere a task is named */
 .tkey {
@@ -1561,6 +1559,16 @@ body.has-overlay { overflow: hidden; }
 }
 .taskbox:focus-within { border-color: var(--accent); box-shadow: var(--ring); }
 .taskbox.is-drop { border-style: dashed; background: var(--accent-bg); }
+/* Above a board the box is one line until you use it: the chips and hints
+   open on focus, or once there is something typed or attached. Home keeps
+   the full box — starting work is what that page is for. */
+.taskbox[data-compact] { gap: var(--sp-3); padding: var(--sp-4) var(--sp-6); border-color: var(--border); }
+.taskbox[data-compact] .taskbox__label { display: none; }
+.taskbox[data-compact] .taskbox__textarea { min-height: auto; font-size: var(--fs-lg); }
+.taskbox[data-compact] .taskbox__bar { display: none; }
+.taskbox[data-compact]:focus-within .taskbox__bar,
+.taskbox[data-compact]:has(.taskbox__textarea:not(:placeholder-shown)) .taskbox__bar,
+.taskbox[data-compact]:has(.taskbox__files:not([hidden])) .taskbox__bar { display: flex; }
 .taskbox__field { position: relative; }
 .taskbox__textarea {
   width: 100%; min-height: 42px; height: var(--ta-height, auto); resize: none; overflow-y: auto;
@@ -1621,13 +1629,6 @@ body.has-overlay { overflow: hidden; }
 .taskbox__open { color: var(--accent-hi); text-decoration: none; margin-left: auto; }
 .taskbox__open:hover { color: var(--accent); }
 @media (max-width: 640px) { .taskbox__hint { display: none; } }
-.project-autopilots { font-size: var(--fs-base); margin: calc(-1 * var(--sp-2)) 0 var(--sp-7); color: var(--muted); }
-.project-autopilots a { color: var(--text-2); text-decoration: none; }
-.project-autopilots a:hover { color: var(--text); }
-.project-autopilots code {
-  font-size: var(--fs-2xs); color: var(--muted); background: var(--panel-2);
-  border: 1px solid var(--border); border-radius: var(--r-sm); padding: 1px var(--sp-2); margin-left: var(--sp-2);
-}
 
 /* ── Chips ─── */
 .chip-btn { font: inherit; font-size: var(--fs-base); font-weight: var(--fw-strong); padding: var(--sp-2) var(--sp-5); border-radius: var(--r-pill); border: 1px solid var(--border-2); background: var(--panel-2); color: var(--text-2); cursor: pointer; transition: color var(--dur), background var(--dur), border-color var(--dur); }
@@ -2120,7 +2121,8 @@ body.has-overlay { overflow: hidden; }
 .sboard__name { display: flex; align-items: baseline; gap: var(--sp-5); }
 .sboard__name h2 { font-size: var(--fs-3xl); font-weight: var(--fw-bold); }
 .sboard__span { font-family: var(--mono); font-size: var(--fs-sm); color: var(--muted); }
-.sboard__left { font-size: var(--fs-sm); color: var(--warn); }
+.sboard__left { font-size: var(--fs-sm); color: var(--muted); }
+.sboard__left--warn { color: var(--warn); }
 .sboard__progress { display: flex; align-items: center; gap: var(--sp-5); flex: 1 1 200px; max-width: 360px; }
 .sboard__progress .bar-track { flex: 1 1 auto; }
 .sboard__bar { width: var(--w, 0%); }
@@ -2130,7 +2132,14 @@ body.has-overlay { overflow: hidden; }
 .sboard__auto input { width: auto; }
 .sboard__auto:has(input:checked) { color: var(--accent-hi); background: var(--accent-bg); border-color: var(--accent-bd); }
 
-.sboard__lanes { display: grid; grid-template-columns: repeat(5, minmax(210px, 1fr)); gap: var(--sp-6); align-items: start; }
+/* Lanes share the width by what they hold: an empty lane shrinks to a narrow
+   rail, and a full one lays its cards out in columns — four empty lanes used
+   to take 80% of the board while Done queued nine cards in one strip. */
+.sboard__lanes { display: flex; gap: var(--sp-6); align-items: flex-start; }
+.sboard__lanes > .slane { flex: 1 1 13rem; }
+.sboard__lanes > .slane:has(.slane__empty:not([hidden])) { flex: 0 0 9rem; }
+.slane:has(.slane__empty:not([hidden])) .slane__cards { display: block; }
+.sboard__lanes > .slane:not(:has(.slane__empty:not([hidden]))) .slane__cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); }
 .slane {
   --lane: var(--muted);
   display: flex; flex-direction: column; min-width: 0;
@@ -2162,7 +2171,7 @@ body.has-overlay { overflow: hidden; }
 .tcard__when { margin-left: auto; font-family: var(--mono); font-size: var(--fs-2xs); color: var(--muted); }
 .tcard__title {
   font-size: var(--fs-body); font-weight: var(--fw-semibold); line-height: var(--lh-snug);
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .tcard__why { font-size: var(--fs-sm); line-height: var(--lh-snug); display: flex; align-items: center; gap: var(--sp-2); }
 .tcard__foot { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
@@ -2170,10 +2179,11 @@ body.has-overlay { overflow: hidden; }
 .tcard__carried { color: var(--warn); background: var(--warn-bg); border-color: var(--warn-bd); }
 
 @media (max-width: 1100px) {
-  .sboard__lanes { grid-template-columns: repeat(5, minmax(220px, 1fr)); overflow-x: auto; padding-bottom: var(--sp-4); }
+  .sboard__lanes { overflow-x: auto; padding-bottom: var(--sp-4); }
 }
 @media (max-width: 640px) {
-  .sboard__lanes { grid-template-columns: minmax(0, 1fr); overflow-x: visible; }
+  .sboard__lanes { flex-direction: column; align-items: stretch; overflow-x: visible; }
+  .sboard__lanes > .slane { flex: none; }
   .sboard__tools { margin-left: 0; width: 100%; }
 }
 
@@ -2356,4 +2366,13 @@ a.state__rest:hover { color: var(--text-2); }
 .fbar__clear[hidden] { display: none; }
 @media (max-width: 720px) { .fbar__q, .fbar__q input { width: 100%; } }
 .taskbox__label { font-size: var(--fs-sm); color: var(--muted); }
-.zone__sub { font-size: var(--fs-sm); color: var(--muted); }
+.tcard.is-new { border-color: var(--accent-bd); }
+.tcard.is-new .tcard__title { font-weight: var(--fw-bold); }
+.tcard .stagebar { margin: 0; }
+
+/* ── Create / edit dialog (_ui.html modal macro) ────────────────────────
+   A check the form can run sits at the far left of the actions, apart from
+   Cancel and the primary button. The Tools fold keeps its checkboxes clear
+   of the summary line. */
+.modal__aside { margin-right: auto; display: flex; gap: var(--sp-4); }
+.form-more .checks { margin-top: var(--sp-2); }

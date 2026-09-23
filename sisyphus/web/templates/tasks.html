@@ -10,10 +10,10 @@
        page is reworked. Its route (/api/board/watch) and watch_rail.html are
        untouched — putting it back is re-adding the aside below. #}
     <div class="board-main">
-        {% call ui.toolbar([{'label': 'Tasks'}]) %}
-        <span class="toolbar__note">every task, every repo</span>
+        {% call ui.toolbar([{'label': 'Tasks'}], 'every repo') %}
         {{ ui.view_switch() }}
         {% endcall %}
+        {% set compact = true %}
         {% include "_task_box.html" %}
         <div id="tasks-list" hx-get="/api/tasks/list" hx-vals='js:{view: boardMode()}' hx-trigger="load, boardModeChanged from:body, taskCreated from:body, taskUpdated from:body, dataChanged from:body, every 300s[boardIdle()]" hx-swap="innerHTML transition:true">
             <div class="empty">Loading…</div>

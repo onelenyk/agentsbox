@@ -43,21 +43,21 @@
 <div class="board">
 
     {# ── wants you ───────────────────────────────────────────────────── #}
-    <section class="zone zone--you {{ 'zone--quiet' if not needs_you }}">
+    {# Only when something is. An empty "Wants you" took the top of every
+       board to say what Home's state line already counts as zero. #}
+    {% if needs_you %}
+    <section class="zone zone--you">
         <header class="zone__head">
             <h2>Wants you</h2>
-            {% if needs_you %}<span class="zone__count tnum">{{ needs_you|length }}</span>{% endif %}
+            <span class="zone__count tnum">{{ needs_you|length }}</span>
             <button type="button" class="zone__notify" data-notif-state onclick="enableNotifications()"
                     title="A browser notification the moment something lands here"></button>
         </header>
-        {% if needs_you %}
         <div class="asks">
             {% for t in needs_you %}{{ ask_card(t, task_display_title(t)) }}{% endfor %}
         </div>
-        {% else %}
-        <p class="zone__empty">Nothing is waiting on you.</p>
-        {% endif %}
     </section>
+    {% endif %}
 
     {# ── in flight ───────────────────────────────────────────────────── #}
     {% if running or queued %}
@@ -109,14 +109,13 @@
     <section class="zone zone--backlog">
         <header class="zone__head">
             <h2>Backlog</h2>
-            <span class="zone__sub">every task, oldest sprints folded</span>
-            <span class="zone__new" hidden>
-                <span class="zone__new-n tnum">0</span> new since you last looked
-                <button type="button" class="seen-btn">Mark seen</button>
+            <span class="zone__new" data-new hidden>
+                <span class="zone__new-n tnum" data-new-count>0</span> new since you last looked
+                <button type="button" class="seen-btn" data-seen>Mark seen</button>
             </span>
         </header>
         {% set picks = [
-            {'field': 'repo', 'label': 'Repo', 'any': 'any repo', 'options': repos},
+            {'field': 'repo', 'label': 'Repo', 'any': 'any repo', 'options': repos if repos|length > 1 else []},
             {'field': 'who', 'label': 'Worked by', 'any': 'anyone', 'options': whos},
             {'field': 'origin', 'label': 'Asked by', 'any': 'anyone',
              'options': [('you', 'you'), ('auto', 'an automation')]},
@@ -133,7 +132,7 @@
             <span role="columnheader">Key</span>
             <span role="columnheader">Title</span>
             <span role="columnheader" title="Who asked for the task — empty when it was you">Asked by</span>
-            <span role="columnheader" title="Every role that worked it, in order">Worked</span>
+            <span role="columnheader" title="Every role that worked it, in order — OR orchestrator · EN engineer · RV reviewer · MR mr-reviewer · EX explorer">Worked</span>
             <span role="columnheader" title="The one thing worth knowing — empty when it went the ordinary way">Why</span>
             <span role="columnheader" class="thead__right">Status</span>
             <span role="columnheader" class="thead__right">When</span>
@@ -209,30 +208,5 @@
         });
     })();
 
-    // "Finished while I wasn't looking" is the one thing about done work worth
-    // a person's attention, and it is exactly what an archive sorted by date
-    // cannot show. The watermark only ever moves when you say so — a board
-    // that marked itself read on load would mean missing a result by glancing
-    // at the page.
-    var KEY = 'tasksSeenAt';
-    var box = document.querySelector('.zone__new');
-    function watermark() { try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; } }
-    function paint() {
-        var since = watermark(), n = 0;
-        document.querySelectorAll('.trow[data-when]').forEach(function (row) {
-            var isNew = since ? row.dataset.when > since : false;
-            row.classList.toggle('is-new', isNew);
-            if (isNew) n++;
-        });
-        if (!box) return;
-        box.hidden = n === 0;
-        box.querySelector('.zone__new-n').textContent = n;
-    }
-    if (box) box.querySelector('.seen-btn').onclick = function () {
-        try { localStorage.setItem(KEY, new Date().toISOString()); } catch (e) { }
-        paint();
-    };
-    if (!watermark()) { try { localStorage.setItem(KEY, new Date().toISOString()); } catch (e) { } }
-    paint();
 })();
 </script>
