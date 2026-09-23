@@ -626,7 +626,24 @@ async def handle_event(
     if decision.action == "answer" and _produced_something(task_id):
         decision = Decision(action="done", why=decision.why or "the work is delivered, not merely answered")
 
-    if decision.action == "done" and not (_reviewer_approved(task_id) or _all_children_done(task_id)):
+    # Committed work is not done until it is on a merge request: the commit
+    # lives only on the task branch, and a 'done' hands the task to cleanup,
+    # which deletes that branch's clone when no MR is open — losing the work
+    # (SIS-114: an approved, committed task with no MR went done and cleanup
+    # deleted the only copy of the commits). Send it back to the engineer to
+    # open the MR. A task whose deliverable is an answer or a doc commits
+    # nothing, so this never blocks those.
+    from . import mergerequests
+    if (decision.action == "done"
+            and any(m["kind"] == "commit" for m in store.get_thread(task_id))
+            and mergerequests.latest_for_task(task_id) is None):
+        decision = Decision(
+            action="spawn_worker", role="engineer",
+            instruction=("Your commits are on the branch but no merge request was opened. "
+                         "Open it with open_mr now; do not change the code."),
+            why="committed work has no merge request",
+        )
+    elif decision.action == "done" and not (_reviewer_approved(task_id) or _all_children_done(task_id)):
         decision = Decision(
             action="spawn_worker", role="reviewer",
             instruction=(f"Verify the task goal is fully met: {task['goal']}. "

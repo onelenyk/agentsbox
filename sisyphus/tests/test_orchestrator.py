@@ -541,6 +541,66 @@ class TestDoneRequiresReview:
         assert store.get_task(task["id"])["status"] == "done"
 
     @pytest.mark.asyncio
+    async def test_approved_with_commit_but_no_mr_spawns_engineer(self, db_path):
+        # SIS-114 regression: approved + committed + no merge request must NOT
+        # go done — the commits live only on the task branch, and a done hands
+        # it to cleanup, which deletes that branch's clone when no MR is open.
+        task = store.create_task("fix the login bug", repo="sisyphus")
+        store.set_status(task["id"], "active")
+        store.post_message(task["id"], "reviewer", kind="result", text="APPROVED: all good")
+        store.post_message(task["id"], "engineer", kind="commit",
+                           text="fix: the login bug (abc1234)")
+
+        async def fake_spawn(tid, role, instruction, repo_name=None, **kw):
+            store.post_message(tid, role, kind="worker_started", text="spawning")
+
+        decisions = _scripted([Decision(action="done", why="reviewer approved")])
+        with patch("core.orchestrator.spawn_worker", side_effect=fake_spawn):
+            decision, bg = await handle_event(task["id"], "worker_finished", decide_fn=decisions)
+            if bg:
+                await bg
+        assert decision.action == "spawn_worker"
+        assert decision.role == "engineer"
+        assert "open_mr" in decision.instruction
+        assert "do not change the code" in decision.instruction
+        assert store.get_task(task["id"])["status"] == "active"  # NOT done
+
+    @pytest.mark.asyncio
+    async def test_approved_with_commit_and_open_mr_is_done(self, db_path):
+        # A committed task whose MR exists completes exactly as before — the
+        # gate only fires when the merge request is missing.
+        from core import mergerequests
+        task = store.create_task("fix the login bug", repo="sisyphus")
+        store.set_status(task["id"], "active")
+        store.post_message(task["id"], "reviewer", kind="result", text="APPROVED: all good")
+        store.post_message(task["id"], "engineer", kind="commit",
+                           text="fix: the login bug (abc1234)")
+        from core.git_ops import task_branch
+        mergerequests.create_mr(
+            task_id=task["id"], repo="sisyphus",
+            source_branch=task_branch(task["id"]), target_branch="main",
+            title="fix login bug",
+        )
+
+        decisions = _scripted([Decision(action="done", why="reviewer approved")])
+        decision, bg = await handle_event(task["id"], "worker_finished", decide_fn=decisions)
+        assert decision.action == "done"
+        assert store.get_task(task["id"])["status"] == "done"
+
+    @pytest.mark.asyncio
+    async def test_approved_answer_with_no_commits_is_done(self, db_path):
+        # An answer task commits nothing — no MR is required, and it completes
+        # exactly as it did before the committed-work gate.
+        task = store.create_task("answer a question", repo="sisyphus")
+        store.set_status(task["id"], "active")
+        store.post_message(task["id"], "reviewer", kind="result", text="APPROVED: the answer is right")
+
+        decisions = _scripted([Decision(action="done", why="reviewer approved")])
+        decision, bg = await handle_event(task["id"], "worker_finished", decide_fn=decisions)
+        assert decision.action == "done"
+        assert store.get_task(task["id"])["status"] == "done"
+
+    @pytest.mark.asyncio
     async def test_done_with_mixed_case_approval_is_allowed(self, db_path):
         # Regression (task-ec2ef73b): a reviewer whose only result is the
         # mixed-case "Approved." must still unblock 'done' — never re-spawn a
@@ -968,6 +1028,9 @@ class TestAQuestionIsAnswered:
 
     @pytest.mark.asyncio
     async def test_work_that_shipped_is_reviewed_even_if_it_answers(self, db_path):
+        # Committed work is never finished by answering — but with no MR open it
+        # first goes back to the engineer to open one (SIS-114), then a
+        # reviewer. Answering is not a way around the gate.
         task = store.create_task("how do I add a runner? write it down", repo="sisyphus")
         store.set_status(task["id"], "active")
         store.post_message(task["id"], "engineer", kind="commit", text="docs: a guide (abc1234)")
@@ -980,7 +1043,8 @@ class TestAQuestionIsAnswered:
             decision, bg = await handle_event(task["id"], "worker_finished", decide_fn=decisions)
             if bg:
                 await bg
-        assert decision.action == "spawn_worker" and decision.role == "reviewer"
+        assert decision.action == "spawn_worker" and decision.role == "engineer"
+        assert "open_mr" in decision.instruction
 
 
 class TestWorkNobodyNeedsIsStopped:
