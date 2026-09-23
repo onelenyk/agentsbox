@@ -1,28 +1,25 @@
-<div id="editAgentModal" class="modal-backdrop" onclick="if(event.target===this)this.remove()">
-    <div class="modal" onclick="event.stopPropagation()">
-        <div class="modal__head"><h2>Edit {{ agent.name }}</h2></div>
-        <form hx-post="/api/agents/{{ agent.name }}/edit" hx-target="#editAgentModal" hx-swap="outerHTML">
-            <div class="modal__body">
-                <div class="field"><label>Persona</label><textarea name="persona" rows="3">{{ agent.persona }}</textarea></div>
-                <div class="field"><label>Tools</label>
-                    <div class="checks">
-                        {% for t in catalog %}
-                        <label class="check"><input type="checkbox" name="tools" value="{{ t }}" {% if t in agent.tools %}checked{% endif %}> {{ t }}</label>
-                        {% endfor %}
-                    </div>
-                </div>
-                <div class="field"><label>Runtime</label>
-                    <select name="runner_id">
-                        <option value="">default runner</option>
-                        {% for r in runners %}<option value="{{ r.id }}" {% if r.id == agent.runner_id %}selected{% endif %}>{{ r.name }}</option>{% endfor %}
-                    </select>
-                </div>
-                <div class="field"><label>Model override (optional)</label><input name="model" value="{{ agent.model }}" placeholder="leave blank to use the runtime's model"></div>
-            </div>
-            <div class="modal__actions">
-                <button type="button" class="btn btn--ghost" onclick="this.closest('.modal-backdrop').remove()">Cancel</button>
-                <button type="submit" class="btn btn--primary">Save</button>
-            </div>
-        </form>
+{% from "_ui.html" import modal %}
+{% set fa %}hx-post="/api/agents/{{ agent.name }}/edit" hx-target="#editAgentModal" hx-swap="outerHTML"{% endset %}
+{% set picked = catalog|select('in', agent.tools or [])|list|length %}
+{% call modal('Edit ' ~ agent.name, 'Save', fa, id='editAgentModal') %}
+<div class="field-pair">
+    <div class="field"><label>Runner</label>
+        <select name="runner_id">
+            <option value="">default runner</option>
+            {% for r in runners %}<option value="{{ r.id }}" {% if r.id == agent.runner_id %}selected{% endif %}>{{ r.name }}</option>{% endfor %}
+        </select>
+    </div>
+    <div class="field"><label>Model</label><input name="model" value="{{ agent.model or '' }}">
+        <span class="hint">Blank uses the runner's model</span>
     </div>
 </div>
+<div class="field"><label>Persona</label><textarea name="persona" rows="3">{{ agent.persona }}</textarea></div>
+<details class="form-more" onchange="this.querySelector('[data-picked]').textContent=this.querySelectorAll('input:checked').length">
+    <summary>Tools · <span data-picked>{{ picked }}</span> picked</summary>
+    <div class="checks">
+        {% for t in catalog %}
+        <label class="check"><input type="checkbox" name="tools" value="{{ t }}" {% if t in agent.tools %}checked{% endif %}> {{ t }}</label>
+        {% endfor %}
+    </div>
+</details>
+{% endcall %}

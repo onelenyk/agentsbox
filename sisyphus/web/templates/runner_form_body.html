@@ -13,9 +13,8 @@
               sub=probe(login.ok, login.summary, login.detail)) }}
     {% call choice('auth_mode', 'key', mode == 'key', 'API key',
                    sub='Kept in the macOS keychain, never in the database') %}
-        <input type="password" name="api_key" autocomplete="new-password"
-               placeholder="{{ 'saved — leave blank to keep it' if has_key else 'paste the key' }}">
-        <span class="choice__sub">{{ key_hint }}</span>
+        <input type="password" name="api_key" autocomplete="new-password">
+        <span class="choice__sub">{{ 'A key is saved; blank keeps it. ' if has_key }}{{ key_hint }}</span>
     {% endcall %}
     {% call choice('auth_mode', 'env', mode == 'env', 'Environment variable',
                    sub="Read from the daemon's environment at launch") %}
@@ -28,7 +27,7 @@
 {% if not count %}{{ probe(false, 'Could not list models', 'type an id below') }}{% endif %}
 {{ model_picker(groups, listed, default_label) }}
 <div class="field">
-    <label>…or a model id</label>
+    <label>Or a model id</label>
     <input type="text" name="model_custom" value="{{ custom }}" placeholder="{{ custom_placeholder }}">
     <span class="hint">Overrides the list when filled.</span>
 </div>
@@ -38,7 +37,7 @@
     <summary>Advanced</summary>
     <div class="field">
         <label>Base URL</label>
-        <input type="text" name="base_url" value="{{ base_url }}" placeholder="the provider's own endpoint">
-        <span class="hint">Only for a proxy or a self-hosted gateway.</span>
+        <input type="text" name="base_url" value="{{ base_url }}">
+        <span class="hint">Blank uses the provider's own endpoint. Only for a proxy or a self-hosted gateway.</span>
     </div>
 </details>
