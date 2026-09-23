@@ -19,11 +19,16 @@ logger = logging.getLogger(__name__)
 # Bump when the set of known migrations grows. 1 = every schema change up to
 # and including 2026-09 (16 guarded ALTERs across store/planner/mergerequests).
 # 2 = the Mission Planner's tables retired with the planner (2026-09-23).
-CURRENT_VERSION = 2
+# 3 = the v1 pipeline's and the copilot's tables, unread since v2 (2026-09-23).
+CURRENT_VERSION = 3
 
 # Tables of features that are gone. Dropped on upgrade so a database does not
 # keep carrying — and a reader keep wondering about — data nothing reads.
-RETIRED_TABLES = ("plans", "plan_items", "plan_messages")
+RETIRED_TABLES = (
+    "plans", "plan_items", "plan_messages",                        # Mission Planner
+    "cards", "runs", "steps", "resources", "activities",           # v1 pipeline
+    "copilot_sessions", "copilot_messages",                        # v1 copilot chat
+)
 
 
 def db_version() -> int:
