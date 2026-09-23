@@ -1,15 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Planner — Sisyphus{% endblock %}
+{% import "_ui.html" as ui %}
 {% block content %}
-<div class="page-head">
-    <div>
-        <h1>Mission Planner</h1>
-        <div class="sub">Plan a big goal into a project-aware brief, then release it as tasks.</div>
-    </div>
-    <div class="actions">
-        <button class="btn btn--primary" hx-post="/api/plans/new" hx-target="#plan-body" hx-swap="innerHTML">+ New Plan</button>
-    </div>
-</div>
+{% call ui.toolbar([{'label': 'Planner'}], 'plan a big goal into a brief, then release it as tasks') %}
+<button class="btn btn--primary btn--sm" hx-post="/api/plans/new" hx-target="#plan-body" hx-swap="innerHTML">+ Plan</button>
+{% endcall %}
 <div id="plan-body" hx-get="/api/plans/panel" hx-trigger="load" hx-swap="innerHTML">
     <div class="empty">Loading…</div>
 </div>

@@ -1,15 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Repos — Sisyphus{% endblock %}
+{% import "_ui.html" as ui %}
 {% block content %}
-<div class="page-head">
-    <div>
-        <h1>Repositories</h1>
-        <div class="sub">Local paths or remotes.</div>
-    </div>
-    <div class="actions">
-        <button class="btn btn--primary" hx-get="/api/repos/new-form" hx-target="body" hx-swap="beforeend">+ Add Repo</button>
-    </div>
-</div>
+{% call ui.toolbar([{'label': 'Projects'}], 'each one is a git repo — a local path or a remote') %}
+<button class="btn btn--primary btn--sm" hx-get="/api/repos/new-form" hx-target="body" hx-swap="beforeend">+ Project</button>
+{% endcall %}
 <div id="repos-list" hx-get="/api/repos/list" hx-trigger="load, reposUpdated from:body" hx-swap="innerHTML">
     <div class="empty">Loading…</div>
 </div>

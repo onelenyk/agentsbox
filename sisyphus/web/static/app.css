@@ -310,35 +310,31 @@ body::before {
   border-bottom: 1px solid var(--border);
 }
 .brand .bolt { color: var(--accent); }
-.brand small { margin-left: auto; font-family: var(--mono); font-size: var(--fs-3xs); font-weight: var(--fw-medium); letter-spacing: var(--ls-caps-wide); text-transform: uppercase; color: var(--muted); }
+.brand__theme {
+  margin-left: auto; font: inherit; font-family: var(--mono); font-size: var(--fs-3xs); font-weight: var(--fw-medium);
+  letter-spacing: var(--ls-caps-wide); text-transform: uppercase; color: var(--muted);
+  background: transparent; border: 1px solid var(--border); border-radius: var(--r-pill);
+  padding: var(--sp-1) var(--sp-4); cursor: pointer;
+}
+.brand__theme:hover { color: var(--text-2); border-color: var(--border-2); }
 
 .nav { padding: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-1); }
-.nav .sec { font-family: var(--mono); font-size: var(--fs-3xs); letter-spacing: var(--ls-caps-wide); text-transform: uppercase; color: var(--muted); padding: var(--sp-7) var(--sp-6) var(--sp-3); }
 .nav a {
   display: flex; align-items: center; gap: var(--sp-5); padding: var(--sp-4) var(--sp-6);
   border-radius: var(--r-md); color: var(--text-2); font-weight: var(--fw-medium); line-height: 1;
 }
 .nav a .ic { width: 15px; text-align: center; opacity: .8; }
-.nav-sec { margin: var(--sp-6) var(--sp-4) var(--sp-2); font-size: var(--fs-3xs); letter-spacing: var(--ls-caps-wide); text-transform: uppercase; color: var(--muted); }
+.nav-sec { display: flex; align-items: baseline; margin: var(--sp-8) var(--sp-4) var(--sp-2) var(--sp-6); font-size: var(--fs-3xs); letter-spacing: var(--ls-caps-wide); text-transform: uppercase; color: var(--muted); }
+.nav .nav-sec__link { margin-left: auto; padding: 0 var(--sp-2); border-radius: var(--r-sm); font-size: var(--fs-3xs); letter-spacing: var(--ls-caps); color: var(--muted); display: inline; line-height: inherit; }
+.nav .nav-sec__link:hover { background: transparent; color: var(--text-2); }
+.nav .nav-sec__link.active { background: transparent; color: var(--accent-hi); }
 .nav a:hover { background: var(--panel-2); color: var(--text); }
 .nav a.active { background: var(--accent-bg); color: var(--accent-hi); }
 .nav a .badge { margin-left: auto; }
 
-/* horizontal sub-nav for the Tasks / System groups (nav is 3 doors deep) */
-.tabstrip {
-  display: flex; gap: var(--sp-1); margin-bottom: var(--sp-8);
-  border-bottom: 1px solid var(--border); overflow-x: auto;
-}
-.tabstrip a {
-  padding: var(--sp-3) var(--sp-6) var(--sp-4); font-size: var(--fs-md); font-weight: var(--fw-medium);
-  color: var(--muted); border-bottom: 2px solid transparent;
-  margin-bottom: -1px; white-space: nowrap;
-}
-.tabstrip a:hover { color: var(--text); }
-.tabstrip a.active { color: var(--accent-hi); border-bottom-color: var(--accent-hi); }
-
 .sys { margin-top: auto; border-top: 1px solid var(--border); padding: var(--sp-7) var(--sp-8); display: flex; flex-direction: column; gap: var(--sp-4); font-family: var(--mono); font-size: var(--fs-xs); }
 .sys .line { display: flex; align-items: center; gap: var(--sp-4); color: var(--text-2); }
+a.line:hover, .sys .line--click:hover { color: var(--text); }
 .sys .line .val { margin-left: auto; color: var(--muted); }
 
 .main { position: relative; z-index: 2; max-width: var(--maxw); padding: var(--sp-10) var(--sp-10) var(--sp-13); }
@@ -407,9 +403,17 @@ body::before {
 
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; }
-  .sidebar { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; }
-  .sidebar .nav { flex-direction: row; flex-wrap: wrap; }
-  .sidebar .nav .sec, .sys { display: none; }
+  /* One scrollable row under the brand, not four wrapped rows of links
+     that push the task box off the first screen. */
+  .sidebar { position: static; height: auto; min-width: 0; }
+  .main { min-width: 0; }
+  .brand { padding: var(--sp-6) var(--sp-8); }
+  .sidebar .nav { flex-direction: row; flex-wrap: nowrap; overflow-x: auto; padding: 0 var(--sp-5) var(--sp-4); border-bottom: 1px solid var(--border); }
+  .sidebar .nav a { white-space: nowrap; flex: none; }
+  /* the row fades at its right edge, so it reads as one you can scroll */
+  .sidebar .nav { -webkit-mask-image: linear-gradient(to right, var(--text) 85%, transparent); mask-image: linear-gradient(to right, var(--text) 85%, transparent); }
+  .sidebar .nav-sec, .sys { display: none; }
+  .brand { border-bottom: none; }
   .main { padding: var(--sp-8) var(--sp-8) var(--sp-12); }
 }
 
@@ -421,12 +425,6 @@ body::before {
 .led.amber { background: var(--accent); }
 .led.idle { background: var(--muted); }
 .led.dead { background: var(--bad); }
-.page-head {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: var(--sp-8); margin-bottom: var(--sp-9);
-}
-.page-head h1 { font-size: var(--fs-5xl); font-weight: var(--fw-bold); letter-spacing: var(--ls-tight); }
-.page-head .sub { color: var(--muted); font-size: var(--fs-body); margin-top: var(--sp-1); }
 .actions { display: flex; gap: var(--sp-4); }
 .row { display: flex; align-items: center; gap: var(--sp-4); }
 .spread { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); }
@@ -1891,18 +1889,22 @@ body.has-overlay { overflow: hidden; }
   font-size: var(--fs-4xl);
 }
 
-.runtime__config {
-  font-size: var(--fs-base);
-  white-space: pre-wrap;
-  color: var(--text-2);
-  line-height: var(--lh-relaxed);
-  margin-top: var(--sp-3);
-}
 
 /* ─ backups_list.html ──────────────────────────────────────────────────────  */
 
+.runtime__label-act { margin-left: auto; text-transform: none; letter-spacing: normal; }
+.bkrows { display: flex; flex-direction: column; }
+.bkrow {
+  display: grid; grid-template-columns: minmax(0, 12rem) 5rem 1fr auto; align-items: center; gap: var(--sp-6);
+  padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--border); font-size: var(--fs-md);
+}
+.bkrow:first-child { border-top: none; }
+.bkrow:hover { background: var(--tint-2); }
+.bkrow__when { color: var(--text); }
+.bkrow__size, .bkrow__kind { color: var(--muted); }
+.bkrow__acts { display: flex; gap: var(--sp-3); }
 .backups__sub-top {
-  margin-top: var(--sp-7);
+  margin-top: var(--sp-6); font-size: var(--fs-sm); color: var(--muted);
 }
 
 /* ─ not_found.html ─────────────────────────────────────────────────────────  */

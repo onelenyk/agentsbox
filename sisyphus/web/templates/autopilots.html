@@ -1,15 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Autopilot — Sisyphus{% endblock %}
+{% import "_ui.html" as ui %}
 {% block content %}
-<div class="page-head">
-    <div>
-        <h1>Autopilot</h1>
-        <div class="sub">Work that starts itself, on a schedule or on an event.</div>
-    </div>
-    <div class="actions">
-        <button class="btn btn--primary" hx-get="/api/autopilots/new-form" hx-target="body" hx-swap="beforeend">+ New Autopilot</button>
-    </div>
-</div>
+{% call ui.toolbar([{'label': 'Autopilot'}], 'work that starts itself, on a schedule or an event') %}
+<button class="btn btn--primary btn--sm" hx-get="/api/autopilots/new-form" hx-target="body" hx-swap="beforeend">+ Autopilot</button>
+{% endcall %}
 <div id="autopilots-list" hx-get="/api/autopilots/list" hx-trigger="load, autopilotsUpdated from:body" hx-swap="innerHTML">
     <div class="empty">Loading…</div>
 </div>

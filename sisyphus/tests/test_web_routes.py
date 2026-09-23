@@ -258,7 +258,7 @@ def test_unknown_page_renders_html_404_with_section_links(db_path):
     assert "text/html" in response.headers["content-type"]
     assert "does not exist" in response.text
     for section in ("/dashboard", "/tasks", "/agents", "/runners",
-                    "/repos", "/autopilots", "/stats", "/runtime", "/backups"):
+                    "/repos", "/autopilots", "/stats", "/runtime"):
         assert section in response.text
 
 
@@ -1117,7 +1117,9 @@ class TestFlatNav:
         assert "Backups" not in nav
 
     def test_backups_are_reachable_from_the_daemon_page(self, db_path):
-        html = _make_client().get("/runtime").text
+        c = _make_client()
+        assert c.get("/backups", follow_redirects=False).headers["location"] == "/runtime#backups"
+        html = c.get("/runtime").text
         assert 'id="backups"' in html and "/api/backups/list" in html
 
     def test_system_still_redirects_for_old_links(self, db_path):
