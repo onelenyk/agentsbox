@@ -14,21 +14,27 @@ _MARKER_PAT = re.compile(r"^Review-of-MR:\s*(\S+)\s*$", re.MULTILINE)
 _ORIGIN_PAT = re.compile(r"^Origin-task:\s*(\S+)\s*$", re.MULTILINE)
 
 
+def find_review_task(mr: dict) -> Optional[dict]:
+    """The non-terminal mr-reviewer task already standing for *mr*, or None."""
+    mr_id = mr["id"]
+    for t in store.list_tasks():
+        if t["status"] not in ("active", "waiting", "paused"):
+            continue
+        if t.get("agent") != "mr-reviewer":
+            continue
+        if f"Review-of-MR: {mr_id}" in t.get("goal", ""):
+            return t
+    return None
+
+
 def ensure_review_task(mr: dict) -> Optional[dict]:
     """Create a review task for *mr* if one isn't already pending. Returns the
     created task dict, or None when a duplicate is found."""
     mr_id = mr["id"]
 
     # Dedup: a non-terminal review task for this MR already exists?
-    for t in store.list_tasks():
-        if t["status"] not in ("active", "waiting", "paused"):
-            continue
-        if t.get("agent") != "mr-reviewer":
-            continue
-        if _MARKER_PAT.search(t.get("goal", "")):
-            # The marker line must reference THIS mr_id.
-            if f"Review-of-MR: {mr_id}" in t["goal"]:
-                return None
+    if find_review_task(mr) is not None:
+        return None
 
     # Run the repo's own check before the reviewer is asked anything, so the
     # verdict it must account for is already on the record and was produced by

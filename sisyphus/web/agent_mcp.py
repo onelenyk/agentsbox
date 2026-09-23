@@ -161,6 +161,25 @@ def _review_hook(task_id: str) -> None:
                 # queue — without this the review task sits `active` forever.
                 from core.orchestrator import emit
                 emit(task["id"], "created")
+            # The check only ever ran inside ensure_review_task, which dedups at
+            # the top: a second open_mr on a branch whose head moved never
+            # re-checked the new commit, and the merge sat blocked on
+            # check-stale (SIS-115, mr-acbf1f50). Re-run whenever the recorded
+            # verdict no longer covers the branch. Re-read the row first —
+            # ensure_review_task may just have recorded the first check, and the
+            # stale copy fetched above would mislead the comparison.
+            fresh = mergerequests.get_mr(mr["id"])
+            if fresh and mergerequests.needs_recheck(fresh):
+                from core import verify
+                res = verify.run_and_record(fresh)
+                if task is None:
+                    # A review task already exists — its goal carries the old
+                    # check line, so post the new verdict on its thread for the
+                    # reviewer to read (same format the goal embeds).
+                    existing = reviews.find_review_task(fresh)
+                    if existing:
+                        store.post_message(existing["id"], "system", kind="note",
+                                           text=verify.summarise(res))
     except Exception:
         logger.warning("review hook failed for open_mr on task %s", task_id, exc_info=True)
 

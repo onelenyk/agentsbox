@@ -254,13 +254,42 @@ class TestAPassIsOnlyEvidenceForTheCommitItRanOn:
                                        head=mergerequests.current_head(row))
         assert mergerequests.merge_block_reason(mergerequests.get_mr(mr["id"])) is None
 
-    def test_a_stale_pass_cannot_be_merged_through_the_route(self, db_path, tmp_path):
+    def test_a_stale_pass_is_rerun_at_merge_time_not_refused(self, db_path, tmp_path, monkeypatch):
+        """The gate still blocks a stale pass at the row level, but the merge
+        route used to refuse outright, stranding the merge until a human re-ran
+        the check by hand (SIS-115, mr-acbf1f50). Now it re-runs the daemon's
+        check against the current head first and merges when it passes — and
+        the re-run's verdict records the commit it actually covered."""
+        from core import verify
+        mr, real, bare = _mr(db_path, tmp_path, target="develop")
+        mergerequests.set_review_status(mr["id"], "approved")
+        mergerequests.set_check_result(mr["id"], "passed", command="pytest -q",
+                                       head="deadbeefcafe")   # not this branch
+        monkeypatch.setattr(verify, "run_check", lambda mr, timeout=900: {
+            "ran": True, "ok": True, "exit_code": 0, "command": "pytest -q",
+            "output": "1095 passed", "duration_ms": 1, "reason": ""})
+        TestClient(app).post(f"/api/mr/{mr['id']}/merge")
+        row = mergerequests.get_mr(mr["id"])
+        assert row["status"] == "merged"
+        assert row["check_head"] == mergerequests.current_head(row)
+
+    def test_a_stale_check_that_now_fails_blocks_the_merge_with_it(self, db_path, tmp_path, monkeypatch):
+        """A fresh failure is a refusal with the failure, not a silent block:
+        the re-run's verdict — check FAILED — is what the human sees."""
+        from core import verify
         mr, real, bare = _mr(db_path, tmp_path, target="develop")
         mergerequests.set_review_status(mr["id"], "approved")
         mergerequests.set_check_result(mr["id"], "passed", command="pytest -q",
                                        head="deadbeefcafe")
-        TestClient(app).post(f"/api/mr/{mr['id']}/merge")
-        assert mergerequests.get_mr(mr["id"])["status"] == "open"
+        monkeypatch.setattr(verify, "run_check", lambda mr, timeout=900: {
+            "ran": True, "ok": False, "exit_code": 1, "command": "pytest -q",
+            "output": "3 failed, 1092 passed", "duration_ms": 1, "reason": ""})
+        r = TestClient(app).post(f"/api/mr/{mr['id']}/merge")
+        assert r.status_code == 200
+        row = mergerequests.get_mr(mr["id"])
+        assert row["status"] == "open"
+        assert "check FAILED" in r.text
+        assert "merge blocked" in r.text
 
 
 class TestBarePreservedForOpenMR:
