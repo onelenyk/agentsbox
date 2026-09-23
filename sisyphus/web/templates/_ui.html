@@ -1,5 +1,5 @@
-{# Shared chrome. One toolbar for every working surface — the list, a project,
-   a task — so moving between them changes the content under it and nothing
+{# Shared chrome. One toolbar for every page — the list, a project, a task,
+   a settings page — so moving between them changes the content under it and nothing
    else: same height, same crumb line on the left, same action row on the
    right. A page that rebuilds its own header makes every navigation look like
    a reload. #}
@@ -30,7 +30,7 @@
 </div>
 {%- endmacro %}
 
-{% macro toolbar(crumbs) %}
+{% macro toolbar(crumbs, sub='') %}
 <div class="toolbar">
     <nav class="toolbar__crumbs">
         {%- for c in crumbs %}
@@ -40,7 +40,8 @@
         {%- if not loop.last %}<span class="toolbar__sep">/</span>{% endif %}
         {%- endfor %}
     </nav>
-    <div class="toolbar__actions">{{ caller() }}</div>
+    {%- if sub %}<span class="toolbar__note">{{ sub }}</span>{% endif %}
+    <div class="toolbar__actions">{% if caller %}{{ caller() }}{% endif %}</div>
 </div>
 {% endmacro %}
 

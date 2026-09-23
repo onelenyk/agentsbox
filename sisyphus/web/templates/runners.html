@@ -1,16 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Runtimes — Sisyphus{% endblock %}
+{% import "_ui.html" as ui %}
 {% block content %}
-<div class="page-head">
-    <div>
-        <h1>Runners</h1>
-        <div class="sub">The CLIs that run agents.</div>
-    </div>
-    <div class="actions">
-        <button class="btn btn--ghost" hx-get="/api/runners/detect" hx-target="#modal-container" hx-swap="innerHTML">⌖ Detect</button>
-        <button class="btn btn--primary" hx-get="/api/runners/new-form" hx-target="body" hx-swap="beforeend">+ Add runner</button>
-    </div>
-</div>
+{% call ui.toolbar([{'label': 'Runners'}], 'the CLIs that run agents') %}
+<button class="btn btn--ghost btn--sm" hx-get="/api/runners/detect" hx-target="#modal-container" hx-swap="innerHTML">⌖ Detect</button>
+<button class="btn btn--primary btn--sm" hx-get="/api/runners/new-form" hx-target="body" hx-swap="beforeend">+ Runner</button>
+{% endcall %}
 <div id="runners-list" hx-get="/api/runners/list" hx-trigger="load, runnersUpdated from:body" hx-swap="innerHTML">
     <div class="empty">Loading…</div>
 </div>

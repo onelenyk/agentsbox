@@ -1,15 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Statistics — Sisyphus{% endblock %}
+{% import "_ui.html" as ui %}
 {% block content %}
-<div class="page-head">
-    <div>
-        <h1>Statistics</h1>
-        <div class="sub">Activity and token/cost usage across all tasks.</div>
-    </div>
-    <div class="actions">
-        <button class="btn btn--ghost" hx-get="/api/stats/view" hx-target="#stats-view" hx-swap="innerHTML">Refresh</button>
-    </div>
-</div>
+{{ ui.toolbar([{'label': 'Statistics'}], 'activity, spend and outcomes across every task') }}
 <div id="stats-view" hx-get="/api/stats/view" hx-trigger="load" hx-swap="innerHTML">
     <div class="empty">Loading…</div>
 </div>

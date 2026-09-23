@@ -151,8 +151,8 @@ class TestIndicatorsTrackTheData:
         from core.worker import WORKER_TIMEOUT_SECONDS, WORKER_IDLE_TIMEOUT_SECONDS
 
         body = _text(_client().get("/runtime"))
-        assert str(WORKER_TIMEOUT_SECONDS) in body
-        assert str(WORKER_IDLE_TIMEOUT_SECONDS) in body
+        assert f"{WORKER_TIMEOUT_SECONDS // 60} min in all" in body
+        assert f"{WORKER_IDLE_TIMEOUT_SECONDS // 60} min silent" in body
         assert "default_timeout" not in body, "dead config key is back on the page"
 
     def test_review_task_links_to_the_mr_it_reviews(self, db_path):

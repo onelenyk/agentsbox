@@ -517,7 +517,9 @@ async def repos_check(request: Request, name: str):
 
 @router.get("/backups", response_class=HTMLResponse)
 async def backups_page(request: Request):
-    return _tmpl().TemplateResponse(request, "backups.html", {"active_page": "backups"})
+    # Snapshots live on the Daemon page now; old links and bookmarks land there.
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse("/runtime#backups", status_code=307)
 
 @router.get("/api/backups/list", response_class=HTMLResponse)
 async def backups_list_view(request: Request):

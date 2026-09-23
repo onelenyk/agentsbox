@@ -1,13 +1,24 @@
 {% extends "base.html" %}
 {% block title %}Runtime — Sisyphus{% endblock %}
+{% import "_ui.html" as ui %}
 {% block content %}
-<div class="page-head"><div><h1>Daemon</h1><div class="sub">Read-only.</div></div></div>
+{{ ui.toolbar([{'label': 'Daemon'}], 'the running process, its snapshots and its configuration') }}
 <div class="panel runtime__panel-margin">
     <div class="result__label">Process</div>
     <div class="kpis runtime__kpis-top">
         <div class="kpi kpi--live"><div class="l">Uptime</div><div class="v">{{ process.uptime }}</div><div class="d">since {{ process.started }} UTC</div></div>
         <div class="kpi"><div class="l">Running code</div><div class="v mono runtime__kpi-value">{{ process.git_commit }}</div><div class="d">pid {{ process.pid }}</div></div>
         <div class="kpi kpi--violet"><div class="l">Workers in flight</div><div class="v">{{ process.workers_in_flight }}</div><div class="d">restart kills these</div></div>
+    </div>
+</div>
+{# The daemon's snapshots live with the daemon — Backups used to be a sidebar
+   item of their own for something opened once a month. #}
+<div class="panel runtime__panel-margin" id="backups">
+    <div class="result__label">Backups
+        <button class="btn btn--ghost btn--sm runtime__label-act" hx-post="/api/backups/create" hx-target="#backups-list" hx-swap="innerHTML">+ Snapshot</button>
+    </div>
+    <div id="backups-list" hx-get="/api/backups/list" hx-trigger="load" hx-swap="innerHTML">
+        <div class="empty">Loading…</div>
     </div>
 </div>
 <div class="panel runtime__panel-margin">
@@ -17,14 +28,12 @@
 </div>
 <div class="panel">
     <div class="result__label">Configuration</div>
-    <pre class="mono runtime__config">workspace_root:   {{ workspace_root }}
-default_runtime:  {% if default_runner %}{{ default_runner.name }}{% if default_runner.model %} · {{ default_runner.model }}{% endif %}{% else %}(none configured){% endif %}
-worker_timeout:   {{ limits.worker_timeout }}s total · {{ limits.worker_idle_timeout }}s idle
-max_review_loops: {{ config.max_review_loops or 3 }}
-log_level:        {{ config.log_level or 'info' }}
-{% if integrations %}
-{% for name, url in integrations.items() %}{{ '%-11s'|format(name ~ '.base_url') }}: {{ url }}
-{% endfor %}{% else %}
-integrations:     none configured{% endif %}</pre>
+    {# Read from config.yaml; each row names what the setting does. #}
+    <div class="prop"><span class="k">Workspace</span><span class="v mono">{{ workspace_root }}</span></div>
+    <div class="prop"><span class="k">Default runner</span><span class="v">{% if default_runner %}{{ default_runner.name }}{% if default_runner.model %} <span class="muted mono">· {{ default_runner.model }}</span>{% endif %}{% else %}<span class="muted">none configured</span>{% endif %}</span></div>
+    <div class="prop"><span class="k">Worker time limit</span><span class="v">{{ (limits.worker_timeout // 60)|int }} min in all · {{ (limits.worker_idle_timeout // 60)|int }} min silent</span></div>
+    <div class="prop"><span class="k">Review rounds</span><span class="v">up to {{ config.max_review_loops or 3 }}</span></div>
+    <div class="prop"><span class="k">Log level</span><span class="v">{{ config.log_level or 'info' }}</span></div>
+    {% for name, url in (integrations or {}).items() %}<div class="prop"><span class="k">{{ name|capitalize }}</span><span class="v mono">{{ url }}</span></div>{% else %}<div class="prop"><span class="k">Integrations</span><span class="v muted">none configured</span></div>{% endfor %}
 </div>
 {% endblock %}
