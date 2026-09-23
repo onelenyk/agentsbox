@@ -1292,8 +1292,13 @@ a.ev:hover .txt { color: var(--text); }
      renamed, so on a phone the full eight-column grid survived and the page
      scrolled sideways. */
   .trow a { grid-template-columns: var(--c-mark) 56px minmax(0, 1fr) auto 56px; }
-  .trow__asked, .trail, .trow__why { display: none; }
+  .trow__asked, .trow .trail, .trow__why { display: none; }
   .thead { display: none; }
+  .trow .tkey { white-space: nowrap; }
+  .toolbar__here { white-space: normal; }
+  /* A file row keeps its name and its Open button; the rest waits for room. */
+  .file { grid-template-columns: minmax(0, 1fr) auto; }
+  .file__icon, .file__kind, .file__by, .file__size { display: none; }
 }
 
 .ecard.is-off { opacity: .5; }
@@ -1436,7 +1441,7 @@ a.ev:hover .txt { color: var(--text); }
 .docview { font-size: var(--fs-lg); line-height: var(--lh-relaxed); color: var(--text-2); }
 
 /* the reply on a finished task says what it will do */
-.reopen { margin-top: var(--sp-8); }
+.reopen { margin: var(--sp-8) 0 var(--sp-9); }
 .reopen > summary {
   cursor: pointer; list-style: none; font-size: var(--fs-md); color: var(--muted);
   border: 1px dashed var(--border); border-radius: var(--r); padding: var(--sp-5) var(--sp-7);
@@ -1453,6 +1458,15 @@ a.ev:hover .txt { color: var(--text); }
 }
 .rawthread > summary::-webkit-details-marker { display: none; }
 .rawthread[open] > summary { margin-bottom: var(--sp-5); }
+/* A fold says it is one: a caret, and a hover — "FULL THREAD 7" alone read
+   as a caption at the end of the page. */
+.rawthread > summary::before { content: "▸"; font-size: var(--fs-sm); transition: transform var(--dur); }
+.rawthread[open] > summary::before { transform: rotate(90deg); }
+.rawthread > summary:hover { color: var(--text-2); }
+.rawthread + .rawthread { margin-top: var(--sp-6); }
+.outcome__files { margin-top: var(--sp-6); border: 1px solid var(--border); border-radius: var(--r); }
+.rail-trail { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); }
+.rail-delete { align-self: flex-start; }
 
 /* rail: history as a line, usage as a footnote */
 .timeline { list-style: none; margin: 0; padding: 0; }
@@ -1514,7 +1528,11 @@ a.ev:hover .txt { color: var(--text); }
 .overlay__close:hover { color: var(--text); border-color: var(--border-2); background: var(--hover); }
 /* the toolbar inside the panel keeps clear of the close button */
 .overlay__panel .toolbar { padding-right: var(--sp-12); }
-.overlay__panel .task-detail { grid-template-columns: 1fr 240px; }
+/* A panel is too narrow for a second column: the rail squeezed file names to
+   "task-31f99421-mr-reviewe…". It follows the content instead, its sections
+   side by side. */
+.overlay__panel .task-detail { grid-template-columns: 1fr; }
+.overlay__panel .task-rail { position: static; display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); align-items: start; }
 body.has-overlay { overflow: hidden; }
 @keyframes scrim-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes panel-in { from { transform: translateX(24px); opacity: .6; } to { transform: none; opacity: 1; } }
