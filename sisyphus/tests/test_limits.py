@@ -230,3 +230,34 @@ class TestRunnersPage:
         TestClient(app).post("/api/agents/engineer/edit",
                              data={"persona": "p", "runner_id": "", "model": "", "model_class": ""})
         assert not agents.get_agent("engineer")["runner_id"]
+
+
+class TestProviderFaults:
+    def _result(self, **kw):
+        from core.launcher import AgentResult
+        return AgentResult(**{"status": "completed", **kw})
+
+    def test_what_counts_against_the_provider(self, db_path):
+        one = {"steps": 1}
+        assert limits.provider_fault(self._result(raw_stdout="402")) is not None
+        assert limits.provider_fault(self._result(status="timeout", error="idle")) is not None
+        assert limits.provider_fault(self._result(usage=one)) is None          # it reached the model
+        assert limits.provider_fault(self._result(status="timeout", usage=one)) is None
+        assert limits.provider_fault(self._result(status="cancelled")) is None
+
+    def test_a_set_aside_provider_is_skipped_until_it_cools_down(self, two_runners):
+        claude, oc = two_runners
+        model_classes.set_options("worker", [
+            {"runner_id": oc["id"], "model": "openrouter/some-model"},
+            {"runner_id": claude["id"], "model": "claude-haiku-4-5"}])
+        assert model_classes.choose("engineer").runner_name == "oc"
+        # A key-billed provider has no windows, but a fault still sets it aside.
+        assert limits.cooldown("openrouter", "402") is not None
+        c = model_classes.choose("engineer")
+        assert c.runner_name == "claude"
+        assert "set aside" in c.skipped[0][1]
+        assert "openrouter" in limits.providers_in_use()
+
+        limits.record("openrouter", "cooldown", 100, _iso(-1), "rejected")   # cooled down
+        assert model_classes.choose("engineer").runner_name == "oc"
+        assert all(w["span"] != "cooldown" for p in limits.view() for w in p["windows"])

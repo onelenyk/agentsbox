@@ -154,7 +154,9 @@ def choose(agent_or_name) -> Choice:
         provider = limits.provider_of(r, model)
         blocked = limits.blocked_until(provider)
         if blocked:
-            skipped.append((_label(r, model), f"is at its {provider} limit"))
+            why = ("was set aside after a failed run" if limits.cooldown_until(provider)
+                   else f"is at its {provider} limit")
+            skipped.append((_label(r, model), why))
             until = blocked if until is None or blocked < until else until
             continue
         return Choice(r, model, provider, "class", skipped)
@@ -192,7 +194,9 @@ def view() -> list:
                 row["provider"] = limits.provider_of(r, model)
                 blocked = limits.blocked_until(row["provider"])
                 if blocked:
-                    row["state"], row["until"] = "limit", blocked.isoformat()
+                    cooling = limits.cooldown_until(row["provider"])
+                    row["state"] = "cooldown" if cooling and cooling >= blocked else "limit"
+                    row["until"] = blocked.isoformat()
             if row["state"] == "ready" and in_use is None:
                 in_use = i
             options.append(row)
