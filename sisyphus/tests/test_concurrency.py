@@ -41,35 +41,55 @@ async def test_gate_from_config_default(db_path):
     assert isinstance(gate, orchestrator._PriorityGate)
 
 
+async def _wait_for_waiters(gate, n: int, timeout: float = 5) -> None:
+    """Poll until the gate reports at least ``n`` queued waiters. The gate keeps
+    its waiters in ``{True: deque, False: deque}`` (high/review first); count
+    both lanes. Wrapped in asyncio.wait_for by callers so a regression fails
+    instead of hanging."""
+    async def queued() -> None:
+        while sum(len(q) for q in gate._waiters.values()) < n:
+            await asyncio.sleep(0.001)
+    await asyncio.wait_for(queued(), timeout=timeout)
+
+
 @pytest.mark.asyncio
 async def test_a_queued_reviewer_overtakes_queued_engineers(db_path, monkeypatch):
     """The failure this guards: with both slots busy, a reviewer — the cheap,
     read-only step that unblocks a whole task — waited ~10 minutes at the back
     of a FIFO behind queued engineering runs."""
     started = []
-
-    async def fake_spawn(task_id, role, instruction, repo_name=None):
-        started.append(role)
-        await asyncio.sleep(0.01)
-
-    monkeypatch.setattr(orchestrator, "spawn_worker", fake_spawn)
-    orchestrator._worker_gate = orchestrator._PriorityGate(1)  # one slot: strict order
+    holder_running = asyncio.Event()
+    release_holder = asyncio.Event()
 
     from core import store
     tasks = [store.create_task(f"goal {i}") for i in range(4)]
+    holder_id = tasks[0]["id"]
 
-    async def occupy():
-        await orchestrator._spawn_worker_safe(tasks[0]["id"], "engineer", "x", None)
+    async def fake_spawn(task_id, role, instruction, repo_name=None):
+        started.append(role)
+        if task_id == holder_id:
+            holder_running.set()
+            # Hold the slot until the test has queued everyone behind it. This
+            # is the ordering the old `await asyncio.sleep(0.001)` guessed at;
+            # a real condition cannot be starved by load.
+            await release_holder.wait()
 
-    holder = asyncio.create_task(occupy())
-    await asyncio.sleep(0.001)          # holder owns the slot
+    monkeypatch.setattr(orchestrator, "spawn_worker", fake_spawn)
+    orchestrator._worker_gate = orchestrator._PriorityGate(1)  # one slot: strict order
+    gate = orchestrator._worker_gate
+
+    holder = asyncio.create_task(
+        orchestrator._spawn_worker_safe(holder_id, "engineer", "x", None))
+    await asyncio.wait_for(holder_running.wait(), timeout=5)   # holder owns the slot
     waiters = [
         asyncio.create_task(orchestrator._spawn_worker_safe(tasks[1]["id"], "engineer", "x", None)),
         asyncio.create_task(orchestrator._spawn_worker_safe(tasks[2]["id"], "engineer", "x", None)),
     ]
-    await asyncio.sleep(0.001)          # engineers are queued first
+    await _wait_for_waiters(gate, 2)                            # engineers are queued first
     reviewer = asyncio.create_task(
         orchestrator._spawn_worker_safe(tasks[3]["id"], "reviewer", "x", None))
+    await _wait_for_waiters(gate, 3)                            # reviewer queued behind them
+    release_holder.set()
     await asyncio.gather(holder, *waiters, reviewer)
 
     assert started[0] == "engineer"     # the original holder
@@ -81,7 +101,7 @@ async def test_cancelled_waiter_does_not_leak_a_slot(db_path):
     gate = orchestrator._PriorityGate(1)
     await gate.acquire()
     waiter = asyncio.create_task(gate.acquire())
-    await asyncio.sleep(0.001)
+    await _wait_for_waiters(gate, 1)    # waiter is queued, not guessed
     waiter.cancel()
     try:
         await waiter
