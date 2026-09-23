@@ -80,6 +80,27 @@ async def pulse():
     return {"v": _pulse.version()}
 
 
+_LOOPBACK = ("127.0.0.1", "::1", "localhost")
+
+
+@api.post("/shutdown", status_code=202)
+async def shutdown(request: Request):
+    """Stop the daemon: the desktop app's way of closing. Loopback only, token
+    or not — ending the process is not something a remote caller gets to do.
+
+    Answers first, then exits: the SIGTERM is scheduled after the response is
+    on its way, and the lifespan runs core.lifecycle.shutdown on the way out.
+    The caller waits for the process to end, not for this reply.
+    """
+    import asyncio
+    from core import lifecycle
+    host = request.client.host if request.client else ""
+    if host not in _LOOPBACK:
+        raise HTTPException(status_code=403, detail="shutdown is loopback-only")
+    asyncio.get_running_loop().call_later(0.1, lifecycle.request_exit, "Sisyphus was closed")
+    return {"stopping": True}
+
+
 @api.get("/health")
 async def health():
     """Liveness (ok) plus readiness: db reachable and the default runner's binary

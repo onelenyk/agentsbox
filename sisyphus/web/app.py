@@ -30,6 +30,10 @@ from web.auth import api_token_guard, _wants_html
 async def lifespan(_app: FastAPI):
     await startup()
     yield
+    # Every way out comes through here (SIGTERM, Ctrl-C, /api/v1/shutdown, the
+    # parent watch): the loops stop and no worker outlives the daemon.
+    from core import lifecycle
+    await lifecycle.shutdown()
 
 
 app = FastAPI(title="Sisyphus", version="2.0", lifespan=lifespan)

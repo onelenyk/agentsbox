@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from typing import List, Optional
@@ -151,30 +152,37 @@ async def startup():
                 f"${_task_cap:.2f}" if _task_cap > 0 else "OFF",
                 f"${_daily_cap:.2f}" if _daily_cap > 0 else "OFF (explicit 0 in config)")
 
-    asyncio.create_task(orchestrator.dispatch_forever())
+    from core import lifecycle
+    lifecycle.start_loop(orchestrator.dispatch_forever(), "dispatcher")
     # reconcile_on_boot only covers the restart. Keep guarding at runtime, so a
     # task created without an event recovers in minutes instead of waiting for
     # the next daemon restart.
-    asyncio.create_task(orchestrator.watchdog_forever())
+    lifecycle.start_loop(orchestrator.watchdog_forever(), "watchdog")
 
     from core import autopilot
-    asyncio.create_task(autopilot.run_forever())
+    lifecycle.start_loop(autopilot.run_forever(), "autopilot")
 
     # Ask the forges what happened to the pull requests we opened. A webhook
     # would be cheaper, but it needs the forge to reach us and this daemon
     # listens on loopback — see core.forge_poll.
     from core import forge_poll
-    asyncio.create_task(forge_poll.poll_forever())
+    lifecycle.start_loop(forge_poll.poll_forever(), "forge poll")
 
     # A consistent snapshot at boot and daily after — restore is only as good
     # as the last time anything actually called snapshot().
     from core import backup
-    asyncio.create_task(backup.backup_forever())
+    lifecycle.start_loop(backup.backup_forever(), "backup")
 
     # The runner's own session store grows with every worker run and is never
     # read back (core.runner_store) — prune it so it cannot quietly eat the disk.
     from core import runner_store
-    asyncio.create_task(runner_store.prune_forever())
+    lifecycle.start_loop(runner_store.prune_forever(), "runner-store")
+
+    # Started by the desktop app: end with it, even when it cannot say so.
+    parent = os.environ.get("SISYPHUS_PARENT_PID")
+    if parent and parent.isdigit():
+        lifecycle.start_loop(lifecycle.watch_parent(int(parent)), "parent watch")
+        logger.info("owned by the app (pid %s) — exits when it does", parent)
 
 @router.get("/", response_class=HTMLResponse)
 async def root():
