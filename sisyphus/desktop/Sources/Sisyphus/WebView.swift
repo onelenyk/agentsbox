@@ -40,7 +40,7 @@ final class WebView: NSObject, WKNavigationDelegate, WKUIDelegate {
           svg{color:#f5a623}
         </style>
         <main>
-          <svg width="34" height="34" viewBox="0 0 20 20" fill="none"><path d="M3 16.5 15.5 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".55"/><circle cx="8.5" cy="11" r="3.2" stroke="currentColor" stroke-width="1.6"/></svg>
+          <svg width="34" height="34" viewBox="0 0 20 20" fill="none"><path d="M3 17 17 5v12z" fill="currentColor" opacity=".18"/><path d="M3 17 17 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".6"/><circle cx="6.9" cy="7.4" r="3.2" stroke="currentColor" stroke-width="1.6"/></svg>
           <h1>\(esc(title))</h1>
           \(detail.isEmpty ? "" : "<pre>\(esc(detail))</pre>")
         </main>

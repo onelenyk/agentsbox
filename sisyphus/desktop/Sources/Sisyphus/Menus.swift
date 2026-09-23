@@ -8,7 +8,7 @@ enum Menus {
         let main = NSMenu()
 
         main.addItem(submenu("Sisyphus", [
-            item("About Sisyphus", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
+            item("About Sisyphus", #selector(AppDelegate.showAbout(_:))),
             .separator(),
             item("Hide Sisyphus", #selector(NSApplication.hide(_:)), "h"),
             item("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option]),

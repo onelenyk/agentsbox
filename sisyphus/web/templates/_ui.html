@@ -257,11 +257,13 @@ hx-post="/api/tasks/{{ task_id }}/messages" hx-target="closest .askc" hx-swap="o
      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ d }}"></path></svg>
 {%- endmacro %}
 
-{# The brand: a stone, and the slope it keeps going back up. #}
+{# The brand: a stone resting on the slope it keeps being pushed up. The
+   app icon (desktop/Icon/make_icon.swift) draws the same shapes. #}
 {% macro brand_mark() -%}
 <svg class="brand__mark" width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-    <path d="M3 16.5 15.5 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".55"></path>
-    <circle cx="8.5" cy="11" r="3.2" stroke="currentColor" stroke-width="1.6"></circle>
+    <path d="M3 17 17 5v12z" fill="currentColor" opacity=".18"></path>
+    <path d="M3 17 17 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity=".6"></path>
+    <circle cx="6.9" cy="7.4" r="3.2" stroke="currentColor" stroke-width="1.6"></circle>
 </svg>
 {%- endmacro %}
 
