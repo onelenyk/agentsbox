@@ -767,6 +767,23 @@ def _park_for_limits(task_id: str, agent_name: str, reason: str) -> None:
     pause(task_id, "limits", f"[limits] {reason}")
 
 
+# Tasks whose worker is queued behind the concurrency gate right now. It has no
+# session yet — it has not started — so to find_abandoned it looked exactly like
+# a worker that died: after ten quiet minutes the watchdog closed its marker, the
+# orchestrator queued another, and when a slot freed BOTH ran (SIS-83: six
+# "vanished" in one afternoon while two slots were busy). In memory on purpose:
+# after a restart nothing is queued, and reconcile_on_boot handles the markers.
+_AWAITING_SLOT: dict = {}
+
+
+def _release_slot_wait(task_id: str) -> None:
+    n = _AWAITING_SLOT.get(task_id, 0) - 1
+    if n > 0:
+        _AWAITING_SLOT[task_id] = n
+    else:
+        _AWAITING_SLOT.pop(task_id, None)
+
+
 def _queue_worker(task_id: str, role: str) -> bool:
     """Mark a worker as queued — synchronously, before anything awaits — or
     pause the task if the worker has no runner to go to. Returns whether to go
@@ -814,7 +831,11 @@ async def _spawn_worker_safe(task_id: str, role: str, instruction: str, repo_nam
         return
     try:
         gate = _get_worker_gate()
-        await gate.acquire(high=_is_review_role(role))
+        _AWAITING_SLOT[task_id] = _AWAITING_SLOT.get(task_id, 0) + 1
+        try:
+            await gate.acquire(high=_is_review_role(role))
+        finally:
+            _release_slot_wait(task_id)
         try:
             await spawn_worker(task_id, role, instruction, repo_name=repo_name)
         finally:
@@ -1024,6 +1045,8 @@ def find_abandoned(stall_after: int = STALL_AFTER_SECONDS) -> list:
             continue
         if sessions.list_for_task(task["id"]):
             continue          # a session backs it — the worker is alive
+        if task["id"] in _AWAITING_SLOT:
+            continue          # queued for a slot, not dead — it has not started
         try:
             seen = _dt.datetime.fromisoformat(task["updated_at"])
         except (ValueError, KeyError, TypeError):
