@@ -120,3 +120,24 @@ class TestOneWorkerPerTask:
             assert orchestrator._worker_in_flight(t["id"])
             await bg
         asyncio.run(go())
+
+
+class TestAQueuedWorkerIsNotAbandoned:
+    def test_a_worker_waiting_for_a_slot_is_not_declared_vanished(self, db_path, monkeypatch):
+        """Both slots busy for 10+ minutes used to read as a dead worker: the
+        watchdog closed the marker and a second worker was queued behind it."""
+        t = store.create_task("g", repo="r")
+        store.post_message(t["id"], "system", kind="worker_queued", text="engineer queued")
+        monkeypatch.setattr(orchestrator, "_AWAITING_SLOT", {t["id"]: 1})
+        assert orchestrator.find_abandoned(stall_after=0) == []
+        monkeypatch.setattr(orchestrator, "_AWAITING_SLOT", {})
+        assert orchestrator.find_abandoned(stall_after=0) == [t["id"]]
+
+    def test_the_wait_is_forgotten_once_the_slot_is_taken(self, db_path, monkeypatch):
+        t = store.create_task("g", repo="r")
+
+        async def fake_spawn(*a, **kw):
+            assert t["id"] not in orchestrator._AWAITING_SLOT   # started, so no longer waiting
+        monkeypatch.setattr(orchestrator, "spawn_worker", fake_spawn)
+        asyncio.run(orchestrator._spawn_worker_safe(t["id"], "engineer", "x", None))
+        assert t["id"] not in orchestrator._AWAITING_SLOT
