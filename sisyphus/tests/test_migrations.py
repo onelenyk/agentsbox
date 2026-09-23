@@ -150,3 +150,21 @@ def test_a_current_database_just_gets_stamped(tmp_path, monkeypatch):
     }
     assert required_tables.issubset(tables)
     conn.close()
+
+
+def test_retired_tables_are_dropped(db_path):
+    """A table nothing reads is dropped on upgrade, so it stops raising the
+    question of what still uses it."""
+    from core import migrations
+    from core.db import get_conn
+    conn = get_conn()
+    conn.execute("CREATE TABLE IF NOT EXISTS copilot_messages (id TEXT)")
+    conn.execute("CREATE TABLE IF NOT EXISTS cards (id TEXT)")
+    conn.commit()
+    conn.close()
+    migrations.migrate_all()
+    conn = get_conn()
+    names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    conn.close()
+    assert not names & set(migrations.RETIRED_TABLES)
+    assert "tasks" in names
