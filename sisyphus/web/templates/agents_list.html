@@ -1,27 +1,89 @@
-{% from "_ui.html" import agent_marks %}
+{% from "_ui.html" import agent_mark %}
+{# The team, not a list of prompts. The orchestrator leads — it hands every
+   task to someone — and each worker says what it is for, what it has done,
+   and who it actually works with: "passes to" and "picks up from" are counted
+   from real runs (core.usage.roster), so a link on this page is one that
+   happened, not one that was meant to. The persona and the full tool list are
+   one click away, in Edit. #}
+
+{% macro who(name, n, unit) -%}
+<span class="rel" title="{{ n }} {{ unit }}">{{ agent_mark(name) }}<span class="rel__name">{{ name }}</span><span class="rel__n tnum">{{ n }}</span></span>
+{%- endmacro %}
+
+{% macro facts(a) -%}
+<div class="agent__facts">
+    {%- if a.stats %}
+    <span><b class="tnum">{{ a.stats.runs }}</b> runs</span>
+    <span><b class="tnum">${{ '%.2f'|format(a.stats.cost) }}</b></span>
+    <span>last {{ a.stats.last|when }}</span>
+    {%- else %}
+    <span class="muted">has not run yet</span>
+    {%- endif %}
+</div>
+{%- endmacro %}
+
+{% macro foot(a) -%}
+<div class="agent__foot">
+    <span class="agent__runner" title="Runner · model">{{ runners.get(a.runner_id) or 'default runner' }}{% if a.model %} · {{ a.model }}{% endif %}</span>
+    <span class="agent__tools" title="{{ a.tools|join(', ') }}">{{ a.tools|length }} tool{{ '' if a.tools|length == 1 else 's' }}</span>
+    <span class="agent__acts">
+        <button class="btn btn--ghost btn--sm" hx-get="/api/agents/{{ a.name }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
+        {% if not a.is_builtin %}
+        <button class="btn btn--danger btn--sm" hx-post="/api/agents/{{ a.name }}/delete" hx-confirm="Delete agent {{ a.name }}?" hx-swap="none">Delete</button>
+        {% endif %}
+    </span>
+</div>
+{%- endmacro %}
+
+{% macro head(a) -%}
+<div class="agent__head">
+    <span class="agent__mark">{{ agent_mark(a.name, a.live) }}</span>
+    <div class="agent__id">
+        <h3 class="agent__name">{{ a.name }}</h3>
+        <span class="agent__kind">{{ a.kind }} · {{ 'built-in' if a.is_builtin else 'custom' }}</span>
+    </div>
+    <span class="agent__state{{ ' is-live' if a.live }}"><span class="led {{ 'live' if a.live else 'idle' }}"></span>{{ 'working now' if a.live else 'idle' }}</span>
+</div>
+{%- endmacro %}
+
 {% if agents %}
-{# A roster reads as a list, not as a grid of equal cards: the persona is the
-   point, so it gets room to be read, and the tools are one line of names
-   rather than a field of pills. #}
-<div class="alist">
-    {% for a in agents %}
-    <article class="arow">
-        <div class="arow__head">
-            <span class="ecard__glyph {{ 'violet' if a.kind == 'orchestrator' else '' }}">{{ agent_marks.get(a.name, [(a.name or '?')[:2]|upper])[0] }}</span>
-            <h3 class="arow__name">{{ a.name }}</h3>
-            <span class="arow__kind">{{ a.kind }}{{ ' · built-in' if a.is_builtin else ' · custom' }}</span>
-            <span class="arow__runtime">{{ runners.get(a.runner_id) or 'default runner' }}{% if a.model %} · {{ a.model }}{% endif %}</span>
-            <div class="acts">
-                <button class="btn btn--ghost btn--sm" hx-get="/api/agents/{{ a.name }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
-                {% if not a.is_builtin %}
-                <button class="btn btn--danger btn--sm" hx-post="/api/agents/{{ a.name }}/delete" hx-confirm="Delete agent {{ a.name }}?" hx-swap="none">Delete</button>
-                {% endif %}
-            </div>
+<div class="team">
+    {% for a in lead %}
+    <article class="agent agent--lead">
+        {{ head(a) }}
+        {% if a.role_line %}<p class="agent__role">{{ a.role_line }}</p>{% endif %}
+        {% if dispatch %}
+        <div class="agent__rel">
+            <span class="agent__rel-k">hands tasks to</span>
+            <span class="rels">{% for n, k in dispatch %}{{ who(n, k, 'tasks') }}{% endfor %}</span>
         </div>
-        {% if a.persona %}<p class="arow__persona">{{ a.persona }}</p>{% endif %}
-        <p class="arow__tools">{% for t in a.tools %}{{ t }}{{ '  ·  ' if not loop.last }}{% endfor %}</p>
+        {% endif %}
+        {{ facts(a) }}
+        {{ foot(a) }}
     </article>
     {% endfor %}
+
+    <div class="team__grid">
+        {% for a in workers %}
+        <article class="agent">
+            {{ head(a) }}
+            {% if a.role_line %}<p class="agent__role">{{ a.role_line }}</p>{% endif %}
+            <div class="agent__links">
+                {% if a.gives %}
+                <div class="agent__rel"><span class="agent__rel-k">passes to →</span><span class="rels">{% for n, k in a.gives %}{{ who(n, k, 'times') }}{% endfor %}</span></div>
+                {% endif %}
+                {% if a.takes %}
+                <div class="agent__rel"><span class="agent__rel-k">← picks up from</span><span class="rels">{% for n, k in a.takes %}{{ who(n, k, 'times') }}{% endfor %}</span></div>
+                {% endif %}
+                {% if not a.gives and not a.takes %}
+                <div class="agent__rel"><span class="agent__rel-k">works alone</span></div>
+                {% endif %}
+            </div>
+            {{ facts(a) }}
+            {{ foot(a) }}
+        </article>
+        {% endfor %}
+    </div>
 </div>
 {% else %}
 <div class="empty">No agents. Add one to get started.</div>
