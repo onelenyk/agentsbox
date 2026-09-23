@@ -1,10 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Mission Control — Sisyphus{% endblock %}
+{% block title %}Home — Sisyphus{% endblock %}
 {% import "_ui.html" as ui %}
 {% block content %}
-{% call ui.toolbar([{'label': 'Home'}]) %}
-<span class="liveflag"><span class="led live"></span> LIVE</span>
-{% endcall %}
+{{ ui.toolbar([{'label': 'Home'}], 'what needs you, and what just happened') }}
 {% include "_task_box.html" %}
 <div id="inbox" hx-get="/api/inbox/view" hx-trigger="load, dataChanged from:body, taskUpdated from:body, inboxChanged, every 300s" hx-swap="innerHTML"></div>
 <div id="dash" hx-get="/api/dashboard/view" hx-trigger="load, dataChanged from:body, every 300s" hx-swap="innerHTML transition:true">

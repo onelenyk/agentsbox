@@ -1,12 +1,11 @@
-{# Home, in the order a person actually reads it: where the system stands in
-   one line, what is happening now, and only then the history.
+{# Home, in the order a person reads it: where the system stands in one line,
+   what is running now, then what just happened.
 
-   It used to open with four equal boxes and continue as a grid of equal
-   panels, so nothing on the page was more important than anything else — the
-   shape of every generated dashboard. Figures now sit on a rule, sections are
-   headings and hairlines instead of boxes, and the past is smaller than the
-   present. #}
-{% set ov = d.ov %}{% set t = ov.tasks %}{% set u = ov.usage %}{% set a = ov.activity %}
+   Only what is true right now earns a place. The spend and tasks-a-day charts
+   were the Statistics page drawn a second time, and three separate "nothing is
+   waiting" lines said one thing thrice — an empty section now renders nothing,
+   because the state line already counted it as zero. #}
+{% set ov = d.ov %}{% set t = ov.tasks %}{% set u = ov.usage %}
 {% from "_ui.html" import agent_mark %}
 
 <div class="state">
@@ -22,57 +21,28 @@
         <span class="state__n tnum">{{ t.done }}</span>
         <span class="state__l">done{% if t.failed %} · <span class="tone-bad">{{ t.failed }} failed</span>{% endif %}</span>
     </div>
-    <div class="state__rest">
-        <span>{{ a.orchestrator_passes }} orchestrator passes across {{ t.total }} tasks</span>
-        <span>${{ '%.4f'|format(u.totals.cost) }} · {{ '{:,}'.format(u.totals.tokens) }} tokens</span>
-    </div>
+    <a class="state__rest" href="/stats" title="Spend, throughput and outcomes, charted">
+        <span>${{ '%.2f'|format(u.totals.cost) }} spent · {{ '{:,}'.format(u.totals.tokens) }} tokens</span>
+        <span>Statistics →</span>
+    </a>
 </div>
 
+{% if live_sessions %}
 <section class="sect">
-    <h2 class="sect__h">Now
-        <span class="sect__meta">{{ live_sessions|length }} running{% if d.waiting %} · {{ d.waiting|length }} waiting{% endif %}</span>
-    </h2>
+    <h2 class="sect__h">Now <span class="sect__meta">{{ live_sessions|length }} running</span></h2>
     <div class="sect__body">
-        {% if live_sessions %}{% with sessions = live_sessions %}{% include "workers_live.html" %}{% endwith %}{% endif %}
-        {% for w in d.waiting %}
-        <a class="q-row" href="/tasks/{{ w.id }}"><span class="status status--waiting">waiting</span><span class="g">{{ w.goal }}</span><span class="id">{{ w.id }}</span></a>
-        {% endfor %}
-        {% if not live_sessions and not d.waiting %}<p class="sect__quiet">No agent is running, and nothing is waiting on you.</p>{% endif %}
+        {% with sessions = live_sessions %}{% include "workers_live.html" %}{% endwith %}
     </div>
 </section>
+{% endif %}
 
-<div class="cols-2 dash-past">
-    <section class="sect">
-        <h2 class="sect__h">Spend by agent <span class="sect__meta">${{ '%.4f'|format(u.totals.cost) }} in all</span></h2>
-        {% if u.by_agent %}
-        {% set amax = (u.by_agent|map(attribute='cost')|list|max) or 0.0001 %}
-        <div class="bars">
-            {% for r in u.by_agent %}
-            <div class="bar-row"><span class="cap">{{ r.agent or '—' }}</span><span class="bar-track"><span class="bar-fill dashboard__bar-fill" style="--w:{{ (100*r.cost/amax)|round }}%"></span></span><span class="val">${{ '%.4f'|format(r.cost) }} · {{ r.runs }} runs</span></div>
-            {% endfor %}
-        </div>
-        {% else %}<p class="sect__quiet">Nothing has run yet.</p>{% endif %}
-
-        {% if ov.created_by_day %}
-        {% set dmax = (ov.created_by_day|map(attribute='n')|list|max) or 1 %}
-        <h2 class="sect__h dash-past__h">Tasks a day <span class="sect__meta">peak {{ dmax }}</span></h2>
-        <div class="spark">
-            {% for day in ov.created_by_day %}<div class="col" title="{{ day.day }}: {{ day.n }}"><span style="--h:{{ (100*day.n/dmax)|round }}%"></span></div>{% endfor %}
-        </div>
-        <div class="spark-labels">
-            {% for day in ov.created_by_day %}<span>{{ day.n }}<br>{{ day.day[8:] }}</span>{% endfor %}
-        </div>
-        {% endif %}
-    </section>
-
-    <section class="sect">
-        <h2 class="sect__h">Lately</h2>
-        <div class="feed">
-            {% for m in d.recent %}
-            <div class="ev">{{ agent_mark('forge' if m.kind == 'external' else m.author) }}<span class="txt">{{ m.text[:80] }}</span></div>
-            {% else %}
-            <p class="sect__quiet">Nothing has happened yet.</p>
-            {% endfor %}
-        </div>
-    </section>
-</div>
+<section class="sect">
+    <h2 class="sect__h">Lately</h2>
+    <div class="feed">
+        {% for m in d.recent %}
+        <a class="ev" href="/tasks/{{ m.task_id }}">{{ agent_mark('forge' if m.kind == 'external' else m.author) }}<span class="txt">{% if m.task_key %}<span class="tkey">{{ m.task_key }}</span> {% endif %}{{ m.text|truncate(120, killwords=false) }}</span><span class="ev__when">{{ m.created_at|when }}</span></a>
+        {% else %}
+        <p class="sect__quiet">Nothing has happened yet.</p>
+        {% endfor %}
+    </div>
+</section>

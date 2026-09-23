@@ -118,7 +118,7 @@ class TestIndicatorsTrackTheData:
                                 "cost": 1.2345, "steps": 1})
 
         body = _text(_client().get("/api/dashboard/view"))
-        assert "1.2345" in body, "recorded cost never reached the dashboard"
+        assert "1.23" in body, "recorded cost never reached the dashboard"
 
     def test_repos_distinguish_reachable_from_missing(self, db_path, tmp_path):
         """The exact bug shape: a status that could only ever say one thing."""
