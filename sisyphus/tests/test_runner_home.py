@@ -43,7 +43,7 @@ class TestWhatAWorkerInherits:
         should have, never whatever the machine happens to hold."""
         home = runner_home.build(str(tmp_path / "ws"), real_home=str(_fake_home(tmp_path)))
         assert not os.path.exists(os.path.join(home, ".aws"))
-        assert sorted(os.listdir(home)) == [".claude", ".gitconfig", ".local"]
+        assert sorted(os.listdir(home)) == [".gitconfig", ".local"]
 
     def test_it_links_rather_than_copies(self, tmp_path):
         """A copy of a credential file is a second credential file, and it goes

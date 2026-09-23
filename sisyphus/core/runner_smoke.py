@@ -119,6 +119,12 @@ async def smoke_test(runner: dict, timeout: int = DEFAULT_TIMEOUT) -> dict:
         from .config import worker_env
         env.update(worker_env() or {})
         env["PATH"] = path_with_install_dirs(env.get("PATH", ""))
+        # The HOME too: without it this passed for Claude Code while every
+        # real run, under the private home, answered "Not logged in".
+        from .launcher import WORKSPACE_ROOT
+        home = runner_profiles.worker_home(rtype, WORKSPACE_ROOT)
+        if home:
+            env["HOME"] = home
         for var in runner_profiles.env_to_drop(rtype, runner):
             env.pop(var, None)
         env.update(runner_profiles.build_env(rtype, runner))

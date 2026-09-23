@@ -585,6 +585,28 @@ _LOGIN_OVERRIDES = {
 }
 
 
+# Runners that get the owner's real HOME instead of core.runner_home's private
+# one. The private home exists because opencode reads its config from $HOME
+# ahead of every flag, so HOME is the only lever on its tool roster. Claude Code
+# has real levers — --strict-mcp-config and --setting-sources project (see
+# _claude_argv) — and on macOS its login lives in the Keychain, which a
+# substituted HOME hides: every run answered "Not logged in" while the smoke
+# test, run under the real HOME, kept reporting the runner healthy.
+_KEEPS_REAL_HOME = ("claude-cli",)
+
+
+def worker_home(rtype: str, root: str) -> Optional[str]:
+    """The HOME a run of *rtype* gets (private homes live under *root*), or
+    None to keep the daemon's own.
+
+    The one rule both the launcher and the smoke test apply, so a smoke test
+    cannot pass under an environment the real run never sees."""
+    if rtype in _KEEPS_REAL_HOME:
+        return None
+    from .runner_home import build as _build_home
+    return _build_home(root)
+
+
 def env_to_drop(rtype: str, runner: dict) -> tuple:
     """Inherited variables to remove before build_env's overlay is applied."""
     from .runners import auth_mode

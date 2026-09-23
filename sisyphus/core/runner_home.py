@@ -33,10 +33,6 @@ LINKED: List[Tuple[str, str]] = [
     # config that carries plugins, which is exactly why a private HOME can drop
     # the config and keep the login.
     (".local/share/opencode", "opencode credentials and session store"),
-    # Claude Code's own login and settings live here; a private HOME without it
-    # would leave that runner unable to authenticate at all.
-    (".claude", "Claude Code login and settings"),
-    (".claude.json", "Claude Code account state"),
     # Any git the AGENT runs itself (the sanctioned `commit` tool runs in the
     # daemon, but a persona may still shell out) needs an identity, or it stops
     # with "Please tell me who you are".
