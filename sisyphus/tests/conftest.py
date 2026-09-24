@@ -60,6 +60,7 @@ def db_path(tmp_path):
     from core.limits import init_limits_table
     from core.model_classes import init_classes_table
     from core.integrations import init_integrations_table
+    from core.jira_intake import init_jira_sync_table
     init_runners_table()
     init_agents_table()
     init_usage_table()
@@ -68,5 +69,6 @@ def db_path(tmp_path):
     init_limits_table()
     init_classes_table()
     init_integrations_table()
+    init_jira_sync_table()
 
     yield str(db)
