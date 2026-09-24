@@ -32,6 +32,11 @@ sandbox:
                                  # set to false. On a platform with no backend
                                  # (Linux) unset means not required — the
                                  # launcher announces every unconfined run.
+  # read_isolation: true         # unset/false = off. When on, a worker can READ
+                                 # only the workspace, worktree, output dir, and
+                                 # allowlisted paths under $HOME (credentials,
+                                 # caches, toolchain state dirs). Blocks exfiltration
+                                 # of secrets from other projects via prompt injection.
 
 default_model: deepseek          # model for the seeded default runner
 max_concurrent_workers: 2        # global worker cap
