@@ -23,7 +23,7 @@ TIERS = {
         "test_heartbeat", "test_launcher_cancel", "test_ledger", "test_logging_setup",
         "test_markdown", "test_mergerequests", "test_migrations", "test_notifications", "test_pulse", "test_timeline", "test_runner_catalog", "test_asks", "test_runner_store",
         "test_notify",
-        "test_orchestrator", "test_preflight", "test_repo_context",
+        "test_obvious_steps", "test_orchestrator", "test_preflight", "test_repo_context",
         "test_repos", "test_reviews",
         "test_runlogs", "test_runner_detect", "test_runner_profiles",
         "test_runner_home", "test_runner_smoke", "test_runners",
