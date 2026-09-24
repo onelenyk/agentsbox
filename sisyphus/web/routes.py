@@ -1031,9 +1031,9 @@ async def runners_edit(runner_id: str, name: str = Form(""), binary: str = Form(
     fields["base_url"] = base_url
     # Blank idle/timeout also means "clear it": the row override is dropped and
     # the run falls back to the type default.
-    fields["idle_timeout"] = _seconds_field(idle_timeout, "Idle timeout")
-    fields["timeout"] = _seconds_field(timeout, "Total timeout")
     try:
+        fields["idle_timeout"] = _seconds_field(idle_timeout, "Idle timeout")
+        fields["timeout"] = _seconds_field(timeout, "Total timeout")
         mode, key_env, key = _runner_auth(type or current.get("type") or "opencode", model,
                                           auth_mode, api_key, api_key_env, runner_id)
         fields["auth_mode"], fields["api_key_env"] = mode, key_env
