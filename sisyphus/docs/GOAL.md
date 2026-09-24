@@ -69,6 +69,25 @@ denominator:
 
 We are below L1.
 
+## Production readiness
+
+The scoreboard measures ambition. These metrics measure whether the pipeline
+actually works—whether runs finish, merges land, and code reaches the trunk.
+
+| Metric | What it counts | Baseline | Target for pilot |
+|---|---|---|---|
+| **Wasted runs** | worker_finished messages ending without a result, vs all finished | % of runs that produced nothing | < 5% |
+| Provider faults | worker_finished with "set aside", counted per provider | cooldowns that stall merges | 0 in 14 days |
+| Duplicate workers | tasks with two worker_started, no worker_finished between | retries that overlap | 0 |
+| Lost work | done tasks with a commit but no merge_requests | code that never reached the trunk | 0 |
+| Merge latency | median hours from MR created_at to merged_at | time a decision stalls a merge | — |
+| Stale-check blocks | thread notes naming "check-stale" or "auto-merge waiting" | times the merge gate timed out | 0 in 14 days |
+| Human turns | answer messages by human per task with an MR | interventions per delivery | ≤ 1.0 |
+
+**Conditions to justify a production pilot:** wasted < 5% in 14 days, duplicates 0, lost 0,
+provider faults 0, stale-check blocks 0. These are pipeline health thresholds, not effort
+metrics—once they are met, the backlog can route tasks to Sisyphus safely.
+
 ## The rule that actually moves the number
 
 Nothing in the code raises *self-build* on its own. The number moves when work
