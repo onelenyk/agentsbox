@@ -58,6 +58,7 @@ _READ_ALLOWLIST = [
     _ReadAllowedPath(".local/state", "XDG state dir for opencode and other CLI tools"),
     _ReadAllowedPath(".opencode", "opencode legacy state directory"),
     _ReadAllowedPath(".superset", "Superset wrapper installation and agents"),
+    _ReadAllowedPath(".config", "XDG config dir for opencode, git, and other CLI tools"),
     _ReadAllowedPath(".claude", "Claude Code state and authentication"),
     _ReadAllowedPath(".claude.json", "Claude Code configuration"),
     _ReadAllowedPath(".cache", "caches from build tools and CLIs"),
