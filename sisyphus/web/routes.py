@@ -1074,6 +1074,72 @@ async def stats_view(request: Request):
     from core.stats import overview
     return _tmpl().TemplateResponse(request, "stats_view.html", {"s": overview()})
 
+# ── Integrations ────────────────────────────────────────────────────────
+
+@router.get("/integrations", response_class=HTMLResponse)
+async def integrations_page(request: Request):
+    return _tmpl().TemplateResponse(request, "integrations.html", {"active_page": "integrations"})
+
+@router.get("/api/integrations/view", response_class=HTMLResponse)
+async def integrations_view(request: Request, provider: str = "", errors: int = 0, limit: int = 100):
+    from core import integrations, jira
+
+    # Only filter by provider if specified and in the valid list
+    provider = provider.lower() if provider and provider.lower() in integrations.PROVIDERS else None
+
+    # Get events for the filtered provider
+    events = integrations.list_events(provider=provider, limit=limit, only_errors=bool(errors))
+
+    # Get Jira base URL for issue links (cleaned: skip unresolved ${VAR})
+    from core.config import get_config
+    jira_base_url = (get_config("jira.base_url") or "").strip().rstrip("/")
+    if jira_base_url and jira_base_url.startswith("${"):
+        jira_base_url = ""
+
+    # Get provider cards data — always include Jira even if no events
+    providers = {}
+    for p in integrations.PROVIDERS:
+        if p == "jira":
+            providers[p] = {
+                "name": "Jira",
+                "configured": jira.configured(),
+                "summary": integrations.summary(p, days=1),
+            }
+        else:
+            # Future providers (gitlab, github) only show if they have events
+            summary = integrations.summary(p, days=1)
+            if summary.get("last") or summary.get("calls", 0) > 0:
+                providers[p] = {
+                    "name": p.capitalize(),
+                    "configured": False,  # Not configured in this version
+                    "summary": summary,
+                }
+
+    return _tmpl().TemplateResponse(request, "integrations_view.html", {
+        "providers": providers,
+        "events": events,
+        "selected_provider": provider,
+        "errors_only": bool(errors),
+        "jira_base_url": jira_base_url,
+    })
+
+@router.post("/api/integrations/jira/check", response_class=HTMLResponse)
+async def integrations_jira_check(request: Request):
+    from core import jira, integrations
+
+    try:
+        result = jira.myself(actor="human:ui")
+        # The myself() function already recorded in integrations
+        return _tmpl().TemplateResponse(request, "integrations_check_result.html", {
+            "ok": True,
+            "detail": f"Connected as {result.get('displayName') or result.get('emailAddress')}",
+        })
+    except jira.JiraError as e:
+        return _tmpl().TemplateResponse(request, "integrations_check_result.html", {
+            "ok": False,
+            "detail": str(e),
+        })
+
 # ── Live Workers ─────────────────────────────────────────────────────────
 
 @router.get("/api/workers/live", response_class=HTMLResponse)

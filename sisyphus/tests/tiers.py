@@ -35,7 +35,7 @@ TIERS = {
     "component": [
         "test_agent_mcp", "test_agents_api", "test_api", "test_auth",
         "test_auto_merge", "test_forge_merge_safety",
-        "test_git_ops", "test_goal_report", "test_mcp_server",
+        "test_git_ops", "test_goal_report", "test_integrations_page", "test_mcp_server",
         "test_mr_actions", "test_mr_resolve",
         "test_page_smoke", "test_providers", "test_read_only_repo", "test_readiness", "test_repo_check",
         "test_setup_hook", "test_stats", "test_task_lifecycle", "test_verify",
