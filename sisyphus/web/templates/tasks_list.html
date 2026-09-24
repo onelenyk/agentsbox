@@ -14,16 +14,23 @@
     so the ones that do say something are the ones worth reading. -#}
 <li class="trow trow--{{ row.kind }} {{ 'trow--child' if row.parent_id }}" data-filter-item
     data-when="{{ row.when }}" data-repo="{{ row.repo }}" data-who="{{ row.trail|join(' ') }}"
-    data-kind="{{ row.kind }}" data-origin="{{ 'auto' if row.origin else 'you' }}"
-    data-text="{{ (row.key ~ ' ' ~ row.title ~ ' ' ~ (row.origin.name if row.origin else '') ~ ' ' ~ (row.why.text if row.why else ''))|lower }}">
+    data-kind="{{ row.kind }}" data-origin="{{ 'jira' if (row.origin and row.origin.jira) else ('auto' if row.origin else 'you') }}"
+    data-text="{{ (row.key ~ ' ' ~ row.title ~ ' ' ~ (row.origin.name if row.origin and not row.origin.jira else (row.origin.key if row.origin.jira else '')) ~ ' ' ~ (row.why.text if row.why else ''))|lower }}">
     <a href="/tasks/{{ row.id }}" draggable="false" hx-get="/api/tasks/{{ row.id }}/panel" hx-target="#overlay-body" hx-swap="innerHTML" hx-push-url="/tasks/{{ row.id }}">
         <span class="trow__mark" title="new since your last visit"></span>
         <span class="tkey"{% if row.repo %} title="{{ row.repo }}"{% endif %}>{{ row.key }}</span>
         <span class="trow__title"{% if row.full %} title="{{ row.full }}"{% endif %}>{{ row.title }}{% if row.runs > 1 %}<span class="trow__runs tnum">×{{ row.runs }}</span>{% endif %}</span>
-        <span class="trow__asked">
+        <span class=”trow__asked”>
             {%- if row.origin -%}
-            <span class="tag tag--origin{{ ' tag--bad' if row.origin.broken }}{{ ' tag--idle' if row.origin.paused }}"
-                  title="Created by the automation “{{ row.origin.name }}” — {{ row.origin.about }}">↻ {{ row.origin.short }}</span>
+            {%- if row.origin.jira -%}
+            {%- if jira_base_url -%}
+            <a href=”{{ jira_base_url }}/browse/{{ row.origin.key }}” target=”_blank” class=”tag tag--origin tag--jira” title=”From Jira issue {{ row.origin.key }}”>{{ row.origin.short }}</a>
+            {%- else -%}
+            <span class=”tag tag--origin tag--jira” title=”From Jira issue {{ row.origin.key }}”>{{ row.origin.short }}</span>
+            {%- endif -%}
+            {%- else -%}
+            <span class=”tag tag--origin{{ ' tag--bad' if row.origin.broken }}{{ ' tag--idle' if row.origin.paused }}” title=”Created by the automation “{{ row.origin.name }}” — {{ row.origin.about }}”>↻ {{ row.origin.short }}</span>
+            {%- endif -%}
             {%- endif -%}
         </span>
         <span class="trail">
@@ -130,7 +137,7 @@
             {'field': 'repo', 'label': 'Repo', 'any': 'any repo', 'options': repos if repos|length > 1 else []},
             {'field': 'who', 'label': 'Worked by', 'any': 'anyone', 'options': whos},
             {'field': 'origin', 'label': 'Asked by', 'any': 'anyone',
-             'options': [('you', 'you'), ('auto', 'an automation')]},
+             'options': [('you', 'you'), ('auto', 'an automation'), ('jira', 'Jira')]},
             {'field': 'kind', 'label': 'Status', 'any': 'any status',
              'options': [('in-progress', 'in flight'), ('needs-you', 'wants you'), ('to-merge', 'to merge'),
                          ('shipped', 'shipped'), ('done', 'done'), ('not-merged', 'not merged'), ('failed', 'failed')]},
