@@ -37,6 +37,7 @@
                 <a href="/autopilots" class="{{ 'active' if ap == 'autopilots' else '' }}" title="Tasks that start themselves">{{ ui.nav_icon("autopilot") }} Autopilot</a>
                 <div class="nav-sec"><span>Observe</span></div>
                 <a href="/stats" class="{{ 'active' if ap == 'stats' else '' }}" title="Spend, throughput, outcomes">{{ ui.nav_icon("stats") }} Statistics</a>
+                <a href="/integrations" class="{{ 'active' if ap == 'integrations' else '' }}" title="What Sisyphus did in Jira and the forges, and who did it">{{ ui.nav_icon("integrations") }} Integrations</a>
                 <a href="/runtime" class="{{ 'active' if ap == 'runtime' else '' }}" title="The process, its snapshots, its config">{{ ui.nav_icon("daemon") }} Daemon</a>
             </nav>
             {# Status, not settings: only things that can go wrong. #}
