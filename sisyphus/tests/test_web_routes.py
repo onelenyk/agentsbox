@@ -1264,6 +1264,123 @@ def test_runner_edit_keeps_required_fields_on_blank(db_path):
     assert row["name"] == "keepname" and row["binary"] == "opencode"
 
 
+def test_runner_add_saves_the_timeout_overrides(db_path):
+    from core.runners import get_runner_by_name
+    init_runners_table()
+    r = _make_client().post("/api/runners", data={
+        "name": "timed", "binary": "opencode", "type": "opencode",
+        "idle_timeout": "900", "timeout": "2700",
+    })
+    assert r.status_code == 200
+    row = get_runner_by_name("timed")
+    assert row["idle_timeout"] == 900 and row["timeout"] == 2700
+
+
+def test_runner_add_blank_timeouts_are_null(db_path):
+    """Blank input = NULL = use the type default — not 0, not an error."""
+    from core.runners import get_runner_by_name
+    init_runners_table()
+    r = _make_client().post("/api/runners", data={
+        "name": "untimed", "binary": "opencode", "type": "opencode",
+        "idle_timeout": "", "timeout": "",
+    })
+    assert r.status_code == 200
+    row = get_runner_by_name("untimed")
+    assert row["idle_timeout"] is None and row["timeout"] is None
+
+
+def test_runner_add_rejects_a_non_integer_timeout(db_path):
+    init_runners_table()
+    r = _make_client().post("/api/runners", data={
+        "name": "bad", "binary": "opencode", "type": "opencode",
+        "idle_timeout": "ten",
+    })
+    assert r.status_code == 400
+    assert "whole number of seconds" in r.headers.get("HX-Trigger", "")
+
+
+def test_runner_add_rejects_a_non_positive_timeout(db_path):
+    init_runners_table()
+    for bad in ("0", "-5"):
+        r = _make_client().post("/api/runners", data={
+            "name": "bad", "binary": "opencode", "type": "opencode",
+            "timeout": bad,
+        })
+        assert r.status_code == 400
+        assert "positive number of seconds" in r.headers.get("HX-Trigger", "")
+
+
+def test_runner_form_body_redisplays_saved_timeouts(db_path):
+    from core.runners import add_runner
+    init_runners_table()
+    row = add_runner("timed", "opencode", "opencode",
+                     idle_timeout=900, timeout=2700)
+    a, b, c = _probe_patches()
+    with a, b, c:
+        body = _make_client().get(
+            f"/api/runners/form-body?type=opencode&runner_id={row['id']}").text
+    assert 'name="idle_timeout" value="900"' in body
+    assert 'name="timeout" value="2700"' in body
+    # The type default is named as the blank-state hint, so a reader knows
+    # what clearing the field means.
+    assert "Blank = 10 min for this runner type" in body
+
+
+def test_runner_edit_rejects_a_non_integer_timeout(db_path):
+    from core.runners import add_runner
+    init_runners_table()
+    row = add_runner("timed", "opencode", "opencode")
+    r = _make_client().post(f"/api/runners/{row['id']}/edit", data={
+        "name": "timed", "binary": "opencode", "type": "opencode",
+        "model": "", "idle_timeout": "ten",
+    })
+    assert r.status_code == 400
+    assert "whole number of seconds" in r.headers.get("HX-Trigger", "")
+
+
+def test_runner_edit_rejects_a_non_positive_timeout(db_path):
+    from core.runners import add_runner
+    init_runners_table()
+    row = add_runner("timed", "opencode", "opencode")
+    for bad in ("0", "-5"):
+        r = _make_client().post(f"/api/runners/{row['id']}/edit", data={
+            "name": "timed", "binary": "opencode", "type": "opencode",
+            "model": "", "timeout": bad,
+        })
+        assert r.status_code == 400
+        assert "positive number of seconds" in r.headers.get("HX-Trigger", "")
+
+
+def test_runner_edit_blank_timeouts_clear_the_override(db_path):
+    from core.runners import add_runner, get_runner
+    init_runners_table()
+    row = add_runner("timed", "opencode", "opencode",
+                     idle_timeout=900, timeout=2700)
+    r = _make_client().post(f"/api/runners/{row['id']}/edit", data={
+        "name": "timed", "binary": "opencode", "type": "opencode",
+        "model": "", "idle_timeout": "", "timeout": "",
+    })
+    assert r.status_code == 200
+    after = get_runner(row["id"])
+    assert after["idle_timeout"] is None and after["timeout"] is None
+
+
+def test_daemon_page_lists_each_runners_own_limits(db_path):
+    """The Daemon page shows the real per-runner limits, not one constant: a
+    reader sizes a long job off what THIS runner will actually enforce."""
+    from core.runners import add_runner
+    init_runners_table()
+    add_runner("slow-thinker", "opencode", "opencode", idle_timeout=1800)
+    add_runner("claude", "claude", "claude-cli")
+    html = _make_client().get("/runtime").text
+    # opencode default idle is now 10 min (600s), claude-cli keeps 5 min.
+    assert "30 min in all" in html
+    assert "10 min silent" in html
+    assert "5 min silent" in html
+    # the override is marked as coming from the runner, not the type default
+    assert "slow-thinker" in html and "set on runner" in html
+
+
 # ── The board's watch rail ───────────────────────────────────────────────
 
 

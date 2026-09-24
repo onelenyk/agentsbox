@@ -33,11 +33,23 @@
 </div>
 {% endcall %}
 
-<details class="form-more"{{ ' open' if base_url }}>
+<details class="form-more"{{ ' open' if base_url or idle_timeout or timeout }}>
     <summary>Advanced</summary>
     <div class="field">
         <label>Base URL</label>
         <input type="text" name="base_url" value="{{ base_url }}">
         <span class="hint">Blank uses the provider's own endpoint. Only for a proxy or a self-hosted gateway.</span>
+    </div>
+    <div class="field-pair">
+        <div class="field">
+            <label>Idle timeout (seconds)</label>
+            <input type="number" name="idle_timeout" value="{{ idle_timeout }}" min="1" step="1" placeholder="{{ idle_default_min * 60 }}">
+            <span class="hint">Silence before a worker run is abandoned. Blank = {{ idle_default_min }} min for this runner type.</span>
+        </div>
+        <div class="field">
+            <label>Total timeout (seconds)</label>
+            <input type="number" name="timeout" value="{{ timeout }}" min="1" step="1" placeholder="{{ total_default_min * 60 }}">
+            <span class="hint">Whole wall-clock limit for one worker run. Blank = {{ total_default_min }} min for this runner type.</span>
+        </div>
     </div>
 </details>

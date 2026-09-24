@@ -107,6 +107,57 @@ def credential_store(rtype: str) -> Optional[str]:
     return _CREDENTIAL_STORE.get(rtype)
 
 
+# ── worker timeouts ─────────────────────────────────────────────────────
+
+# (idle, total) seconds a WORKER run of each type lives under, before the
+# launcher abandons it. idle is silence-with-no-output; total is wall-clock.
+# A slow model (opencode + deepseek thinking for minutes without streaming)
+# used to be killed by the old flat 300s idle limit (core.worker
+# WORKER_IDLE_TIMEOUT_SECONDS) while its run was still genuinely working —
+# 10 of 127 worker runs died exactly that way. opencode gets twice the idle
+# allowance for exactly that reason; claude-cli streams per step (its
+# --output-format stream-json), so its real silence never gets close to 300s.
+# A runner row's own idle_timeout/timeout columns override these (blank = this).
+# The total is the same 1800s for both — a run's budget, not a per-type knob.
+TIMEOUT_DEFAULTS = {
+    "opencode": (600, 1800),
+    "claude-cli": (300, 1800),
+}
+# Fallback for a type with no recorded defaults — mirrors the module constants
+# in core.worker (WORKER_IDLE_TIMEOUT_SECONDS / WORKER_TIMEOUT_SECONDS). Kept
+# in lockstep there; effective_timeouts is what both the launcher wiring and
+# the Daemon page read.
+FALLBACK_TIMEOUTS = (300, 1800)
+
+
+def _positive_timeout(value) -> Optional[int]:
+    """*value* as a positive int, or None when it is not set. The form already
+    rejects junk; this merely keeps a bad row (hand-edited DB) from asserting."""
+    if value is None or value == "":
+        return None
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
+def effective_timeouts(runner: dict) -> tuple:
+    """(idle, total) seconds a worker run of *runner* actually runs under.
+
+    The runner row's own ``idle_timeout``/``timeout`` columns win when set;
+    otherwise the type's defaults (TIMEOUT_DEFAULTS); otherwise the platform
+    fallback (core.worker's constants). The two are resolved independently, so
+    a row can raise just the idle allowance while keeping the total default.
+    """
+    idle_default, total_default = TIMEOUT_DEFAULTS.get(
+        ((runner or {}).get("type") or "").strip() or DEFAULT_TYPE,
+        FALLBACK_TIMEOUTS)
+    idle = _positive_timeout((runner or {}).get("idle_timeout"))
+    total = _positive_timeout((runner or {}).get("timeout"))
+    return (idle or idle_default, total or total_default)
+
+
 # ── CLI versions this profile was written against ───────────────────────
 
 # Every flag in build_argv below is this project's reading of a CLI it does not

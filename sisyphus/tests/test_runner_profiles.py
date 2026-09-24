@@ -451,3 +451,59 @@ class TestWorkerHome:
         from core import runner_profiles
         assert runner_profiles.worker_home("claude-cli", str(tmp_path)) is None
         assert not (tmp_path / "runner-home").exists()
+
+
+class TestEffectiveTimeouts:
+    """The (idle, total) limits a worker run of a runner actually lives under:
+    the row's own overrides win, else the type default, else the platform
+    fallback (core.worker's constants)."""
+
+    def test_opencode_default_is_a_longer_idle(self):
+        # A slow model (opencode + deepseek) thinks for minutes without
+        # streaming; the old flat 300s idle killed 10 of 127 runs. opencode's
+        # default is twice the claude-cli one.
+        assert rp.effective_timeouts({"type": "opencode", "name": "x"}) == (600, 1800)
+
+    def test_claude_default_keeps_the_old_idle(self):
+        # claude-cli streams per step (--output-format stream-json), so its
+        # real silence never approaches the limit; the old 300s stays.
+        assert rp.effective_timeouts({"type": "claude-cli"}) == (300, 1800)
+
+    def test_both_types_share_the_total_budget(self):
+        assert rp.effective_timeouts({"type": "opencode"})[1] == 1800
+        assert rp.effective_timeouts({"type": "claude-cli"})[1] == 1800
+
+    def test_a_rows_own_values_override_both(self):
+        assert rp.effective_timeouts(
+            {"type": "claude-cli", "idle_timeout": 1200, "timeout": 3600}
+        ) == (1200, 3600)
+
+    def test_an_override_in_one_field_leaves_the_other_default(self):
+        # The two resolve independently: raising only the idle allowance must
+        # not silently change the total budget.
+        assert rp.effective_timeouts(
+            {"type": "opencode", "idle_timeout": 900}
+        ) == (900, 1800)
+        assert rp.effective_timeouts(
+            {"type": "claude-cli", "timeout": 2700}
+        ) == (300, 2700)
+
+    def test_blank_values_are_no_override(self):
+        # Blank form input arrives as NULL / "" — neither may count as "set".
+        assert rp.effective_timeouts(
+            {"type": "opencode", "idle_timeout": "", "timeout": " "}
+        ) == (600, 1800)
+        assert rp.effective_timeouts({"type": "opencode", "idle_timeout": None,
+                                      "timeout": None}) == (600, 1800)
+
+    def test_an_unknown_type_gets_the_platform_fallback(self):
+        # A type with no recorded defaults falls back to core.worker's module
+        # constants — the old behaviour, kept so a hand-edited DB row cannot
+        # change what a run gets.
+        assert rp.effective_timeouts({"type": "ollama"}) == (300, 1800)
+
+    def test_zero_or_negative_values_fall_back_to_the_default(self):
+        # The form rejects them, but a bad row (hand-edited DB) must not yield
+        # a run that is killed instantly.
+        assert rp.effective_timeouts({"type": "opencode", "idle_timeout": 0,
+                                      "timeout": -5}) == (600, 1800)

@@ -1778,6 +1778,11 @@ body.has-overlay { overflow: hidden; }
   font-size: var(--fs-4xl);
 }
 
+/* Per-runner worker limits on the Daemon page: one line each, so a page
+   showing several runners is read down, not across. */
+.wlim { display: block; }
+.wlim + .wlim { margin-top: var(--sp-1); }
+
 /* ─ backups_list.html ──────────────────────────────────────────────────────  */
 
 .runtime__label-act { margin-left: auto; text-transform: none; letter-spacing: normal; }
