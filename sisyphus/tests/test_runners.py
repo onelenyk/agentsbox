@@ -88,6 +88,29 @@ class TestRunnerCRUD:
         assert updated["model"] == "claude-4"
         assert updated["binary"] == "old-binary"
 
+    def test_timeout_columns_are_nullable_and_stored(self, db_path):
+        init_runners_table()
+        r = add_runner("timed", "opencode", "opencode",
+                       idle_timeout=900, timeout=2700)
+        assert r["idle_timeout"] == 900
+        assert r["timeout"] == 2700
+        # Blank (None) on create means "use the type default".
+        plain = add_runner("untimed", "opencode", "opencode")
+        assert plain["idle_timeout"] is None
+        assert plain["timeout"] is None
+
+    def test_update_can_set_and_clear_timeout_overrides(self, db_path):
+        init_runners_table()
+        r = add_runner("timed", "opencode", "opencode")
+        set_row = update_runner(r["id"], idle_timeout=1200, timeout=3600)
+        assert set_row["idle_timeout"] == 1200 and set_row["timeout"] == 3600
+        # None is a REAL value for the nullable columns — it clears the
+        # override back to the type default, unlike the other fields where
+        # None means "leave alone".
+        cleared = update_runner(r["id"], idle_timeout=None, timeout=None)
+        assert cleared["idle_timeout"] is None
+        assert cleared["timeout"] is None
+
     def test_set_default_runner(self, db_path):
         init_runners_table()
         r1 = add_runner("runner-a", "binary-a")

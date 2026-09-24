@@ -35,7 +35,9 @@
     {# Read from config.yaml; each row names what the setting does. #}
     <div class="prop"><span class="k">Workspace</span><span class="v mono">{{ workspace_root }}</span></div>
     <div class="prop"><span class="k">Default runner</span><span class="v">{% if default_runner %}{{ default_runner.name }}{% if default_runner.model %} <span class="muted mono">· {{ default_runner.model }}</span>{% endif %}{% else %}<span class="muted">none configured</span>{% endif %}</span></div>
-    <div class="prop"><span class="k">Worker time limit</span><span class="v">{{ (limits.worker_timeout // 60)|int }} min in all · {{ (limits.worker_idle_timeout // 60)|int }} min silent</span></div>
+    <div class="prop"><span class="k">Worker time limit</span><span class="v">
+        {% for w in worker_limits %}<span class="wlim">{{ w.name }}: {{ w.total_min }} min in all · {{ w.idle_min }} min silent{% if w.override %}<span class="muted"> · set on runner</span>{% endif %}</span>{% endfor %}
+    </span></div>
     <div class="prop"><span class="k">Review rounds</span><span class="v">up to {{ config.max_review_loops or 3 }}</span></div>
     <div class="prop"><span class="k">Log level</span><span class="v">{{ config.log_level or 'info' }}</span></div>
     {% for name, url in (integrations or {}).items() %}<div class="prop"><span class="k">{{ name|capitalize }}</span><span class="v mono">{{ url }}</span></div>{% else %}<div class="prop"><span class="k">Integrations</span><span class="v muted">none configured</span></div>{% endfor %}

@@ -332,6 +332,11 @@ def _build_prompt(role_def: dict, goal: str, instruction: str, thread: str,
 # advertised `default_timeout: 300` from config.yaml, which no code has ever
 # read, while workers in fact get 1800s. Anyone sizing a long job off that page
 # would have been off by 6x.
+#
+# These are now the FALLBACK for a runner whose type has no recorded default —
+# each run resolves its own (idle, total) from the runner row's overrides,
+# else core.runner_profiles.TIMEOUT_DEFAULTS, else these constants (see
+# runner_profiles.effective_timeouts).
 WORKER_TIMEOUT_SECONDS = 1800       # total wall-clock for one worker run
 WORKER_IDLE_TIMEOUT_SECONDS = 300   # silence before the run is abandoned
 
@@ -530,11 +535,16 @@ async def spawn_worker(
     role: str,
     instruction: str,
     repo_name: Optional[str] = None,
-    timeout: Optional[int] = WORKER_TIMEOUT_SECONDS,
-    idle_timeout: Optional[int] = WORKER_IDLE_TIMEOUT_SECONDS,
+    timeout: Optional[int] = None,
+    idle_timeout: Optional[int] = None,
 ) -> None:
     """Launch one worker for *task_id*. Fire-and-forget: the outcome lands on
-    the thread via the agent's own tool calls, not in a return value."""
+    the thread via the agent's own tool calls, not in a return value.
+
+    *timeout*/*idle_timeout* are optional EXPLICIT overrides. When absent (the
+    normal path), the run's limits resolve per runner: the runner row's own
+    idle_timeout/timeout when set, else the type defaults, else this module's
+    WORKER_* constants (core.runner_profiles.effective_timeouts)."""
     role_def = agents.get_agent(role)   # `role` is now an agent name
     if not role_def:
         raise ValueError(f"unknown agent {role!r}")
@@ -590,6 +600,12 @@ async def spawn_worker(
     from .runners import resolve_runner
     runner_row = resolve_runner(runner_name or "")
     rtype = runner_profiles.normalize_type(runner_row)
+    # The run's own limits, resolved for the runner _pick_runner chose: row
+    # overrides win, else the type's defaults, else WORKER_* above. Only an
+    # EXPLICIT timeout/idle_timeout argument beats that.
+    idle_default, total_default = runner_profiles.effective_timeouts(runner_row)
+    idle_timeout = idle_timeout if idle_timeout is not None else idle_default
+    timeout = timeout if timeout is not None else total_default
     # Read what the checkout's own opencode config declares BEFORE the write
     # below replaces the winning slot — then say it on the thread. A repo is
     # added by a human who vouches for it, so its config is overridden rather

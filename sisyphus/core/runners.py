@@ -75,12 +75,20 @@ def init_runners_table():
             health_checked_at TEXT,
             health_error TEXT,
             created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+            updated_at TEXT NOT NULL,
+            idle_timeout INTEGER,
+            timeout INTEGER
         )
     """)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(runners)")}
     if "auth_mode" not in cols:
         conn.execute("ALTER TABLE runners ADD COLUMN auth_mode TEXT DEFAULT ''")
+    # Per-runner worker timeouts (seconds). NULL means "use the type default"
+    # — see core.runner_profiles.effective_timeouts for how they resolve.
+    if "idle_timeout" not in cols:
+        conn.execute("ALTER TABLE runners ADD COLUMN idle_timeout INTEGER")
+    if "timeout" not in cols:
+        conn.execute("ALTER TABLE runners ADD COLUMN timeout INTEGER")
     conn.commit()
 
     existing = conn.execute("SELECT COUNT(*) FROM runners").fetchone()[0]
@@ -120,6 +128,8 @@ def add_runner(
     extra_args: list = None,
     is_default: bool = False,
     auth_mode: str = "",
+    idle_timeout: Optional[int] = None,
+    timeout: Optional[int] = None,
 ) -> dict:
     runner_type = validate_type(runner_type)
     if auth_mode and auth_mode not in AUTH_MODES:
@@ -134,10 +144,11 @@ def add_runner(
     conn = get_conn()
     conn.execute(
         """INSERT INTO runners (id, name, binary, type, model, api_key_env, base_url,
-           is_default, enabled, extra_args, health_status, created_at, updated_at, auth_mode)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'unknown', ?, ?, ?)""",
+           is_default, enabled, extra_args, health_status, created_at, updated_at,
+           auth_mode, idle_timeout, timeout)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'unknown', ?, ?, ?, ?, ?)""",
         (rid, name, binary, runner_type, model, api_key_env, base_url,
-         int(is_default), extra_json, now, now, auth_mode),
+         int(is_default), extra_json, now, now, auth_mode, idle_timeout, timeout),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM runners WHERE id = ?", (rid,)).fetchone()
@@ -212,9 +223,14 @@ def list_runners() -> list:
 def update_runner(runner_id: str, **fields) -> dict:
     allowed = {
         "name", "binary", "type", "model", "api_key_env", "base_url",
-        "enabled", "extra_args", "auth_mode",
+        "enabled", "extra_args", "auth_mode", "idle_timeout", "timeout",
     }
-    updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
+    # The timeout columns are nullable: a None is a real value that clears a
+    # row override back to "use the type default", so it must reach SQL (the
+    # other fields' None means "leave alone").
+    nullable = {"idle_timeout", "timeout"}
+    updates = {k: v for k, v in fields.items()
+               if k in allowed and (v is not None or k in nullable)}
 
     if "type" in updates:
         updates["type"] = validate_type(updates["type"])
