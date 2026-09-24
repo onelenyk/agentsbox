@@ -176,6 +176,140 @@ def open_gaps(path: str = KNOWN_GAPS) -> dict:
     return _parse(path)
 
 
+def readiness(conn, days: int) -> dict:
+    """Production readiness metrics: wasted runs, provider faults, duplicate
+    workers, lost work, merge latency, stale-check blocks, human turns.
+
+    These measure the health of the delivery pipeline — whether runs finish,
+    merges land, and the system stays out of the human's way.
+    """
+    cut = _cutoff(days)
+
+    # Wasted runs: worker_finished without a result
+    wasted_texts = ["ended without reporting a result", "vanished", "failed to start",
+                    "agent_no_result"]
+    all_finished = conn.execute("""
+        SELECT COUNT(*) as cnt FROM messages
+         WHERE created_at >= ? AND kind = 'worker_finished'
+    """, (cut,)).fetchone()["cnt"]
+    wasted_finished = 0
+    if all_finished > 0:
+        wasted_finished = conn.execute(f"""
+            SELECT COUNT(*) as cnt FROM messages
+             WHERE created_at >= ? AND kind = 'worker_finished'
+               AND ({' OR '.join(['text LIKE ?' for _ in wasted_texts])})
+        """, (cut, *[f"%{t}%" for t in wasted_texts])).fetchone()["cnt"]
+    wasted_rate = _rate(wasted_finished, all_finished)
+
+    # Provider faults: worker_finished with "set aside"
+    provider_faults = {}
+    faults = conn.execute("""
+        SELECT text FROM messages
+         WHERE created_at >= ? AND kind = 'worker_finished'
+           AND text LIKE '%set aside%'
+    """, (cut,)).fetchall()
+    for fault_row in faults:
+        text = fault_row["text"]
+        # Try to extract provider name from the text (e.g., "set aside: anthropic")
+        # Common pattern: "set aside" followed by provider name
+        if "anthropic" in text.lower():
+            provider_faults["anthropic"] = provider_faults.get("anthropic", 0) + 1
+        elif "openai" in text.lower():
+            provider_faults["openai"] = provider_faults.get("openai", 0) + 1
+        else:
+            provider_faults["unknown"] = provider_faults.get("unknown", 0) + 1
+
+    # Duplicate workers: tasks with two worker_started with no worker_finished between
+    duplicates = 0
+    task_rows = conn.execute("""
+        SELECT DISTINCT task_id FROM messages
+         WHERE created_at >= ? AND kind IN ('worker_started', 'worker_finished')
+    """, (cut,)).fetchall()
+    for task_row in task_rows:
+        task_id = task_row["task_id"]
+        messages = conn.execute("""
+            SELECT kind FROM messages
+             WHERE task_id = ? AND created_at >= ?
+             ORDER BY seq ASC
+        """, (task_id, cut)).fetchall()
+        prev_started_idx = -1
+        for i, msg in enumerate(messages):
+            if msg["kind"] == "worker_started":
+                if prev_started_idx >= 0:
+                    # Found two worker_started with no worker_finished between
+                    duplicates += 1
+                prev_started_idx = i
+            elif msg["kind"] == "worker_finished":
+                prev_started_idx = -1
+
+    # Lost work: done tasks with commit but no merge_requests
+    lost = conn.execute("""
+        SELECT t.id FROM tasks t
+         WHERE t.created_at >= ? AND t.status = 'done'
+           AND EXISTS (SELECT 1 FROM messages m
+                        WHERE m.task_id = t.id AND m.kind = 'commit')
+           AND NOT EXISTS (SELECT 1 FROM merge_requests mr
+                            WHERE mr.task_id = t.id)
+    """, (cut,)).fetchall()
+    lost_count = len(lost)
+
+    # Merge latency: median hours from MR created_at to merged_at
+    latencies = conn.execute("""
+        SELECT (julianday(merged_at) - julianday(created_at)) * 24 as hours
+         FROM merge_requests
+         WHERE created_at >= ? AND status = 'merged' AND merged_at IS NOT NULL
+    """, (cut,)).fetchall()
+    median_latency = 0.0
+    if latencies:
+        latencies_sorted = sorted([l["hours"] for l in latencies])
+        n = len(latencies_sorted)
+        if n % 2 == 1:
+            median_latency = latencies_sorted[n // 2]
+        else:
+            median_latency = (latencies_sorted[n // 2 - 1] + latencies_sorted[n // 2]) / 2.0
+
+    # Stale-check blocks: notes with "check-stale" or "auto-merge waiting"
+    stale_blocks = conn.execute("""
+        SELECT COUNT(*) as cnt FROM messages
+         WHERE created_at >= ? AND kind = 'note'
+           AND (text LIKE '%check-stale%' OR text LIKE '%auto-merge waiting%')
+    """, (cut,)).fetchone()["cnt"]
+
+    # Human turns per delivered task: answer messages by human per task with MR
+    delivering = conn.execute("""
+        SELECT DISTINCT t.id FROM tasks t
+         WHERE t.created_at >= ?
+           AND EXISTS (SELECT 1 FROM merge_requests mr WHERE mr.task_id = t.id)
+    """, (cut,)).fetchall()
+    total_delivering = len(delivering)
+    human_turns = 0
+    if total_delivering > 0:
+        human_answers = conn.execute("""
+            SELECT t.id, COUNT(*) as cnt
+              FROM messages m
+              JOIN tasks t ON m.task_id = t.id
+             WHERE m.created_at >= ? AND m.author = 'human' AND m.kind = 'answer'
+               AND EXISTS (SELECT 1 FROM merge_requests mr WHERE mr.task_id = t.id)
+             GROUP BY t.id
+        """, (cut,)).fetchall()
+        human_turns = sum(row["cnt"] for row in human_answers)
+
+    human_per_delivered = (human_turns / total_delivering) if total_delivering > 0 else 0.0
+
+    return {
+        "wasted_finished": wasted_finished,
+        "all_finished": all_finished,
+        "wasted_rate": wasted_rate,
+        "provider_faults": provider_faults,
+        "duplicates": duplicates,
+        "lost_work": lost_count,
+        "merged_count": len(latencies),
+        "median_latency_hours": round(median_latency, 1),
+        "stale_blocks": stale_blocks,
+        "human_per_delivered": round(human_per_delivered, 2),
+    }
+
+
 def report(days: int = 30) -> dict:
     if not os.path.exists(DB_PATH):
         # Say which file is missing. The bare sqlite error ("unable to open
@@ -191,6 +325,7 @@ def report(days: int = 30) -> dict:
             "autonomy": autonomy(conn, days),
             "evidence": evidence(conn, days),
             "reliability": reliability(conn, days),
+            "readiness": readiness(conn, days),
             "gaps": open_gaps(),
         }
     finally:
@@ -205,8 +340,8 @@ def _bar(pct: float, width: int = 28) -> str:
 
 
 def render(r: dict) -> str:
-    sb, au, ev, rel, gaps = (r["self_build"], r["autonomy"], r["evidence"],
-                             r["reliability"], r["gaps"])
+    sb, au, ev, rel, rd, gaps = (r["self_build"], r["autonomy"], r["evidence"],
+                                 r["reliability"], r["readiness"], r["gaps"])
     lines = [
         f"Sisyphus builds Sisyphus — last {r['days']} days",
         "",
@@ -228,8 +363,26 @@ def render(r: dict) -> str:
         f"               {rel['failed']} of {rel['terminal']} terminal tasks failed, "
         f"{rel['silent']} of them silently",
         "",
-        f"  known gaps   {gaps['open']} open, {gaps['closed']} closed",
+        "  READINESS",
+        f"    wasted runs       {rd['wasted_rate']:5.1f}%  {_bar(100-rd['wasted_rate'])}",
+        f"                      {rd['wasted_finished']} of {rd['all_finished']} "
+        f"worker runs ended without a result",
     ]
+    if rd['provider_faults']:
+        faults_str = ", ".join(f"{k}: {v}" for k, v in rd['provider_faults'].items())
+        lines.append(f"    provider faults    {faults_str}")
+    else:
+        lines.append(f"    provider faults    none")
+    lines.extend([
+        f"    duplicate workers  {rd['duplicates']} tasks with concurrent starts",
+        f"    lost work          {rd['lost_work']} done tasks with commits but no MR",
+        f"    merge latency      {rd['median_latency_hours']}h median from MR to merged "
+        f"({rd['merged_count']} merges)",
+        f"    stale-check blocks {rd['stale_blocks']} notes waiting on check status",
+        f"    human turns        {rd['human_per_delivered']} per delivered task",
+        "",
+        f"  known gaps   {gaps['open']} open, {gaps['closed']} closed",
+    ])
     lines += [f"               · {t}" for t in gaps["titles"]]
     return "\n".join(lines)
 

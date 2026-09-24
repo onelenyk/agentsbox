@@ -9,7 +9,7 @@ import subprocess
 from core import mergerequests as mrs
 from core import store
 from core.db import get_conn
-from tools.goal_report import (autonomy, evidence, open_gaps, reliability,
+from tools.goal_report import (autonomy, evidence, open_gaps, readiness, reliability,
                                self_build, _rate)
 
 
@@ -141,3 +141,284 @@ def test_open_gaps_survives_a_missing_ledger(tmp_path):
 
 def test_a_rate_of_nothing_is_zero():
     assert _rate(0, 0) == 0.0 and _rate(1, 3) == 33.3
+
+
+def test_readiness_wasted_runs_counts_workers_without_results(db_path):
+    # Good run that produced a result
+    good = store.create_task("worked", repo="sisyphus")
+    store.post_message(good["id"], "orchestrator", kind="worker_finished",
+                      text="worker returned a diff")
+
+    # Bad runs that wasted a worker slot
+    wasted1 = store.create_task("nothing came back", repo="sisyphus")
+    store.post_message(wasted1["id"], "orchestrator", kind="worker_finished",
+                      text="agent_no_result")
+
+    wasted2 = store.create_task("vanished", repo="sisyphus")
+    store.post_message(wasted2["id"], "orchestrator", kind="worker_finished",
+                      text="worker vanished mid-run")
+
+    wasted3 = store.create_task("never started", repo="sisyphus")
+    store.post_message(wasted3["id"], "orchestrator", kind="worker_finished",
+                      text="failed to start: too many workers")
+
+    r = readiness(get_conn(), days=30)
+    assert r["all_finished"] == 4
+    assert r["wasted_finished"] == 3
+    assert r["wasted_rate"] == 75.0
+
+
+def test_readiness_wasted_runs_zero_when_no_finished(db_path):
+    store.create_task("still running", repo="sisyphus")
+    r = readiness(get_conn(), days=30)
+    assert r["all_finished"] == 0
+    assert r["wasted_finished"] == 0
+    assert r["wasted_rate"] == 0.0
+
+
+def test_readiness_provider_faults_counts_cooldowns(db_path):
+    t1 = store.create_task("anthropic cooldown", repo="sisyphus")
+    store.post_message(t1["id"], "orchestrator", kind="worker_finished",
+                      text="set aside: anthropic rate limit")
+
+    t2 = store.create_task("anthropic again", repo="sisyphus")
+    store.post_message(t2["id"], "orchestrator", kind="worker_finished",
+                      text="set aside by anthropic")
+
+    t3 = store.create_task("openai issue", repo="sisyphus")
+    store.post_message(t3["id"], "orchestrator", kind="worker_finished",
+                      text="set aside: openai quota exceeded")
+
+    r = readiness(get_conn(), days=30)
+    assert r["provider_faults"]["anthropic"] == 2
+    assert r["provider_faults"]["openai"] == 1
+
+
+def test_readiness_provider_faults_empty_when_no_cooldowns(db_path):
+    store.create_task("fine run", repo="sisyphus")
+    store.post_message(store.create_task("ok", repo="sisyphus")["id"], "orchestrator",
+                      kind="worker_finished", text="completed normally")
+    r = readiness(get_conn(), days=30)
+    assert r["provider_faults"] == {}
+
+
+def test_readiness_duplicate_workers_finds_concurrent_starts(db_path):
+    task = store.create_task("concurrent worker issue", repo="sisyphus")
+
+    # First worker starts
+    store.post_message(task["id"], "orchestrator", kind="worker_started",
+                      text="worker A starting")
+    # Second worker starts before first finishes (duplicate)
+    store.post_message(task["id"], "orchestrator", kind="worker_started",
+                      text="worker B starting")
+    # First finishes
+    store.post_message(task["id"], "orchestrator", kind="worker_finished",
+                      text="worker A done")
+
+    r = readiness(get_conn(), days=30)
+    assert r["duplicates"] == 1
+
+
+def test_readiness_duplicate_workers_zero_when_sequential(db_path):
+    task = store.create_task("sequential runs", repo="sisyphus")
+
+    store.post_message(task["id"], "orchestrator", kind="worker_started",
+                      text="worker 1 starting")
+    store.post_message(task["id"], "orchestrator", kind="worker_finished",
+                      text="worker 1 done")
+    store.post_message(task["id"], "orchestrator", kind="worker_started",
+                      text="worker 2 starting")
+    store.post_message(task["id"], "orchestrator", kind="worker_finished",
+                      text="worker 2 done")
+
+    r = readiness(get_conn(), days=30)
+    assert r["duplicates"] == 0
+
+
+def test_readiness_duplicate_workers_empty_when_no_workers(db_path):
+    store.create_task("no workers", repo="sisyphus")
+    r = readiness(get_conn(), days=30)
+    assert r["duplicates"] == 0
+
+
+def test_readiness_lost_work_finds_commits_without_mr(db_path):
+    mrs.init_mr_table()
+
+    # Task with commit and MR (not lost)
+    has_mr = store.create_task("with mr", repo="sisyphus")
+    store.set_status(has_mr["id"], "done")
+    store.post_message(has_mr["id"], "orchestrator", kind="commit",
+                      text="commit abc123")
+    mr = mrs.create_mr(has_mr["id"], "sisyphus", "sisyphus/task-x", "main")
+    get_conn().execute("UPDATE merge_requests SET status='merged' WHERE id=?",
+                      (mr["id"],)).connection.commit()
+
+    # Task with commit but no MR (lost work)
+    no_mr = store.create_task("lost work", repo="sisyphus")
+    store.set_status(no_mr["id"], "done")
+    store.post_message(no_mr["id"], "orchestrator", kind="commit",
+                      text="commit def456")
+
+    # Active task with commit (not terminal yet, not lost)
+    active = store.create_task("still running", repo="sisyphus")
+    store.post_message(active["id"], "orchestrator", kind="commit",
+                      text="commit ghi789")
+
+    r = readiness(get_conn(), days=30)
+    assert r["lost_work"] == 1
+
+
+def test_readiness_lost_work_zero_when_all_have_mrs(db_path):
+    mrs.init_mr_table()
+    t = store.create_task("all good", repo="sisyphus")
+    store.set_status(t["id"], "done")
+    store.post_message(t["id"], "orchestrator", kind="commit", text="commit xyz")
+    mr = mrs.create_mr(t["id"], "sisyphus", "sisyphus/task-x", "main")
+    get_conn().execute("UPDATE merge_requests SET status='merged' WHERE id=?",
+                      (mr["id"],)).connection.commit()
+    r = readiness(get_conn(), days=30)
+    assert r["lost_work"] == 0
+
+
+def test_readiness_merge_latency_calculates_median_hours(db_path):
+    mrs.init_mr_table()
+    t = store.create_task("latency test", repo="sisyphus")
+
+    # MR 1: 1 hour latency
+    mr1 = mrs.create_mr(t["id"], "sisyphus", "sisyphus/task-1", "main")
+    get_conn().execute(
+        "UPDATE merge_requests SET created_at=?, merged_at=? WHERE id=?",
+        ("2026-09-24T10:00:00+00:00", "2026-09-24T11:00:00+00:00", mr1["id"])
+    ).connection.commit()
+    get_conn().execute("UPDATE merge_requests SET status='merged' WHERE id=?",
+                      (mr1["id"],)).connection.commit()
+
+    # MR 2: 3 hours latency
+    mr2 = mrs.create_mr(t["id"], "sisyphus", "sisyphus/task-2", "main")
+    get_conn().execute(
+        "UPDATE merge_requests SET created_at=?, merged_at=? WHERE id=?",
+        ("2026-09-24T10:00:00+00:00", "2026-09-24T13:00:00+00:00", mr2["id"])
+    ).connection.commit()
+    get_conn().execute("UPDATE merge_requests SET status='merged' WHERE id=?",
+                      (mr2["id"],)).connection.commit()
+
+    # MR 3: 5 hours latency
+    mr3 = mrs.create_mr(t["id"], "sisyphus", "sisyphus/task-3", "main")
+    get_conn().execute(
+        "UPDATE merge_requests SET created_at=?, merged_at=? WHERE id=?",
+        ("2026-09-24T10:00:00+00:00", "2026-09-24T15:00:00+00:00", mr3["id"])
+    ).connection.commit()
+    get_conn().execute("UPDATE merge_requests SET status='merged' WHERE id=?",
+                      (mr3["id"],)).connection.commit()
+
+    r = readiness(get_conn(), days=30)
+    assert r["median_latency_hours"] == 3.0  # median of [1, 3, 5]
+    assert r["merged_count"] == 3
+
+
+def test_readiness_merge_latency_zero_when_no_merges(db_path):
+    mrs.init_mr_table()
+    r = readiness(get_conn(), days=30)
+    assert r["median_latency_hours"] == 0.0
+    assert r["merged_count"] == 0
+
+
+def test_readiness_merge_latency_handles_two_merges(db_path):
+    mrs.init_mr_table()
+    t = store.create_task("two merges", repo="sisyphus")
+
+    # MR 1: 2 hours
+    mr1 = mrs.create_mr(t["id"], "sisyphus", "sisyphus/task-1", "main")
+    get_conn().execute(
+        "UPDATE merge_requests SET created_at=?, merged_at=? WHERE id=?",
+        ("2026-09-24T10:00:00+00:00", "2026-09-24T12:00:00+00:00", mr1["id"])
+    ).connection.commit()
+    get_conn().execute("UPDATE merge_requests SET status='merged' WHERE id=?",
+                      (mr1["id"],)).connection.commit()
+
+    # MR 2: 4 hours
+    mr2 = mrs.create_mr(t["id"], "sisyphus", "sisyphus/task-2", "main")
+    get_conn().execute(
+        "UPDATE merge_requests SET created_at=?, merged_at=? WHERE id=?",
+        ("2026-09-24T10:00:00+00:00", "2026-09-24T14:00:00+00:00", mr2["id"])
+    ).connection.commit()
+    get_conn().execute("UPDATE merge_requests SET status='merged' WHERE id=?",
+                      (mr2["id"],)).connection.commit()
+
+    r = readiness(get_conn(), days=30)
+    assert r["median_latency_hours"] == 3.0  # (2 + 4) / 2
+
+
+def test_readiness_stale_check_blocks_counts_notes(db_path):
+    t1 = store.create_task("stale check", repo="sisyphus")
+    store.post_message(t1["id"], "orchestrator", kind="note",
+                      text="[status] check-stale: waiting for new check run")
+
+    t2 = store.create_task("auto-merge wait", repo="sisyphus")
+    store.post_message(t2["id"], "orchestrator", kind="note",
+                      text="auto-merge waiting for check to pass")
+
+    t3 = store.create_task("auto-merge wait again", repo="sisyphus")
+    store.post_message(t3["id"], "orchestrator", kind="note",
+                      text="auto-merge waiting for approval")
+
+    t4 = store.create_task("other note", repo="sisyphus")
+    store.post_message(t4["id"], "orchestrator", kind="note",
+                      text="[status] merge check passed")
+
+    r = readiness(get_conn(), days=30)
+    assert r["stale_blocks"] == 3
+
+
+def test_readiness_stale_check_blocks_zero_when_none(db_path):
+    t = store.create_task("no blocks", repo="sisyphus")
+    store.post_message(t["id"], "orchestrator", kind="note",
+                      text="[status] all clear")
+    r = readiness(get_conn(), days=30)
+    assert r["stale_blocks"] == 0
+
+
+def test_readiness_human_turns_per_delivered_task(db_path):
+    mrs.init_mr_table()
+
+    # Task 1: delivered, no human answers
+    t1 = store.create_task("auto delivery", repo="sisyphus")
+    mr1 = mrs.create_mr(t1["id"], "sisyphus", "sisyphus/task-1", "main")
+
+    # Task 2: delivered, 1 human answer
+    t2 = store.create_task("one question", repo="sisyphus")
+    store.post_message(t2["id"], "orchestrator", kind="question", text="ok?")
+    store.post_message(t2["id"], "human", kind="answer", text="yes")
+    mr2 = mrs.create_mr(t2["id"], "sisyphus", "sisyphus/task-2", "main")
+
+    # Task 3: delivered, 2 human answers
+    t3 = store.create_task("two questions", repo="sisyphus")
+    store.post_message(t3["id"], "orchestrator", kind="question", text="which one?")
+    store.post_message(t3["id"], "human", kind="answer", text="left")
+    store.post_message(t3["id"], "orchestrator", kind="question", text="really?")
+    store.post_message(t3["id"], "human", kind="answer", text="yes")
+    mr3 = mrs.create_mr(t3["id"], "sisyphus", "sisyphus/task-3", "main")
+
+    # Task 4: not delivered (no MR)
+    t4 = store.create_task("not delivered", repo="sisyphus")
+    store.post_message(t4["id"], "human", kind="answer", text="ignored")
+
+    r = readiness(get_conn(), days=30)
+    # (0 + 1 + 2) / 3 = 1.0 turn per delivered task
+    assert r["human_per_delivered"] == 1.0
+
+
+def test_readiness_human_turns_zero_when_no_delivered(db_path):
+    t = store.create_task("not delivered", repo="sisyphus")
+    r = readiness(get_conn(), days=30)
+    assert r["human_per_delivered"] == 0.0
+
+
+def test_readiness_human_turns_zero_when_all_clean_deliveries(db_path):
+    mrs.init_mr_table()
+    t1 = store.create_task("clean 1", repo="sisyphus")
+    t2 = store.create_task("clean 2", repo="sisyphus")
+    mrs.create_mr(t1["id"], "sisyphus", "sisyphus/task-1", "main")
+    mrs.create_mr(t2["id"], "sisyphus", "sisyphus/task-2", "main")
+    r = readiness(get_conn(), days=30)
+    assert r["human_per_delivered"] == 0.0
