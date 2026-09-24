@@ -350,6 +350,15 @@ async def launch_agent(
     else:
         logger.warning("worker runs unconfined: %s", unconfined)
 
+    # Network egress (sandbox.egress): the worker reaches the outside only
+    # through the daemon's allowlisting proxy — core.egress.
+    from . import egress
+    try:
+        env.update(await egress.worker_env())
+    except Exception as e:  # noqa: BLE001
+        logger.error("failed to start egress proxy: %s", e)
+        return AgentResult(status="error", error=f"failed to start egress proxy — {e}")
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *args,

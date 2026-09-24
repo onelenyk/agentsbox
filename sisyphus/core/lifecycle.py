@@ -98,6 +98,13 @@ async def shutdown(reason: Optional[str] = None, grace: float = WORKER_GRACE_SEC
         for pid, how in outcomes.items():
             orphans.release(pid, still_running=how in ("survived", "denied"))
 
+    # 5. Stop the egress proxy if it's running.
+    try:
+        from core import egress
+        await egress.stop()
+    except Exception as e:
+        logger.debug("error stopping egress proxy: %s", e)
+
     logger.info("shutdown (%s): parked %d task(s), terminated %d process(es)",
                 reason, len(parked), len(outcomes))
     return {"reason": reason, "parked": parked, "terminated": outcomes}

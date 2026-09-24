@@ -39,6 +39,14 @@ sandbox:
                                  # of secrets from other projects via prompt injection.
                                  # Verified with the claude runner; opencode does
                                  # not run under it yet (docs/known-gaps.md).
+  # egress: false                # opt-in network egress filtering: when true,
+                                 # workers can only reach hosts on the allowlist
+                                 # via an HTTP CONNECT proxy (port 443 only).
+  # egress_allowlist: []         # custom allowlist (list of hosts). Unset =
+                                 # default allowlist: api.anthropic.com, claude.ai,
+                                 # *.claude.ai, statsig.anthropic.com, sentry.io,
+                                 # opencode.ai, *.opencode.ai, openrouter.ai,
+                                 # api.deepseek.com, models.dev, registry.npmjs.org
 
 default_model: deepseek          # model for the seeded default runner
 max_concurrent_workers: 2        # global worker cap

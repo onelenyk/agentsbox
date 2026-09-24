@@ -243,7 +243,8 @@ def build_seatbelt_profile(worktree: str, output_dir: str,
                            workspace_root: Optional[str] = None,
                            home: Optional[str] = None,
                            protected: Optional[List[str]] = None,
-                           db_path: Optional[str] = None) -> str:
+                           db_path: Optional[str] = None,
+                           egress_enabled: bool = False) -> str:
     """Allow-by-default, then deny writes to the protected paths (repo sources +
     credential dirs), then re-allow the workspace areas a worker needs — so a
     path under a protected repo but inside the workspace stays writable (last
@@ -252,7 +253,10 @@ def build_seatbelt_profile(worktree: str, output_dir: str,
     When sandbox.read_isolation is enabled, also deny reads to the home directory
     and re-allow only the specific paths a worker legitimately needs (credentials,
     caches, toolchain state). The worktree and workspace are re-allowed for both
-    reads and writes so they remain accessible."""
+    reads and writes so they remain accessible.
+
+    When egress_enabled, also deny all network-outbound except to localhost,
+    forcing the worker through the egress proxy."""
     workspace_root = workspace_root or os.environ.get("WORKSPACE_ROOT", "")
     home = home if home is not None else os.environ.get("HOME", "")
     protected = protected if protected is not None else _protected_paths(home)
@@ -271,6 +275,18 @@ def build_seatbelt_profile(worktree: str, output_dir: str,
     # 1. deny writes to protected paths (repo sources + credential dirs)
     # 2. re-allow writes to workspace areas (which may be inside protected repos)
     # 3. (later) re-deny writes to the daemon's own database
+    # Network egress control: deny outbound except to localhost.
+    # This forces the worker through the HTTP CONNECT proxy for any external
+    # connections, which will check against the allowlist.
+    if egress_enabled:
+        # SBPL wants host:port filters; a bare address is a profile error
+        # ("port missing in network address"), which sandbox-exec reports and
+        # then refuses to run anything. localhost:* covers the proxy and the
+        # daemon's MCP endpoint; unix sockets stay open for the system daemons
+        # (DNS, keychain) every process talks to.
+        lines.append("(deny network-outbound)")
+        lines.append("(allow network-outbound (remote ip \"localhost:*\") (remote unix-socket))")
+
     if deny:
         lines.append(f"(deny file-write* {deny})")
     if allow:
@@ -318,7 +334,9 @@ def build_seatbelt_profile(worktree: str, output_dir: str,
 
 
 def _seatbelt_wrap(args: List[str], worktree: str, output_dir: str) -> List[str]:
-    profile = build_seatbelt_profile(worktree, output_dir)
+    from core.config import get_config
+    egress_enabled = get_config("sandbox.egress", False)
+    profile = build_seatbelt_profile(worktree, output_dir, egress_enabled=egress_enabled)
     profile_path = Path(output_dir) / "sandbox.sb"
     profile_path.parent.mkdir(parents=True, exist_ok=True)
     profile_path.write_text(profile)
