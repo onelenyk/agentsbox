@@ -129,6 +129,14 @@ async def smoke_test(runner: dict, timeout: int = DEFAULT_TIMEOUT) -> dict:
             env.pop(var, None)
         env.update(runner_profiles.build_env(rtype, runner))
 
+        # The same network too — the proxy, when egress is on (core.egress).
+        from . import egress
+        try:
+            env.update(await egress.worker_env())
+        except Exception as e:  # noqa: BLE001
+            return _result(False, "spawn", f"egress proxy failed: {e}",
+                           duration_ms=_ms(started), tool_called=False)
+
         if sandbox.enabled():
             argv = sandbox.wrap(argv, workdir, workdir)
 
