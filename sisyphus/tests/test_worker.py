@@ -330,6 +330,51 @@ class TestModelOverride:
         assert kwargs.get("model_override") == "gpt-5-decider-override"
 
 
+class TestWorkerTimeouts:
+    """The run's (idle, total) limits resolve per runner — the row's own
+    overrides, else the type default — and reach launch_agent for worker runs."""
+
+    @pytest.mark.asyncio
+    async def test_spawn_worker_passes_the_type_default(self, db_path):
+        # The seeded default runner is opencode: 600s idle, 1800s total — the
+        # longer idle that keeps a slow model from being killed for thinking.
+        from core.runners import get_default_runner
+        assert (get_default_runner()["type"] or "") == "opencode"
+        task = store.create_task("timeouts")
+        mock_launch = AsyncMock(return_value=AgentResult(status="completed", summary="ok"))
+        with patch("core.worker.launch_agent", mock_launch):
+            await spawn_worker(task["id"], "explorer", "x")
+        kwargs = mock_launch.call_args.kwargs
+        assert kwargs["timeout"] == 1800
+        assert kwargs["idle_timeout"] == 600
+
+    @pytest.mark.asyncio
+    async def test_spawn_worker_passes_the_runners_own_overrides(self, db_path):
+        from core.runners import get_default_runner, update_runner
+        default = get_default_runner()
+        update_runner(default["id"], idle_timeout=999, timeout=3456)
+        task = store.create_task("timeouts")
+        mock_launch = AsyncMock(return_value=AgentResult(status="completed", summary="ok"))
+        with patch("core.worker.launch_agent", mock_launch):
+            await spawn_worker(task["id"], "explorer", "x")
+        kwargs = mock_launch.call_args.kwargs
+        assert kwargs["timeout"] == 3456
+        assert kwargs["idle_timeout"] == 999
+
+    @pytest.mark.asyncio
+    async def test_an_explicit_argument_beats_the_runner_resolution(self, db_path):
+        from core.runners import get_default_runner, update_runner
+        update_runner(get_default_runner()["id"], idle_timeout=999, timeout=3456)
+        task = store.create_task("timeouts")
+        mock_launch = AsyncMock(return_value=AgentResult(status="completed", summary="ok"))
+        with patch("core.worker.launch_agent", mock_launch):
+            await spawn_worker(task["id"], "explorer", "x",
+                               timeout=111, idle_timeout=22)
+        kwargs = mock_launch.call_args.kwargs
+        assert kwargs["timeout"] == 111
+        assert kwargs["idle_timeout"] == 22
+
+
 class TestCleanupSalvage:
 
     def _make_worktree(self, base: Path, task_id: str, role: str, dirty: bool) -> Path:
