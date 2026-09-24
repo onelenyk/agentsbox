@@ -26,6 +26,16 @@
             hx-target="#modal-container" hx-swap="innerHTML">Live log</button>
     {% endif %}
 {% endcall %}
+
+{% if asked_by.jira %}
+<div class="facts">
+    {% if jira_base_url %}<a href="{{ jira_base_url }}/browse/{{ asked_by.who }}" target="_blank" title="From Jira issue {{ asked_by.who }}">From Jira · {{ asked_by.who }}</a>
+    {%- else %}From Jira · {{ asked_by.who }}{% endif %}
+    {%- if asked_by.issue_type %} · {{ asked_by.issue_type }}{% endif -%}
+    {%- if asked_by.priority %} · {{ asked_by.priority }}{% endif -%}
+</div>
+{% endif %}
+
 <div class="task-detail">
   {% macro diffstat_table(text) -%}
   {# Diffstat-shaped text ("path | 5 +++++") becomes a compact monospace
