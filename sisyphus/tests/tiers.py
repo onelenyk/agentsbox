@@ -32,7 +32,7 @@ TIERS = {
     ],
     "component": [
         "test_agent_mcp", "test_agents_api", "test_api", "test_auth",
-        "test_auto_merge",
+        "test_auto_merge", "test_forge_merge_safety",
         "test_git_ops", "test_goal_report", "test_mcp_server",
         "test_mr_actions", "test_mr_resolve",
         "test_page_smoke", "test_providers", "test_repo_check",
