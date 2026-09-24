@@ -1326,6 +1326,31 @@ def test_runner_form_body_redisplays_saved_timeouts(db_path):
     assert "Blank = 10 min for this runner type" in body
 
 
+def test_runner_edit_rejects_a_non_integer_timeout(db_path):
+    from core.runners import add_runner
+    init_runners_table()
+    row = add_runner("timed", "opencode", "opencode")
+    r = _make_client().post(f"/api/runners/{row['id']}/edit", data={
+        "name": "timed", "binary": "opencode", "type": "opencode",
+        "model": "", "idle_timeout": "ten",
+    })
+    assert r.status_code == 400
+    assert "whole number of seconds" in r.headers.get("HX-Trigger", "")
+
+
+def test_runner_edit_rejects_a_non_positive_timeout(db_path):
+    from core.runners import add_runner
+    init_runners_table()
+    row = add_runner("timed", "opencode", "opencode")
+    for bad in ("0", "-5"):
+        r = _make_client().post(f"/api/runners/{row['id']}/edit", data={
+            "name": "timed", "binary": "opencode", "type": "opencode",
+            "model": "", "timeout": bad,
+        })
+        assert r.status_code == 400
+        assert "positive number of seconds" in r.headers.get("HX-Trigger", "")
+
+
 def test_runner_edit_blank_timeouts_clear_the_override(db_path):
     from core.runners import add_runner, get_runner
     init_runners_table()
