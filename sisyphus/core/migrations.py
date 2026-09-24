@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 # 3 = the v1 pipeline's and the copilot's tables, unread since v2 (2026-09-23).
 # 4 = subscription limits, model classes, usage.provider, agents.model_class
 #     (2026-09-23).
-CURRENT_VERSION = 4
+# 5 = integration_events, the journal of calls to Jira and the forges (2026-09-25).
+CURRENT_VERSION = 5
 
 # Tables of features that are gone. Dropped on upgrade so a database does not
 # keep carrying — and a reader keep wondering about — data nothing reads.
@@ -56,6 +57,7 @@ def migrate_all() -> int:
     from core.autopilot import init_autopilot_table
     from core.limits import init_limits_table
     from core.model_classes import init_classes_table
+    from core.integrations import init_integrations_table
 
     before = db_version()
     init_db()
@@ -66,6 +68,7 @@ def migrate_all() -> int:
     init_autopilot_table()
     init_limits_table()
     init_classes_table()
+    init_integrations_table()
     conn = get_conn()
     try:
         for table in RETIRED_TABLES:
