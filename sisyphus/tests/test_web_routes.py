@@ -63,6 +63,48 @@ def test_repos_health(db_path):
     assert data["pending"] == 2
 
 
+def test_repo_edit_form_toggles_auto_merge_and_keeps_check(db_path, monkeypatch):
+    """Saving the checkbox must keep the whole repo entry — notably `check` —
+    which _save_repo_config would drop by rebuilding the entry from scratch."""
+    from core import repos
+    entry = {"name": "acme", "source": "/tmp/acme", "branch": "main",
+             "check": "pytest -q", "setup": {"copy": ["local.properties"]}}
+    captured = {}
+    monkeypatch.setattr(repos, "load_repos", lambda: [dict(entry)])
+    monkeypatch.setattr(repos, "_read_config_file", lambda: {"repos": [dict(entry)]})
+    monkeypatch.setattr(repos, "_write_config_file",
+                        lambda config: captured.setdefault("config", config))
+
+    client = _make_client()
+    response = client.post("/api/repos/acme/edit", data={"auto_merge": "1"})
+    assert response.status_code == 200
+
+    got = captured["config"]["repos"][0]
+    assert got["auto_merge"] is True
+    assert got["check"] == "pytest -q"
+    assert got["setup"] == {"copy": ["local.properties"]}
+
+
+def test_repo_edit_form_unchecking_auto_merge_sets_it_false(db_path, monkeypatch):
+    """An unchecked box submits nothing, so the route must read absence as off."""
+    from core import repos
+    entry = {"name": "acme", "source": "/tmp/acme", "branch": "main",
+             "check": "pytest -q", "auto_merge": True}
+    captured = {}
+    monkeypatch.setattr(repos, "load_repos", lambda: [dict(entry)])
+    monkeypatch.setattr(repos, "_read_config_file", lambda: {"repos": [dict(entry)]})
+    monkeypatch.setattr(repos, "_write_config_file",
+                        lambda config: captured.setdefault("config", config))
+
+    client = _make_client()
+    response = client.post("/api/repos/acme/edit", data={})
+    assert response.status_code == 200
+
+    got = captured["config"]["repos"][0]
+    assert got["auto_merge"] is False
+    assert got["check"] == "pytest -q"
+
+
 # ── Tests: GET /api/runners/list ─────────────────────────────────────────
 
 
