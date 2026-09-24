@@ -67,3 +67,64 @@ def test_dashboard_data_shape(db_path):
     d = dashboard()
     assert "ov" in d and "active" in d and "waiting" in d and "recent" in d
     assert any(x["id"] for x in d["active"])   # the active seed task
+
+
+# ── Readiness on Home ──────────────────────────────────────────────────────
+
+
+def _assess_map(results):
+    def _assess(name):
+        if name in results:
+            return results[name]
+        raise RuntimeError(f"unexpected repo {name}")
+    return _assess
+
+
+def test_dashboard_shows_blocker_and_warning_counts_per_repo(db_path):
+    """A repo that is not ready renders its failed items' counts, one line."""
+    from unittest.mock import patch
+    assess = _assess_map({
+        "alpha": {"repo": "alpha", "ready": True, "items": [
+            {"key": "check", "ok": True, "severity": "block", "text": "ok", "fix": ""}]},
+        "beta": {"repo": "beta", "ready": False, "items": [
+            {"key": "check", "ok": False, "severity": "block", "text": "no check", "fix": "add one"},
+            {"key": "delivery", "ok": False, "severity": "warn", "text": "local only", "fix": ""}]},
+    })
+    repos = [{"name": n, "source": f"/tmp/{n}", "branch": "main"} for n in ("alpha", "beta")]
+    with patch("core.repos.load_repos", return_value=repos), \
+         patch("core.readiness.assess", side_effect=assess):
+        html = TestClient(app).get("/api/dashboard/view").text
+    assert "1 blockers · 1 warnings" in html
+    assert 'href="/repos/beta"' in html
+    assert 'href="/repos/alpha"' in html
+    assert "ready for a pilot" in html
+
+
+def test_dashboard_shows_ready_for_a_ready_repo(db_path):
+    """A fully-ok repo reads 'ready for a pilot' and hides no counts."""
+    from unittest.mock import patch
+    assess = _assess_map({"alpha": {"repo": "alpha", "ready": True, "items": [
+        {"key": "check", "ok": True, "severity": "block", "text": "ok", "fix": ""}]}})
+    with patch("core.repos.load_repos", return_value=[{"name": "alpha", "source": "/tmp/a", "branch": "main"}]), \
+         patch("core.readiness.assess", side_effect=assess):
+        html = TestClient(app).get("/api/dashboard/view").text
+    assert "ready for a pilot" in html
+    assert "blockers" not in html
+
+
+def test_dashboard_survives_an_assess_that_raises(db_path):
+    """One failing assess marks that repo 'could not assess' and keeps the rest."""
+    from unittest.mock import patch
+    def _assess(name):
+        if name == "beta":
+            raise RuntimeError("boom")
+        return {"repo": name, "ready": True, "items": [
+            {"key": "check", "ok": True, "severity": "block", "text": "ok", "fix": ""}]}
+    repos = [{"name": n, "source": f"/tmp/{n}", "branch": "main"} for n in ("alpha", "beta")]
+    with patch("core.repos.load_repos", return_value=repos), \
+         patch("core.readiness.assess", side_effect=_assess):
+        resp = TestClient(app).get("/api/dashboard/view")
+    assert resp.status_code == 200
+    assert "could not assess" in resp.text
+    assert "ready for a pilot" in resp.text      # the healthy repo still renders
+    assert "Lately" in resp.text

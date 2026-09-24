@@ -205,9 +205,27 @@ async def dashboard_page(request: Request):
 @router.get("/api/dashboard/view", response_class=HTMLResponse)
 async def dashboard_view(request: Request):
     from core.stats import dashboard
+    from core import readiness
+
+    rows = []
+    for name in _repo_names():
+        try:
+            result = readiness.assess(name)
+            failed = [i for i in result.get("items", []) if not i.get("ok")]
+            rows.append({
+                "name": name, "href": f"/repos/{name}",
+                "ready": bool(result.get("ready")),
+                "blockers": sum(1 for i in failed if i.get("severity") == "block"),
+                "warnings": sum(1 for i in failed if i.get("severity") == "warn"),
+            })
+        except Exception:
+            # One repo must not take down the whole dashboard.
+            logger.warning("production readiness assessment failed for %r", name, exc_info=True)
+            rows.append({"name": name, "href": f"/repos/{name}", "error": True})
     return _tmpl().TemplateResponse(request, "dashboard_view.html", {
         "d": dashboard(),
         "live_sessions": _enrich_sessions(sessions.list_active()),
+        "readiness": rows,
     })
 
 @router.get("/api/inbox/view", response_class=HTMLResponse)
