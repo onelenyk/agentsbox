@@ -350,6 +350,26 @@ async def launch_agent(
     else:
         logger.warning("worker runs unconfined: %s", unconfined)
 
+    # Network egress control: start the proxy if enabled and set env vars.
+    from .config import get_config
+    if get_config("sandbox.egress", False):
+        from . import egress
+        try:
+            proxy_port = await egress.start()
+            proxy_url = f"http://127.0.0.1:{proxy_port}"
+            env["HTTP_PROXY"] = proxy_url
+            env["HTTPS_PROXY"] = proxy_url
+            env["http_proxy"] = proxy_url
+            env["https_proxy"] = proxy_url
+            # NO_PROXY allows direct access to localhost and 127.0.0.1 (daemon's MCP endpoint)
+            env["NO_PROXY"] = "127.0.0.1,localhost"
+            env["no_proxy"] = "127.0.0.1,localhost"
+            logger.info("worker will use egress proxy at %s", proxy_url)
+        except Exception as e:
+            logger.error("failed to start egress proxy: %s", e)
+            return AgentResult(status="error",
+                               error=f"failed to start egress proxy — {e}")
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *args,

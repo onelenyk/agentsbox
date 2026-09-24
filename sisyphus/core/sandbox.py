@@ -189,11 +189,15 @@ def build_seatbelt_profile(worktree: str, output_dir: str,
                            workspace_root: Optional[str] = None,
                            home: Optional[str] = None,
                            protected: Optional[List[str]] = None,
-                           db_path: Optional[str] = None) -> str:
+                           db_path: Optional[str] = None,
+                           egress_enabled: bool = False) -> str:
     """Allow-by-default, then deny writes to the protected paths (repo sources +
     credential dirs), then re-allow the workspace areas a worker needs — so a
     path under a protected repo but inside the workspace stays writable (last
-    matching rule wins in SBPL), while the repo's real files do not."""
+    matching rule wins in SBPL), while the repo's real files do not.
+
+    When egress_enabled, also deny all network-outbound except to localhost,
+    forcing the worker through the egress proxy."""
     workspace_root = workspace_root or os.environ.get("WORKSPACE_ROOT", "")
     home = home if home is not None else os.environ.get("HOME", "")
     protected = protected if protected is not None else _protected_paths(home)
@@ -204,6 +208,20 @@ def build_seatbelt_profile(worktree: str, output_dir: str,
     allow = "\n".join(f"(subpath {_q(p)})" for p in allow_subpaths)
 
     lines = ["(version 1)", "(allow default)"]
+
+    # Network egress control: deny outbound except to localhost.
+    # This forces the worker through the HTTP CONNECT proxy for any external
+    # connections, which will check against the allowlist.
+    if egress_enabled:
+        lines.append("(deny network-outbound)")
+        lines.append("(allow network-outbound\n"
+                     "  (local ip)\n"
+                     "  (remote ip \"127.0.0.1\")\n"
+                     "  (remote ip \"::1\")\n"
+                     ")")
+        # Allow unix sockets needed for the daemon's MCP endpoint
+        lines.append("(allow network-outbound (local unix-socket))")
+
     if deny:
         lines.append(f"(deny file-write* {deny})")
     if allow:
@@ -223,7 +241,9 @@ def build_seatbelt_profile(worktree: str, output_dir: str,
 
 
 def _seatbelt_wrap(args: List[str], worktree: str, output_dir: str) -> List[str]:
-    profile = build_seatbelt_profile(worktree, output_dir)
+    from core.config import get_config
+    egress_enabled = get_config("sandbox.egress", False)
+    profile = build_seatbelt_profile(worktree, output_dir, egress_enabled=egress_enabled)
     profile_path = Path(output_dir) / "sandbox.sb"
     profile_path.parent.mkdir(parents=True, exist_ok=True)
     profile_path.write_text(profile)
