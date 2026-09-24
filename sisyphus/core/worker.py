@@ -62,6 +62,49 @@ _MCP_SERVER_NAME = "sisyphus_agent"
 DECIDER_ATTEMPTS = 2
 
 
+def _task_branch_ahead_of_target(bare: str, task_id: str) -> bool:
+    """True if the task's branch in *bare* carries commits that are not on its
+    target branch. Conservative on any doubt (unknown target branch, missing
+    ref, unparsable count) — the caller keeps the clone rather than risk
+    deleting unmerged work that exists nowhere else.
+
+    Target resolution mirrors worker's own: a plan step targets its plan's
+    integration branch (task.base_branch), otherwise the repo's default branch.
+    """
+    import subprocess
+    from .git_ops import task_branch
+    task = store.get_task(task_id) or {}
+    base = task.get("base_branch") or ""
+    if not base and task.get("repo"):
+        base = (get_repo(task["repo"]) or {}).get("branch", "")
+    base = base or "main"
+    branch = task_branch(task_id)
+    # No task branch in this clone → nothing of the task's work to protect.
+    # (Also covers a non-git dir, e.g. a bare dir created by a test with no
+    # clone in it.)
+    exists = subprocess.run(
+        ["git", "-C", bare, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
+        capture_output=True, text=True, timeout=30,
+    )
+    if exists.returncode != 0:
+        return False
+    try:
+        r = subprocess.run(
+            ["git", "-C", bare, "rev-list", "--count", f"{base}..{branch}"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.debug("cleanup_task: could not compare %s..%s in %s: %s",
+                     base, branch, bare, e)
+        return True
+    if r.returncode != 0:
+        return True
+    try:
+        return int(r.stdout.strip()) > 0
+    except ValueError:
+        return True
+
+
 def cleanup_task(task_id: str, deep: bool = False) -> None:
     """Reclaim a finished task's disk: its git worktrees, per-task bare clone,
     and run logs. Called when a task hits a terminal status (see
@@ -87,8 +130,26 @@ def cleanup_task(task_id: str, deep: bool = False) -> None:
     # The per-task bare clone holds the branch a local Merge Request lands/merges
     # from — keep it while an MR is still open (unless this is a full delete).
     from . import mergerequests
-    if deep or not mergerequests.open_mr_exists(task_id):
+    if deep:
         patterns.append(f"{ws}/repos/{task_id}_*")   # per-task bare clone
+    elif not mergerequests.open_mr_exists(task_id):
+        # Safety net: a task that committed with no open MR lives only on this
+        # clone's branch — deleting the clone deletes the work (SIS-114). Keep
+        # it while the branch is ahead of its target; only drop a clone whose
+        # branch has nothing unmerged.
+        from .git_ops import task_branch
+        unmerged = [b for b in glob.glob(f"{ws}/repos/{task_id}_*")
+                    if _task_branch_ahead_of_target(b, task_id)]
+        if unmerged:
+            for bare in unmerged:
+                logger.warning(
+                    "cleanup_task: keeping %s for task %s — branch %s has "
+                    "commits not on the target branch and no merge request is "
+                    "open; refusing to delete unmerged work",
+                    bare, task_id, task_branch(task_id),
+                )
+        else:
+            patterns.append(f"{ws}/repos/{task_id}_*")   # per-task bare clone
     if deep:
         patterns.append(f"{ws}/tasks/{task_id}")   # attachments + saved patches
         patterns.append(f"{ws}/runs/{task_id}")    # run logs (forensics)

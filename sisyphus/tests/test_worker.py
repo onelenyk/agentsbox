@@ -425,6 +425,83 @@ class TestCleanupRetainsRunLogs:
         assert not (tmp_path / "runs" / task["id"]).exists()
 
 
+class TestCleanupUnmergedClone:
+    """A committed task with no open MR exists only on its branch in the per-task
+    bare clone — cleanup must never delete it (SIS-114). Only a clone whose
+    branch has nothing unmerged is dropped, and deep delete always reclaims."""
+
+    def _make_bare(self, base: Path, task_id: str) -> Path:
+        from core.git_ops import task_branch
+        src = base / "src"
+        src.mkdir()
+        subprocess.run(["git", "init", "-b", "main"], cwd=str(src),
+                       capture_output=True, text=True)
+        for cfg, val in (("user.email", "test@test"), ("user.name", "test")):
+            subprocess.run(["git", "config", cfg, val], cwd=str(src),
+                           capture_output=True, text=True)
+        (src / "file.txt").write_text("one")
+        subprocess.run(["git", "add", "file.txt"], cwd=str(src),
+                       capture_output=True, text=True)
+        subprocess.run(["git", "commit", "-m", "base"], cwd=str(src),
+                       capture_output=True, text=True)
+
+        bare = base / "repos" / f"{task_id}_repo"
+        bare.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "clone", "--bare", str(src), str(bare)],
+                       capture_output=True, text=True, check=True)
+        branch = task_branch(task_id)
+        subprocess.run(["git", "-C", str(bare), "branch", branch, "main"],
+                       capture_output=True, text=True, check=True)
+
+        # One commit on the task branch only — the unmerged work that must
+        # survive cleanup.
+        wt = base / "wt"
+        subprocess.run(["git", "-C", str(bare), "worktree", "add", str(wt), branch],
+                       capture_output=True, text=True, check=True)
+        (wt / "file.txt").write_text("two")
+        subprocess.run(["git", "-C", str(wt), "add", "file.txt"],
+                       capture_output=True, text=True, check=True)
+        subprocess.run(["git", "-C", str(wt), "commit", "-m", "the work"],
+                       capture_output=True, text=True, check=True)
+        subprocess.run(["git", "-C", str(bare), "worktree", "remove", "--force", str(wt)],
+                       capture_output=True, text=True, check=True)
+        return bare
+
+    def test_keeps_clone_with_unmerged_commits_and_no_mr(self, db_path, tmp_path, monkeypatch, caplog):
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+        task = store.create_task("committed but no mr")
+        bare = self._make_bare(tmp_path, task["id"])
+        assert bare.exists()
+
+        caplog.set_level("WARNING", logger="core.worker")
+        cleanup_task(task["id"])
+
+        assert bare.exists(), "clone with unmerged commits must survive cleanup"
+        assert any("unmerged" in r.message for r in caplog.records)
+
+    def test_removes_clone_once_nothing_is_unmerged(self, db_path, tmp_path, monkeypatch):
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+        task = store.create_task("committed and merged")
+        bare = self._make_bare(tmp_path, task["id"])
+        # Simulate the branch's work reaching the target: main now contains it.
+        subprocess.run(["git", "-C", str(bare), "branch", "-f", "main", "sisyphus/" + task["id"]],
+                       capture_output=True, text=True, check=True)
+
+        cleanup_task(task["id"])
+
+        assert not bare.exists(), "clone with nothing unmerged is reclaimed"
+
+    def test_deep_delete_reclaims_even_with_unmerged_commits(self, db_path, tmp_path, monkeypatch):
+        # Full delete keeps today's behaviour: it reclaims unconditionally.
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+        task = store.create_task("force delete")
+        bare = self._make_bare(tmp_path, task["id"])
+
+        cleanup_task(task["id"], deep=True)
+
+        assert not bare.exists()
+
+
 class TestSetAccessWriteAlias:
     def test_write_level_actually_chmods(self, tmp_path):
         # core.worker calls set_access(path, "write"); an unknown level is a

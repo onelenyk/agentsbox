@@ -1,5 +1,7 @@
 .playwright-mcp/
 .sisyphus/
+# Local tool session state
+.opencode/
 # Local sandbox repos for real-world testing (kept out of the main tree)
 /testrepo/
 /testrepo2/
