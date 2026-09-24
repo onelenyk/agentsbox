@@ -73,9 +73,9 @@ def test_missing_token_rejected(db_path):
 def test_tools_list_matches_role(db_path):
     c = _client()
     for role, expected in [
-        ("explorer", {"get_context", "comment", "attach", "propose_subtasks", "finish"}),
-        ("engineer", {"get_context", "comment", "attach", "commit", "open_mr", "finish"}),
-        ("reviewer", {"get_context", "comment", "attach", "approve", "request_changes"}),
+        ("explorer", {"get_context", "comment", "attach", "propose_subtasks", "finish", "jira_issue", "jira_transition", "jira_comment"}),
+        ("engineer", {"get_context", "comment", "attach", "commit", "open_mr", "finish", "jira_issue", "jira_transition", "jira_comment"}),
+        ("reviewer", {"get_context", "comment", "attach", "approve", "request_changes", "jira_issue", "jira_transition", "jira_comment"}),
     ]:
         _, token = _session(db_path, role)
         tools = _rpc(c, token, "tools/list").json()["result"]["tools"]

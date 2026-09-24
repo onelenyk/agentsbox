@@ -29,7 +29,7 @@ ROLES = {
             "result. Write the report in the language the task goal is written "
             "in; keep paths and commands as they are."
         ),
-        "tools": _BASE + ["propose_subtasks", "finish"],
+        "tools": _BASE + ["propose_subtasks", "finish", "jira_issue", "jira_transition", "jira_comment"],
     },
     "engineer": {
         "persona": (
@@ -60,14 +60,14 @@ ROLES = {
             "final report — in the language the task goal is written in; keep "
             "file paths, commands and code as they are."
         ),
-        "tools": _BASE + ["commit", "open_mr", "finish"],
+        "tools": _BASE + ["commit", "open_mr", "finish", "jira_issue", "jira_transition", "jira_comment"],
     },
     "reviewer": {
         "persona": (
             "You review the work against the goal. End with either approve or "
             "request_changes (with a clear reason). That is how you finish."
         ),
-        "tools": _BASE + ["approve", "request_changes"],
+        "tools": _BASE + ["approve", "request_changes", "jira_issue", "jira_transition", "jira_comment"],
     },
     # Referenced by core.reviews, which pins every review-of-MR task to this
     # name — and it existed only as a row someone had created by hand. On any
