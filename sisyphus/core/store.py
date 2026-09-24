@@ -180,6 +180,15 @@ def task_display_title(task: dict) -> str:
     return first_line
 
 
+def jira_key(task: dict) -> Optional[str]:
+    """Extract the Jira key from a task's origin. Returns 'KEY' from origin
+    'jira:KEY', or None if the task is not from Jira."""
+    origin = task.get("origin") or ""
+    if origin.startswith("jira:"):
+        return origin[5:]  # Strip "jira:" prefix
+    return None
+
+
 def create_task(goal: str, repo: str = "", status: str = "active",
                 parent_id: Optional[str] = None, agent: Optional[str] = None,
                 base_branch: Optional[str] = None,
