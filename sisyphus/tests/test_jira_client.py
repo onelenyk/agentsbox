@@ -99,3 +99,163 @@ def test_adf_to_text_flattens_paragraphs_and_lists():
             {"type": "listItem", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "a"}]}]},
             {"type": "listItem", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "b"}]}]}]}]}
     assert jira.adf_to_text(doc).split() == ["One", "a", "b"]
+
+
+class TestRetryLogic:
+    """Test retry logic for transient errors (429, 5xx)."""
+
+    def test_429_with_retry_after_is_retried_and_succeeds(self, monkeypatch, db_path, jira_config):
+        """A 429 with Retry-After sleeps and retries, succeeds, and journals retries=1."""
+        import time as time_module
+
+        call_count = [0]
+        sleep_calls = []
+
+        def handler(req):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # First call: return 429 with Retry-After header
+                raise urllib.error.HTTPError(req.full_url, 429, "Too Many Requests",
+                    {"Retry-After": "0.01"}, BytesIO(b'{"errorMessages":["rate limit"]}'))
+            # Second call: succeed
+            return {"key": "KMP-1", "id": "1", "fields": {"summary": "Test"}}
+
+        def mock_sleep(seconds):
+            sleep_calls.append(seconds)
+
+        _fake_urlopen(monkeypatch, handler)
+        monkeypatch.setattr("time.sleep", mock_sleep)
+
+        out = jira.get_issue("KMP-1", actor="agent:test@task-1", task_id="task-1")
+        assert out["key"] == "KMP-1"
+        assert call_count[0] == 2  # Called twice
+        assert len(sleep_calls) == 1  # Slept once
+        assert sleep_calls[0] == 0.01  # Honored Retry-After
+
+        ev = integrations.list_events("jira")[0]
+        assert ev["ok"] == 1
+        assert ev["meta"].get("retries") == 1  # Journaled
+
+    def test_429_with_retry_after_capped_at_30s(self, monkeypatch, db_path, jira_config):
+        """Retry-After headers > 30s are capped at 30s."""
+        sleep_calls = []
+        call_count = [0]
+
+        def handler(req):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise urllib.error.HTTPError(req.full_url, 429, "Too Many Requests",
+                    {"Retry-After": "999"}, BytesIO(b'{"errorMessages":["rate limit"]}'))
+            return {"key": "KMP-1", "id": "1", "fields": {"summary": "Test"}}
+
+        def mock_sleep(seconds):
+            sleep_calls.append(seconds)
+
+        _fake_urlopen(monkeypatch, handler)
+        monkeypatch.setattr("time.sleep", mock_sleep)
+
+        jira.get_issue("KMP-1", actor="agent:test@task-1")
+        assert sleep_calls[0] <= 30  # Capped
+        assert call_count[0] == 2
+
+    def test_400_is_not_retried(self, monkeypatch, db_path, jira_config):
+        """A 400 (Bad Request) is not retried; raised immediately."""
+        call_count = [0]
+
+        def handler(req):
+            call_count[0] += 1
+            raise urllib.error.HTTPError(req.full_url, 400, "Bad Request",
+                {}, BytesIO(b'{"errorMessages":["invalid JQL"]}'))
+
+        _fake_urlopen(monkeypatch, handler)
+
+        with pytest.raises(jira.JiraError, match="400"):
+            jira.search("invalid jql", actor="test")
+
+        assert call_count[0] == 1  # Called only once; no retry
+
+    def test_three_503s_end_in_error(self, monkeypatch, db_path, jira_config):
+        """Three 503s (exhausted retries) raises JiraError."""
+        call_count = [0]
+
+        def handler(req):
+            call_count[0] += 1
+            raise urllib.error.HTTPError(req.full_url, 503, "Service Unavailable",
+                {}, BytesIO(b'{"errorMessages":["service unavailable"]}'))
+
+        def mock_sleep(seconds):
+            pass  # Don't actually sleep in tests
+
+        _fake_urlopen(monkeypatch, handler)
+        monkeypatch.setattr("time.sleep", mock_sleep)
+
+        with pytest.raises(jira.JiraError, match="503"):
+            jira.get_issue("KMP-1", actor="test")
+
+        # Called on initial attempt + 3 retries = 4 times
+        assert call_count[0] == 4
+
+
+class TestCheckMethod:
+    """Test the check() method for connection verification."""
+
+    def test_check_ok_when_configured_and_reachable(self, monkeypatch, db_path, jira_config):
+        """check() returns ok=True when configured and myself() succeeds."""
+        def handler(req):
+            return {"accountId": "123", "displayName": "Test User", "emailAddress": "test@example.com"}
+
+        _fake_urlopen(monkeypatch, handler)
+
+        result = jira.check()
+        assert result["ok"] is True
+        assert "Test User" in result["detail"] or "connected" in result["detail"].lower()
+
+    def test_check_not_ok_when_not_configured(self, monkeypatch, db_path):
+        """check() returns ok=False when Jira is not configured."""
+        monkeypatch.setattr("core.config.get_config", lambda key=None, default=None: "${JIRA_API_TOKEN}")
+
+        result = jira.check()
+        assert result["ok"] is False
+        assert "not configured" in result["detail"].lower()
+
+    def test_check_not_ok_when_unreachable(self, monkeypatch, db_path, jira_config):
+        """check() returns ok=False when Jira is unreachable."""
+        def urlopen(req, timeout=0):
+            raise urllib.error.URLError("Connection refused")
+
+        monkeypatch.setattr("urllib.request.urlopen", urlopen)
+
+        result = jira.check()
+        assert result["ok"] is False
+        assert "failed" in result["detail"].lower() or "refused" in result["detail"].lower()
+
+
+class TestCLI:
+    """Test the CLI command `jira check`."""
+
+    def test_jira_check_cli_success(self, monkeypatch, db_path, jira_config):
+        """CLI `jira check` exits 0 and prints connected message on success."""
+        from click.testing import CliRunner
+        from sisyphus import cli
+
+        def handler(req):
+            return {"accountId": "123", "displayName": "Alice", "emailAddress": "alice@example.com"}
+
+        _fake_urlopen(monkeypatch, handler)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["jira", "check"])
+        assert result.exit_code == 0
+        assert "✓" in result.output or "connected" in result.output.lower()
+
+    def test_jira_check_cli_failure(self, monkeypatch, db_path):
+        """CLI `jira check` exits 1 and prints error on failure."""
+        from click.testing import CliRunner
+        from sisyphus import cli
+
+        monkeypatch.setattr("core.config.get_config", lambda key=None, default=None: "${UNCONFIGURED}")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["jira", "check"])
+        assert result.exit_code == 1
+        assert "✗" in result.output or "not configured" in result.output.lower()

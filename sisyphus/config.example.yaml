@@ -61,16 +61,23 @@ forge_poll:                      # follow published PRs/MRs by polling
   interval_seconds: 300
 
 # Forge credentials. A per-repo `token:` below beats these.
+# Forge and tracker credentials.
 github:
-  base_url: ${GITHUB_BASE_URL}
-  token: ${GITHUB_TOKEN}
+  base_url: ${GITHUB_BASE_URL}                    # github.com or self-hosted
+  token: ${GITHUB_TOKEN}                          # personal access token
 gitlab:
-  base_url: ${GITLAB_BASE_URL}
-  token: ${GITLAB_TOKEN}
-jira:
-  base_url: ${JIRA_BASE_URL}
-  email: ${JIRA_EMAIL}
-  token: ${JIRA_API_TOKEN}
+  base_url: ${GITLAB_BASE_URL}                    # gitlab.com or self-hosted
+  token: ${GITLAB_TOKEN}                          # personal access token
+jira:                                             # Jira Cloud for issue tracking
+  base_url: ${JIRA_BASE_URL}                      # https://your-domain.atlassian.net
+  email: ${JIRA_EMAIL}                            # account email for Basic auth
+  token: ${JIRA_API_TOKEN}                        # API token (not password)
+  # intake:                                       # disabled; poll issues to create tasks
+  #   enabled: false
+  #   jql: "project = KMP AND type = Bug AND status = \"To Do\""  # issues to intake
+  #   repo: my-app                                # which repo gets these tasks
+  #   interval_seconds: 300                       # how often to check (min 60)
+  #   max_per_pass: 50                            # max issues to create per check
 openrouter:
   api_key: ${OPENROUTER_API_KEY}
   base_url: https://openrouter.ai/api/v1
