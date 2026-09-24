@@ -452,10 +452,11 @@ async def repos_edit_form(request: Request, name: str):
     return _tmpl().TemplateResponse(request, "repos_edit.html", {"repo": repo})
 
 @router.post("/api/repos/{name}/edit")
-async def repos_edit(name: str, source: str = Form(""), platform: str = Form(""), branch: str = Form("")):
+async def repos_edit(name: str, source: str = Form(""), platform: str = Form(""), branch: str = Form(""), auto_merge: str = Form("")):
     from core.repos import update_repo_config
     from fastapi.responses import Response
-    update_repo_config(name, source or None, platform, branch or None)
+    update_repo_config(name, source or None, platform, branch or None,
+                       auto_merge=(auto_merge == "1"))
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "reposUpdated"
     return resp
@@ -1962,7 +1963,7 @@ async def _recheck_stale_gate(mr: dict, blocked: str):
 
 @router.post("/api/mr/{mr_id}/merge", response_class=HTMLResponse)
 async def mr_merge(request: Request, mr_id: str, force: str = Form("")):
-    from core import mergerequests, store
+    from core import mergerequests
     from fastapi.responses import Response
     mr = mergerequests.get_mr(mr_id)
     if not mr:
@@ -1982,15 +1983,15 @@ async def mr_merge(request: Request, mr_id: str, force: str = Form("")):
             return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
     res = mergerequests.merge_branch(mr, mr["target_branch"])
     if res.get("ok"):
-        mergerequests.mark_merged(mr_id, res["sha"])
         # Name the evidence in the same breath as the merge. An override says so
         # out loud: a merge that skipped the gate must not read like one that
-        # cleared it.
+        # cleared it. mark_merged + the thread note live in
+        # record_merge_success, the one function the manual merge and auto-merge
+        # share, so the two can never drift apart.
         cite = mergerequests.verdict_line(mr)
         if blocked:
             cite = f"OVERRIDDEN by the human — {blocked} ({cite})"
-        store.post_message(mr["task_id"], "system", kind="note",
-                           text=f"Merged {mr['source_branch']} into {res['target']} ({res['sha'][:8]}) in {mr['source_path']} — {cite}")
+        mergerequests.record_merge_success(mr, res, cite=cite)
         mr = mergerequests.get_mr(mr_id)
         ctx = _mr_view_ctx(request, mr)
         ctx["flash"] = f"Merged into {res['target']} as {res['sha'][:8]} — reversible with git reset --hard @{{1}}"

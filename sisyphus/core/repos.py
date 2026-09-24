@@ -117,8 +117,13 @@ def delete_repo(name):
     repos = config.get("repos", [])
     config["repos"] = [r for r in repos if r.get("name") != name]
     _write_config_file(config)
-def update_repo_config(name, source=None, platform=None, branch=None):
-    """Update repo configuration without re-cloning."""
+def update_repo_config(name, source=None, platform=None, branch=None, auto_merge=None):
+    """Update repo configuration without re-cloning.
+
+    In-place edits of the existing entry, so every other key the UI does not
+    know about — ``check``, ``setup``, ``token``, … — survives the save.
+    ``_save_repo_config`` cannot be used here: it rebuilds the entry from
+    scratch and would drop those keys."""
     repos = load_repos()
     for r in repos:
         if r["name"] == name:
@@ -129,6 +134,8 @@ def update_repo_config(name, source=None, platform=None, branch=None):
                     r["platform"] = platform
                 else:
                     r.pop("platform", None)
+            if auto_merge is not None:
+                r["auto_merge"] = bool(auto_merge)
             break
     config = _read_config_file()
     config["repos"] = repos

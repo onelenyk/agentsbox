@@ -15,4 +15,8 @@
         </select>
     </div>
 </div>
+<div class="field">
+    <label class="check"><input type="checkbox" name="auto_merge" value="1" {% if repo.auto_merge %}checked{% endif %}> Auto-merge approved MRs</label>
+    <span class="hint">An approved MR whose check passed merges itself — nobody has to press Merge</span>
+</div>
 {% endcall %}
