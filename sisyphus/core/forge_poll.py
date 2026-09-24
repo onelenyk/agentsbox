@@ -498,7 +498,8 @@ def poll_once() -> dict:
 
 
 async def poll_forever() -> None:
-    """Daemon background loop: one pass every forge_poll.interval_seconds.
+    """Daemon background loop: one pass every forge_poll.interval_seconds, plus
+    an auto-merge sweep of the daemon's local MRs on the same clock.
 
     Started with ``asyncio.create_task`` at app startup, next to
     ``autopilot.run_forever``. The pass itself runs in a worker thread: it makes
@@ -530,4 +531,12 @@ async def poll_forever() -> None:
                             len(summary["skipped"]), len(summary["errors"]))
         except Exception:  # noqa: BLE001
             logger.exception("forge_poll: pass failed")
+        # Auto-merge sweep: an MR blocked only by a dirty checkout of its target
+        # lands here once the tree is clean — the one block no verdict/check
+        # event fires to clear. Off the event loop: it runs git and checks.
+        try:
+            from core import mergerequests
+            await asyncio.to_thread(mergerequests.sweep_auto_merge)
+        except Exception:  # noqa: BLE001 — one bad sweep must not end the loop
+            logger.exception("auto-merge sweep failed")
         await asyncio.sleep(interval)

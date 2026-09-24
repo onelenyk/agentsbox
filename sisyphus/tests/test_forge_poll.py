@@ -573,6 +573,35 @@ class TestPollForever:
         asyncio.run(run())
         assert calls["n"] == 3
 
+    def test_the_loop_runs_the_auto_merge_sweep(self):
+        """Local MRs have no forge to report on, so the poll loop doubles as the
+        auto-merge sweep — an MR blocked only by a dirty target checkout lands
+        once the tree is clean."""
+        import asyncio
+        from core import mergerequests
+        swept = []
+
+        def _sweep():
+            swept.append("sweep")
+            return 0
+
+        class _Break(Exception):
+            pass
+
+        async def _sleep_then_break(_seconds):
+            raise _Break()
+
+        with patch.object(forge_poll, "poll_enabled", return_value=True), \
+                patch.object(forge_poll, "poll_once",
+                             return_value={"checked": 0, "changed": 0, "events": [],
+                                           "skipped": [], "errors": []}), \
+                patch.object(forge_poll, "poll_interval", return_value=0), \
+                patch.object(mergerequests, "sweep_auto_merge", side_effect=_sweep), \
+                patch("asyncio.sleep", side_effect=_sleep_then_break):
+            with pytest.raises(_Break):
+                asyncio.run(forge_poll.poll_forever())
+        assert swept == ["sweep"]
+
 
 async def _noop_sleep(_seconds):
     return None

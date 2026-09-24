@@ -75,6 +75,7 @@ repos: []
 #    platform: github                  # local | github | gitlab (inferred from source)
 #    token: ${MY_APP_TOKEN}            # per-repo forge credential
 #    check: python -m pytest -q        # run against every MR; exit code is the verdict
+#    auto_merge: true                  # an MR that cleared the gate merges itself
 #    setup:                            # things git does not carry into a fresh worktree
 #      copy: [local.properties]
 #      run: ./scripts/bootstrap-worktree.sh
