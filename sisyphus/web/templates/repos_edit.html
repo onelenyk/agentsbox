@@ -19,4 +19,8 @@
     <label class="check"><input type="checkbox" name="auto_merge" value="1" {% if repo.auto_merge %}checked{% endif %}> Auto-merge approved MRs</label>
     <span class="hint">An approved MR whose check passed merges itself — nobody has to press Merge</span>
 </div>
+<div class="field">
+    <label class="check"><input type="checkbox" name="read_only" value="read-only" {% if repo.mode == 'read-only' %}checked{% endif %}> Read-only — agents may read and review, never change</label>
+    <span class="hint">Pilot mode: agents explore and answer questions, never commit or open MRs</span>
+</div>
 {% endcall %}

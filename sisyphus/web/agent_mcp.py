@@ -103,10 +103,16 @@ def _finish(session, summary="", **_):
 def _commit(session, message="", **_):
     if not message.strip():
         return {"error": "commit message required"}
-    from core import git_ops
+    from core import git_ops, repos
 
     if not git_ops.is_git_repo(session.get("worktree", "")):
         return {"error": "this task has no repo — commit needs one; report your work with finish() instead"}
+
+    task = store.get_task(session["task_id"])
+    repo_name = task.get("repo") if task else None
+    if repo_name and repos.is_read_only(repo_name):
+        return {"error": f"repo {repo_name} is read-only: report findings with finish() instead"}
+
     try:
         sha = git_ops.commit_all(session["worktree"], message)
     except Exception as exc:  # noqa: BLE001
@@ -122,6 +128,12 @@ def _open_mr(session, title="", description="", **_):
     if not any(m["kind"] == "commit" for m in store.get_thread(session["task_id"])):
         return {"error": "cannot open a merge request before a commit"}
     from core.providers import publish_change
+    from core import repos
+
+    task = store.get_task(session["task_id"])
+    repo_name = task.get("repo") if task else None
+    if repo_name and repos.is_read_only(repo_name):
+        return {"error": f"repo {repo_name} is read-only: report findings with finish() instead"}
 
     result = publish_change(session, title, description)
     if "error" in result:
