@@ -1375,8 +1375,18 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = "", vi
     def _origin_of(t):
         """Who asked for this task, as the board shows it: None for a person,
         or the automation that fired it — with when it fires and whether it
-        still can, which is what a person wants to know about it."""
-        ap = automations.get(t.get("origin") or "")
+        still can, which is what a person wants to know about it. Also handles
+        Jira-imported tasks: origin "jira:KEY" → {jira: True, key: "KEY", …}."""
+        origin_str = t.get("origin") or ""
+
+        # Check for Jira origin first
+        if origin_str.startswith("jira:"):
+            key = origin_str[5:]  # Strip "jira:" prefix
+            return {"jira": True, "key": key, "short": f"⎈ {key}",
+                    "broken": False, "paused": False}
+
+        # Otherwise check for automation
+        ap = automations.get(origin_str)
         if not ap:
             return None
         notes = [_autopilot.describe_schedule(ap)]
@@ -1486,6 +1496,9 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = "", vi
         elif r["kind"] in ("shipped", "done", "not-merged"):
             sprint["done"] += 1
 
+    from core.jira import _settings as _jira_settings
+    jira_base_url = _jira_settings().get("base_url") or ""
+
     if view == "sprint":
         return _tmpl().TemplateResponse(request, "sprint_board.html", {
             **sprint_board(top, {t["id"] for t in running}), "repo": repo,
@@ -1493,6 +1506,7 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = "", vi
             "whos": sorted({a for r in rows for a in r["trail"]}),
             # the same actionable cards the list view shows, keyed by task
             "asks": {t["id"]: t for t in needs_you},
+            "jira_base_url": jira_base_url,
         })
 
     return _tmpl().TemplateResponse(request, "tasks_list.html", {
@@ -1501,6 +1515,7 @@ async def tasks_list_view(request: Request, repo: str = "", sprint: str = "", vi
         "sprints": sprints, "repo": repo,
         "repos": sorted({r["repo"] for r in rows if r["repo"]}),
         "whos": sorted({a for r in rows for a in r["trail"]}),
+        "jira_base_url": jira_base_url,
     })
 
 
@@ -2189,13 +2204,37 @@ def _task_ctx(task_id: str) -> Optional[dict]:
 
 
 def _asked_by(task: dict) -> dict:
-    """Who asked for the task: you, or the automation that fired it."""
+    """Who asked for the task: you, an automation that fired it, or Jira."""
     origin = task.get("origin") or ""
+    if origin.startswith("jira:"):
+        key = origin[5:]  # Strip "jira:" prefix
+        # Parse issue type and priority from the second line of the goal
+        goal_lines = (task.get("goal") or "").split("\n")
+        issue_type = None
+        priority = None
+        if len(goal_lines) > 1:
+            # Expected format: "Jira: <url> · <type> · Priority: <p> · Status: <s>"
+            second_line = goal_lines[1]
+            if "·" in second_line:
+                parts = [p.strip() for p in second_line.split("·")]
+                for i, part in enumerate(parts):
+                    if part.startswith("Priority:"):
+                        priority = part.replace("Priority:", "").strip()
+                    elif not part.startswith("Jira:") and not part.startswith("Status:") and i > 0:
+                        issue_type = part
+        about = f"{key}"
+        if issue_type:
+            about += f" · {issue_type}"
+        if priority:
+            about += f" · {priority}"
+        return {"who": key, "jira": True, "about": about, "issue_type": issue_type, "priority": priority}
+
     if origin.startswith("autopilot:"):
         from core import autopilot
         ap = autopilot.get_autopilot(origin.split(":", 1)[1])
         if ap:
             return {"who": ap["name"], "auto": True, "about": autopilot.describe_schedule(ap)}
+
     return {"who": "you", "auto": False, "about": ""}
 
 
@@ -2220,6 +2259,8 @@ async def task_panel(request: Request, task_id: str):
     ctx = _task_ctx(task_id)
     if ctx is None:
         return HTMLResponse('<div class="empty">Task not found</div>', status_code=404)
+    from core.jira import _settings as _jira_settings
+    ctx["jira_base_url"] = _jira_settings().get("base_url") or ""
     return _tmpl().TemplateResponse(request, "_task_shell.html", ctx)
 
 
@@ -2228,6 +2269,8 @@ async def task_detail_view(request: Request, task_id: str):
     ctx = _task_ctx(task_id)
     if ctx is None:
         return HTMLResponse('<div class="detail-panel"><p class="tone-bad">Task not found</p></div>')
+    from core.jira import _settings as _jira_settings
+    ctx["jira_base_url"] = _jira_settings().get("base_url") or ""
     return _tmpl().TemplateResponse(request, "task_detail_content.html", ctx)
 
 @router.post("/api/tasks/{task_id}/messages")

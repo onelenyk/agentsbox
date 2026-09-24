@@ -31,7 +31,14 @@
         <span class="trail">
             {%- for agent in r.trail %}{{ agent_mark(agent, agent == r.live) }}{% endfor -%}
         </span>
-        {% if r.origin %}<span class="tag tag--origin{{ ' tag--bad' if r.origin.broken }}{{ ' tag--idle' if r.origin.paused }}" title="Created by the automation “{{ r.origin.name }}” — {{ r.origin.about }}">↻ {{ r.origin.short }}</span>{% endif %}
+        {% if r.origin %}
+        {%- if r.origin.jira -%}
+        {% if jira_base_url %}<a href=”{{ jira_base_url }}/browse/{{ r.origin.key }}” target=”_blank” class=”tag tag--origin tag--jira” title=”From Jira issue {{ r.origin.key }}”>{{ r.origin.short }}</a>
+        {%- else %}<span class=”tag tag--origin tag--jira” title=”From Jira issue {{ r.origin.key }}”>{{ r.origin.short }}</span>{% endif %}
+        {%- else -%}
+        <span class=”tag tag--origin{{ ' tag--bad' if r.origin.broken }}{{ ' tag--idle' if r.origin.paused }}” title=”Created by the automation “{{ r.origin.name }}” — {{ r.origin.about }}”>↻ {{ r.origin.short }}</span>
+        {%- endif -%}
+        {% endif %}
         {% if r.kids %}<span class="chip" title="subtasks done">⑂ {{ r.kids_done }}/{{ r.kids }}</span>{% endif %}
         {% if r.carried %}<span class="tag tcard__carried" title="Still open from an earlier sprint">↪ {{ r.carried }}</span>{% endif %}
         {% if r.kind in ('not-merged', 'to-merge') %}<span class="tag tag--state tag--{{ r.kind }}">{{ r.word }}</span>{% endif %}

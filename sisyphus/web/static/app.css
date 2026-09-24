@@ -701,6 +701,7 @@ a.line:hover, .sys .line--click:hover { color: var(--text); }
 }
 .tag--origin.tag--idle { color: var(--muted); background: var(--panel-2); border-color: var(--border); font-style: italic; }
 .tag--origin.tag--bad { color: var(--bad); background: var(--bad-bg); border-color: var(--bad-bd); }
+.tag--jira { color: var(--accent-hi); background: var(--accent-bg); border-color: var(--accent-bd); }
 .tslot { gap: var(--sp-2); }
 .tag--who { display: inline-flex; align-items: center; gap: var(--sp-2); }
 .tag--who .live-dot { width: 6px; height: 6px; }
