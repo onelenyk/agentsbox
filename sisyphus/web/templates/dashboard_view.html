@@ -6,7 +6,7 @@
    waiting" lines said one thing thrice — an empty section now renders nothing,
    because the state line already counted it as zero. #}
 {% set ov = d.ov %}{% set t = ov.tasks %}{% set u = ov.usage %}
-{% from "_ui.html" import agent_mark %}
+{% from "_ui.html" import agent_mark, fact %}
 
 <div class="state">
     <div class="state__item{{ ' is-live' if t.by_status.get('active', 0) }}">
@@ -26,6 +26,24 @@
         <span>Statistics →</span>
     </a>
 </div>
+
+{% if readiness %}
+<section class="sect">
+    <h2 class="sect__h">Readiness <span class="sect__meta">{{ readiness|length }} repo{{ 's' if readiness|length != 1 }} configured</span></h2>
+    <div class="sect__body">
+        {% for r in readiness %}
+        <div class="meta-line">
+            <span class="k"><a href="{{ r.href }}" class="mono">{{ r.name }}</a></span>
+            <span class="v">
+                {%- if r.error %}{{ fact('could not assess', 'muted') }}
+                {%- elif r.ready %}{{ fact('ready for a pilot', 'good') }}
+                {%- else %}{{ fact(r.blockers ~ ' blockers · ' ~ r.warnings ~ ' warnings', 'bad') }}{% endif %}
+            </span>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
 
 {% if live_sessions %}
 <section class="sect">
