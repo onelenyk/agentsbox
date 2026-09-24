@@ -16,6 +16,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import uuid4
@@ -26,9 +27,31 @@ logger = logging.getLogger(__name__)
 
 MR_STATUSES = ("open", "merged", "closed")
 
+# Per-MR lock: prevents concurrent auto-merge attempts on the same MR.
+# A dict from mr_id to threading.Lock, guarded by its own lock.
+_mr_locks_lock = threading.Lock()
+_mr_locks = {}
+
 
 def _run(args):
     return subprocess.run(args, capture_output=True, text=True)
+
+
+def is_forge_mr(mr: dict) -> bool:
+    """True when the MR has a forge_url, or when its repo's platform is github/gitlab.
+
+    An MR is "forge-hosted" when the change lives on GitHub/GitLab and merging
+    belongs to the forge, not to Sisyphus. Locally merging a forge MR would land
+    code behind the forge's back (branch protection, CI, human review all live there).
+    """
+    if mr.get("forge_url"):
+        return True
+    from .repos import get_repo
+    from .providers import detect_platform
+    repo = get_repo(mr.get("repo", "")) or {}
+    source = repo.get("source", "")
+    platform = (repo.get("platform") or "").strip() or detect_platform(source)
+    return platform in ("github", "gitlab")
 
 
 # ── Git actions on the user's real local repo (choose target / check / land) ──
@@ -566,6 +589,7 @@ def try_auto_merge(mr: dict) -> Optional[str]:
     order, so auto-merge never lands something the button would refuse:
 
       * the repo carries ``auto_merge: true`` in config.yaml;
+      * the MR is not a forge MR (forge merging belongs to the forge, never locally);
       * the MR is open;
       * ``merge_block_reason`` is None — approved, and the recorded check
         passed against the branch's current head;
@@ -576,33 +600,44 @@ def try_auto_merge(mr: dict) -> Optional[str]:
     task. Never forces, never resolves conflicts with a model.
     """
     from core.repos import get_repo
-    if not (get_repo(mr.get("repo", "")) or {}).get("auto_merge"):
-        return None
-    # Decide on the CURRENT row, not the caller's possibly stale snapshot: a
-    # concurrent merge or a moved branch must be seen, not guessed from memory.
-    mr = get_mr(mr["id"]) or mr
-    if mr.get("status") != "open":
-        return None
-    head = current_head(mr)
-    blocked = merge_block_reason(mr, head)
-    if blocked:
-        _note_auto_merge_waiting(mr, blocked)
-        return None
-    merge = check_mergeability(mr["bare_path"], mr["source_path"],
-                               mr["source_branch"], mr["target_branch"])
-    if not merge.get("ok"):
-        _note_auto_merge_waiting(mr, merge.get("error") or "cannot check mergeability")
-        return None
-    if not merge.get("mergeable"):
-        _note_auto_merge_waiting(
-            mr, "the branch does not merge cleanly — resolve the conflicts first")
-        return None
-    res = merge_branch(mr, mr["target_branch"])
-    if not res.get("ok"):
-        _note_auto_merge_waiting(mr, res.get("error") or "merge failed")
-        return None
-    record_merge_success(mr, res, prefix="Auto-merged")
-    return res.get("sha")
+
+    # Acquire per-MR lock to prevent concurrent auto-merge attempts on the same MR.
+    # This prevents two threads from both calling merge_branch on the same MR.
+    mr_id = mr.get("id", "")
+    with _mr_locks_lock:
+        if mr_id not in _mr_locks:
+            _mr_locks[mr_id] = threading.Lock()
+        lock = _mr_locks[mr_id]
+
+    with lock:
+        # Re-read the MR inside the lock to ensure we're working with current state.
+        mr = get_mr(mr_id) or mr
+        if is_forge_mr(mr):
+            return None
+        if not (get_repo(mr.get("repo", "")) or {}).get("auto_merge"):
+            return None
+        if mr.get("status") != "open":
+            return None
+        head = current_head(mr)
+        blocked = merge_block_reason(mr, head)
+        if blocked:
+            _note_auto_merge_waiting(mr, blocked)
+            return None
+        merge = check_mergeability(mr["bare_path"], mr["source_path"],
+                                   mr["source_branch"], mr["target_branch"])
+        if not merge.get("ok"):
+            _note_auto_merge_waiting(mr, merge.get("error") or "cannot check mergeability")
+            return None
+        if not merge.get("mergeable"):
+            _note_auto_merge_waiting(
+                mr, "the branch does not merge cleanly — resolve the conflicts first")
+            return None
+        res = merge_branch(mr, mr["target_branch"])
+        if not res.get("ok"):
+            _note_auto_merge_waiting(mr, res.get("error") or "merge failed")
+            return None
+        record_merge_success(mr, res, prefix="Auto-merged")
+        return res.get("sha")
 
 
 def schedule_auto_merge(mr_id: str) -> None:

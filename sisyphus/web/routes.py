@@ -1975,6 +1975,10 @@ async def mr_merge(request: Request, mr_id: str, force: str = Form("")):
     mr = mergerequests.get_mr(mr_id)
     if not mr:
         return Response(status_code=404)
+    if mergerequests.is_forge_mr(mr):
+        ctx = _mr_view_ctx(request, mr)
+        ctx["error"] = f"This change is merged on the forge — open {mr['forge_url']}"
+        return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
     if mr["status"] != "open":
         ctx = _mr_view_ctx(request, mr); ctx["error"] = f"MR is already {mr['status']}"
         return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
@@ -2027,6 +2031,10 @@ async def mr_merge_resolve(request: Request, mr_id: str, force: str = Form("")):
     mr = mergerequests.get_mr(mr_id)
     if not mr:
         return Response(status_code=404)
+    if mergerequests.is_forge_mr(mr):
+        ctx = _mr_view_ctx(request, mr)
+        ctx["error"] = f"This change is merged on the forge — open {mr['forge_url']}"
+        return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
     if mr["status"] != "open":
         ctx = _mr_view_ctx(request, mr); ctx["error"] = f"MR is already {mr['status']}"
         return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
