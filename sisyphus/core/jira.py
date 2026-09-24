@@ -12,6 +12,8 @@ Credentials never reach a log line, an event row or an exception message.
 import base64
 import json
 import logging
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -21,8 +23,14 @@ from . import integrations
 
 logger = logging.getLogger(__name__)
 
+# Thread-local storage for tracking retries within a single action (search, transition, etc.)
+_thread_local = threading.local()
+
 HTTP_TIMEOUT = 20
 PAGE_SIZE = 50
+MAX_RETRIES = 3
+BACKOFF_SECONDS = (1, 2, 4)  # Retry delays: 1s, 2s, 4s
+MAX_RETRY_AFTER = 30  # Cap on Retry-After header
 
 # Fields copied when an issue becomes a task; kept small so a goal stays readable.
 ISSUE_FIELDS = ("summary", "description", "issuetype", "priority", "status", "labels",
@@ -31,11 +39,13 @@ ISSUE_FIELDS = ("summary", "description", "issuetype", "priority", "status", "la
 
 class JiraError(RuntimeError):
     """Jira answered with something other than the data asked for. *status*
-    is the HTTP status when there was one."""
+    is the HTTP status when there was one. *retry_after* is the number of
+    seconds to wait before retrying, from the Retry-After header."""
 
-    def __init__(self, message: str, status: Optional[int] = None):
+    def __init__(self, message: str, status: Optional[int] = None, retry_after: Optional[float] = None):
         super().__init__(message)
         self.status = status
+        self.retry_after = retry_after
 
 
 def _settings() -> dict:
@@ -54,9 +64,13 @@ def configured() -> bool:
 
 
 def _request(method: str, path: str, body: Optional[dict] = None, params: Optional[dict] = None) -> dict:
-    """One authenticated call. Returns the decoded JSON object ({} for 204).
-    Raises JiraError with Jira's own message on any non-2xx, without the
-    credentials anywhere in it."""
+    """One authenticated call with exponential backoff retry on 429/5xx.
+
+    Returns the decoded JSON object ({} for 204). Raises JiraError with Jira's own
+    message on any non-2xx. A 429 or 5xx is retried up to 3 times with backoff
+    that honors Retry-After when present (capped at 30s), else 1s/2s/4s.
+    Credentials never reach a log line or exception message.
+    """
     s = _settings()
     if not (s["base_url"] and s["email"] and s["token"]):
         raise JiraError("Jira is not configured: set jira.base_url, jira.email and jira.token "
@@ -66,39 +80,117 @@ def _request(method: str, path: str, body: Optional[dict] = None, params: Option
         url += ("&" if "?" in url else "?") + urllib.parse.urlencode(params)
     auth = base64.b64encode(f"{s['email']}:{s['token']}".encode()).decode()
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(url, data=data, method=method, headers={
-        "Authorization": f"Basic {auth}", "Accept": "application/json",
-        "Content-Type": "application/json", "User-Agent": "sisyphus-jira/1"})
-    try:
-        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
-            raw = resp.read()
-            return json.loads(raw) if raw.strip() else {}
-    except urllib.error.HTTPError as exc:
-        text = exc.read().decode("utf-8", errors="replace")[:500]
+
+    # Track retries for this specific request in thread-local storage (for journaling).
+    if not hasattr(_thread_local, 'retry_count'):
+        _thread_local.retry_count = 0
+
+    retries = 0
+    while retries <= MAX_RETRIES:
+        req = urllib.request.Request(url, data=data, method=method, headers={
+            "Authorization": f"Basic {auth}", "Accept": "application/json",
+            "Content-Type": "application/json", "User-Agent": "sisyphus-jira/1"})
         try:
-            msg = "; ".join((json.loads(text).get("errorMessages") or []) or [text])
-        except ValueError:
-            msg = text
-        raise JiraError(f"Jira answered {exc.code} for {method} {path}: {msg or exc.reason}",
-                        status=exc.code) from None
-    except (urllib.error.URLError, OSError, ValueError) as exc:
-        raise JiraError(f"Jira request failed for {method} {path}: {exc}") from None
+            logger.debug("%s %s", method, path)
+            with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+                raw = resp.read()
+                # Success: track retry count for journaling.
+                _thread_local.retry_count = retries
+                return json.loads(raw) if raw.strip() else {}
+        except urllib.error.HTTPError as exc:
+            logger.debug("%s %s → %d", method, path, exc.code)
+            text = exc.read().decode("utf-8", errors="replace")[:500]
+            try:
+                msg = "; ".join((json.loads(text).get("errorMessages") or []) or [text])
+            except ValueError:
+                msg = text
+
+            # Determine if we should retry this error.
+            should_retry = exc.code in (429,) or exc.code >= 500
+            retry_after = None
+            if should_retry and retries < MAX_RETRIES:
+                retry_after = _parse_retry_after(exc.headers)
+                if retry_after is not None:
+                    wait_time = min(retry_after, MAX_RETRY_AFTER)
+                else:
+                    wait_time = BACKOFF_SECONDS[retries] if retries < len(BACKOFF_SECONDS) else BACKOFF_SECONDS[-1]
+                logger.debug("retrying %s %s in %.1fs (attempt %d/%d)", method, path, wait_time, retries + 1, MAX_RETRIES)
+                time.sleep(wait_time)
+                retries += 1
+                continue
+
+            # Non-retryable error: raise immediately.
+            raise JiraError(f"Jira answered {exc.code} for {method} {path}: {msg or exc.reason}",
+                            status=exc.code, retry_after=retry_after) from None
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            raise JiraError(f"Jira request failed for {method} {path}: {exc}") from None
+
+    # Exhausted retries on a retryable error.
+    raise JiraError(f"Jira request to {method} {path} failed after {MAX_RETRIES} retries", status=None)
+
+
+def _parse_retry_after(headers) -> Optional[float]:
+    """Extract retry delay from HTTP headers (Retry-After)."""
+    if not headers:
+        return None
+    try:
+        ra = headers.get("Retry-After")
+        if ra:
+            return float(ra)
+    except (TypeError, ValueError):
+        pass
+    return None
 
 
 def _recorded(action: str, actor: str, subject: str, task_id: Optional[str]):
-    """Context helper: run a call, journal success or failure, re-raise."""
+    """Context helper: run a call, journal success or failure, re-raise.
+
+    The caller sets detail, count, and meta before exiting. Retry count is
+    automatically picked up from thread-local storage if present.
+    """
     class _Ctx:
         def __enter__(self):
+            # Reset retry count at the start of each action.
+            _thread_local.retry_count = 0
             self.detail, self.count, self.meta = "", 0, {}
             return self
 
         def __exit__(self, exc_type, exc, tb):
             ok = exc is None
+            # If retries occurred, include them in meta.
+            if getattr(_thread_local, 'retry_count', 0) > 0:
+                self.meta["retries"] = _thread_local.retry_count
             integrations.record("jira", action, actor, subject=subject, detail=self.detail,
                                 count=self.count, ok=ok, error=None if ok else str(exc),
                                 task_id=task_id, meta=self.meta)
             return False
     return _Ctx()
+
+
+# ── connection check ────────────────────────────────────────────────────────
+
+def check() -> dict:
+    """Verify Jira is connected and configured.
+
+    Returns {ok: bool, detail: str}. If ok is False, detail explains why.
+    Used by the CLI command and the readiness check.
+    """
+    if not configured():
+        return {
+            "ok": False,
+            "detail": "Jira is not configured: set JIRA_BASE_URL, JIRA_EMAIL and JIRA_API_TOKEN in .env"
+        }
+    try:
+        me = myself(actor="human:cli")
+        return {
+            "ok": True,
+            "detail": f"connected as {me.get('displayName') or me.get('emailAddress') or '?'}"
+        }
+    except JiraError as exc:
+        return {
+            "ok": False,
+            "detail": str(exc)
+        }
 
 
 # ── reads ────────────────────────────────────────────────────────────────
