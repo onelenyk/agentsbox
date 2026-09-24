@@ -503,6 +503,98 @@ def _get_mr_diff(session, mr_id="", **_):
     return {"error": f"no diff found for MR {mr_id!r}"}
 
 
+def _jira_issue(session, key="", **_):
+    from core import jira
+
+    if not jira.configured():
+        return {"error": "Jira is not configured on this daemon"}
+
+    # If no key is given, try to extract it from the task's origin
+    if not key.strip():
+        task = store.get_task(session["task_id"])
+        origin = (task.get("origin") or "") if task else ""
+        if origin.startswith("jira:"):
+            key = origin[5:]  # Remove "jira:" prefix
+        else:
+            return {"error": "no key provided and task has no Jira origin"}
+
+    key = key.strip()
+    actor = f"agent:{session['role']}@{session['task_id']}"
+
+    try:
+        return jira.get_issue(key, actor, task_id=session["task_id"])
+    except jira.JiraError as exc:
+        return {"error": str(exc)}
+
+
+def _jira_transition(session, to_status="", key="", **_):
+    from core import jira
+
+    if not jira.configured():
+        return {"error": "Jira is not configured on this daemon"}
+
+    if not to_status.strip():
+        return {"error": "to_status required"}
+
+    # If no key is given, try to extract it from the task's origin
+    if not key.strip():
+        task = store.get_task(session["task_id"])
+        origin = (task.get("origin") or "") if task else ""
+        if origin.startswith("jira:"):
+            key = origin[5:]  # Remove "jira:" prefix
+        else:
+            return {"error": "no key provided and task has no Jira origin"}
+
+    key = key.strip()
+    to_status = to_status.strip()
+    actor = f"agent:{session['role']}@{session['task_id']}"
+
+    try:
+        result = jira.transition(key, to_status, actor, task_id=session["task_id"])
+        # Post a thread note after success
+        store.post_message(
+            session["task_id"], author="system", kind="note",
+            text=f"moved {result['key']} to {result['status']} in Jira"
+        )
+        return result
+    except jira.JiraError as exc:
+        return {"error": str(exc)}
+
+
+def _jira_comment(session, text="", key="", **_):
+    from core import jira
+
+    if not jira.configured():
+        return {"error": "Jira is not configured on this daemon"}
+
+    if not text.strip():
+        return {"error": "text required"}
+
+    # If no key is given, try to extract it from the task's origin
+    if not key.strip():
+        task = store.get_task(session["task_id"])
+        origin = (task.get("origin") or "") if task else ""
+        if origin.startswith("jira:"):
+            key = origin[5:]  # Remove "jira:" prefix
+        else:
+            return {"error": "no key provided and task has no Jira origin"}
+
+    key = key.strip()
+    text = text.strip()
+    actor = f"agent:{session['role']}@{session['task_id']}"
+
+    try:
+        result = jira.comment(key, text, actor, task_id=session["task_id"])
+        # Post a thread note after success
+        store.post_message(
+            session["task_id"], author="system", kind="note",
+            text=f"commented on {result['key']} in Jira"
+        )
+        return result
+    except jira.JiraError as exc:
+        return {"error": str(exc)}
+
+
 # name -> (description, inputSchema, handler)
 TOOLS = {
     "get_context": ("Read the task goal and the full thread so far.",
@@ -531,6 +623,16 @@ TOOLS = {
                 {"type": "object", "properties": {"summary": {"type": "string"}}}, _approve),
     "request_changes": ("Request changes with a reason (a reviewer's way to finish).",
                         {"type": "object", "properties": {"reason": {"type": "string"}}, "required": ["reason"]}, _request_changes),
+    "jira_issue": ("Read a Jira issue. Without a key, uses the task's own key from origin 'jira:<KEY>'; "
+                   "with a key, any issue. Returns the shaped issue (key, url, fields).",
+                   {"type": "object", "properties": {"key": {"type": "string"}}}, _jira_issue),
+    "jira_transition": ("Move this task's Jira issue to a status (e.g. 'In Progress' when you start, "
+                        "'In Review' when the MR is open). Only when the task came from Jira.",
+                        {"type": "object", "properties": {"to_status": {"type": "string"}, "key": {"type": "string"}},
+                         "required": ["to_status"]}, _jira_transition),
+    "jira_comment": ("Comment on this task's Jira issue. Only when the task came from Jira.",
+                     {"type": "object", "properties": {"text": {"type": "string"}, "key": {"type": "string"}},
+                      "required": ["text"]}, _jira_comment),
     # Orchestrator decision tools (kind=orchestrator agents).
     "decide_spawn_worker": ("Decide: run a worker agent on the task.",
                             {"type": "object", "properties": {"agent": {"type": "string"}, "instruction": {"type": "string"}, "why": {"type": "string"}}, "required": ["agent"]}, _decide_spawn_worker),
