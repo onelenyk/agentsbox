@@ -513,6 +513,13 @@ async def repos_check(request: Request, name: str):
         return _repo_error(f"no repo named {name!r}")
     return await _render_check(request, name=name)
 
+@router.get("/api/repos/{name}/readiness", response_class=HTMLResponse)
+async def repos_readiness(request: Request, name: str):
+    """Assess production readiness: check gates, isolation, forge delivery, tokens."""
+    from core import readiness
+    result = readiness.assess(name)
+    return _tmpl().TemplateResponse(request, "repos_readiness.html", {"result": result})
+
 # ── Runner CRUD ────────────────────────────────────────────────────────
 
 @router.get("/backups", response_class=HTMLResponse)

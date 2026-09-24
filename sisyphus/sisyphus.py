@@ -259,6 +259,37 @@ def daemon_logs(follow):
 
 
 @cli.group()
+def repos():
+    """Manage repositories and assess production readiness."""
+
+
+@repos.command("readiness")
+@click.argument("name")
+def repos_readiness(name):
+    """Assess production readiness of a repository.
+
+    Checks: check gate, forge delivery, isolation, egress, tokens, pilot mode.
+    Exit code 1 if any block items fail.
+    """
+    from core import readiness
+    result = readiness.assess(name)
+
+    if not result["items"]:
+        click.echo("No repo found.")
+        raise SystemExit(1)
+
+    for item in result["items"]:
+        icon = "✓" if item["ok"] else "✗"
+        severity = f"[{item['severity'].upper()}]"
+        click.echo(f"{icon} {item['key']:<20} {severity:<8} {item['text']}")
+        if item["fix"]:
+            click.echo(f"  → {item['fix']}")
+
+    if not result["ready"]:
+        raise SystemExit(1)
+
+
+@cli.group()
 def dev():
     """Developer utilities."""
 
