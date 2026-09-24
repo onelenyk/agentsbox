@@ -50,32 +50,34 @@ class TestFullLifecycle:
             Decision(action="done", why="approved"),
         ])
 
-        with patch("core.orchestrator.spawn_worker", side_effect=fake_spawn):
-            decision, bg = await handle_event(task_id, "created", decide_fn=decisions)
-            assert decision.action == "spawn_worker" and decision.role == "engineer"
-            await bg
-            assert store.get_task(task_id)["status"] == "active"
+        # Disable obvious step rules by patching _obvious_step to always return None
+        with patch("core.orchestrator._obvious_step", return_value=None):
+            with patch("core.orchestrator.spawn_worker", side_effect=fake_spawn):
+                decision, bg = await handle_event(task_id, "created", decide_fn=decisions)
+                assert decision.action == "spawn_worker" and decision.role == "engineer"
+                await bg
+                assert store.get_task(task_id)["status"] == "active"
 
-            decision, bg = await handle_event(task_id, "worker_finished", decide_fn=decisions)
-            assert decision.role == "reviewer"
-            await bg
+                decision, bg = await handle_event(task_id, "worker_finished", decide_fn=decisions)
+                assert decision.role == "reviewer"
+                await bg
 
-            # Simulate the reviewer requesting changes (a real session's
-            # request_changes() would post exactly this kind of result).
-            store.post_message(task_id, "reviewer", kind="result", text="CHANGES REQUESTED: needs tests")
+                # Simulate the reviewer requesting changes (a real session's
+                # request_changes() would post exactly this kind of result).
+                store.post_message(task_id, "reviewer", kind="result", text="CHANGES REQUESTED: needs tests")
 
-            decision, bg = await handle_event(task_id, "worker_finished", decide_fn=decisions)
-            assert decision.role == "engineer"
-            await bg
+                decision, bg = await handle_event(task_id, "worker_finished", decide_fn=decisions)
+                assert decision.role == "engineer"
+                await bg
 
-            decision, bg = await handle_event(task_id, "worker_finished", decide_fn=decisions)
-            assert decision.role == "reviewer"
-            await bg
+                decision, bg = await handle_event(task_id, "worker_finished", decide_fn=decisions)
+                assert decision.role == "reviewer"
+                await bg
 
-            store.post_message(task_id, "reviewer", kind="result", text="APPROVED: looks good")
+                store.post_message(task_id, "reviewer", kind="result", text="APPROVED: looks good")
 
-            decision, bg = await handle_event(task_id, "worker_finished", decide_fn=decisions)
-            assert decision.action == "done"
+                decision, bg = await handle_event(task_id, "worker_finished", decide_fn=decisions)
+                assert decision.action == "done"
 
         assert store.get_task(task_id)["status"] == "done"
         # The rationale trail is fully readable from the thread alone.
