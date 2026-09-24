@@ -32,6 +32,7 @@ proceeds unconfined) and `enabled()` returns False so callers can warn.
 import logging
 import os
 import platform
+from collections import namedtuple
 from pathlib import Path
 from typing import List, Optional
 
@@ -42,6 +43,30 @@ _SANDBOX_EXEC = "/usr/bin/sandbox-exec"
 # Credential/secret dirs a worker never has a reason to write — protected in
 # addition to the repo sources, as cheap defense-in-depth.
 _SECRET_SUBPATHS = (".ssh", ".aws", ".gnupg", ".config/gh", ".config/gcloud", ".kube")
+
+# Paths under $HOME that a worker legitimately needs to READ when read_isolation
+# is enabled. Each entry is (path, reason_why_it_is_needed). This allowlist is
+# re-opened after the home directory read-deny is applied, so only these paths
+# and $WORKSPACE_ROOT, $WORKTREE, and $OUTPUT_DIR (paths already in the profile)
+# become readable. Anything outside $HOME stays readable (system tools, Homebrew,
+# etc.). The runner's private HOME from core.runner_home is built under the
+# workspace, so it is automatically re-allowed.
+_ReadAllowedPath = namedtuple("ReadAllowedPath", ["path", "reason"])
+_READ_ALLOWLIST = [
+    _ReadAllowedPath(".local/share/opencode", "opencode CLI credentials and login store"),
+    _ReadAllowedPath(".local/bin", "user's custom scripts installed by package managers"),
+    _ReadAllowedPath(".local/state", "XDG state dir for opencode and other CLI tools"),
+    _ReadAllowedPath(".opencode", "opencode legacy state directory"),
+    _ReadAllowedPath(".superset", "Superset wrapper installation and agents"),
+    _ReadAllowedPath(".claude", "Claude Code state and authentication"),
+    _ReadAllowedPath(".claude.json", "Claude Code configuration"),
+    _ReadAllowedPath(".cache", "caches from build tools and CLIs"),
+    _ReadAllowedPath(".npm", "npm package cache"),
+    _ReadAllowedPath(".bun", "bun package manager cache and store"),
+    _ReadAllowedPath("Library/Keychains", "macOS Keychain (Claude Code login is here)"),
+    _ReadAllowedPath("Library/Caches", "macOS system caches for CLIs and build tools"),
+    _ReadAllowedPath(".gitconfig", "git configuration and user identity"),
+]
 
 
 # ── platform-neutral contract ───────────────────────────────────────────
@@ -144,6 +169,20 @@ def _q(p: str) -> str:
     return '"' + resolved.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def _read_isolation_enabled() -> bool:
+    """Whether opt-in read isolation for the home directory is enabled.
+
+    Read from the config (sandbox.read_isolation) with the same pattern as
+    sandbox.require — environment variable override is possible but not needed
+    since this is an opt-in knob, not a safety feature. Default is False (off)."""
+    try:
+        from core.config import get_config
+        return bool(get_config("sandbox.read_isolation", False))
+    except Exception:  # noqa: BLE001
+        logger.exception("could not read sandbox.read_isolation — defaulting to off")
+        return False
+
+
 def _protected_paths(home: str) -> List[str]:
     """Paths a worker must never write: every registered repo's source, plus
     credential dirs. Repo sources come from config so a newly-added repo is
@@ -166,6 +205,42 @@ def _protected_paths(home: str) -> List[str]:
         if rp not in seen:
             seen.add(rp); out.append(p)
     return out
+
+
+def _read_isolation_rules(home: str) -> tuple[str, str]:
+    """Build the read-deny and read-allow SBPL rules for read_isolation.
+
+    Returns (deny_rule, allow_rule) where deny_rule denies all file-read* under
+    home, and allow_rule re-allows the specific paths a worker needs. Both are
+    ready to be embedded in the profile as separate (deny ...) and (allow ...)
+    clauses. If read_isolation is off, both strings are empty.
+
+    Ordering in the profile matters: deny FIRST (while default allow is still in
+    place), then re-allow the specific paths (last matching rule wins in SBPL).
+    """
+    if not _read_isolation_enabled():
+        return "", ""
+
+    if not home:
+        return "", ""
+
+    # Deny all reads under the home directory
+    home_deny = f"(deny file-read* (subpath {_q(home)}))"
+
+    # Re-allow specific paths that workers legitimately need to read
+    allow_paths = []
+    for allowed_entry in _READ_ALLOWLIST:
+        p = str(Path(home) / allowed_entry.path)
+        # Only include if the resolved path actually exists (to avoid Seatbelt
+        # complaints) — a missing optional path is not an error
+        if os.path.exists(p):
+            allow_paths.append(f"(subpath {_q(p)})")
+
+    home_allow = ""
+    if allow_paths:
+        home_allow = "(allow file-read*\n" + "\n".join(allow_paths) + "\n)"
+
+    return home_deny, home_allow
 
 
 def _daemon_state_paths(db_path: Optional[str] = None) -> List[str]:
@@ -193,7 +268,12 @@ def build_seatbelt_profile(worktree: str, output_dir: str,
     """Allow-by-default, then deny writes to the protected paths (repo sources +
     credential dirs), then re-allow the workspace areas a worker needs — so a
     path under a protected repo but inside the workspace stays writable (last
-    matching rule wins in SBPL), while the repo's real files do not."""
+    matching rule wins in SBPL), while the repo's real files do not.
+
+    When sandbox.read_isolation is enabled, also deny reads to the home directory
+    and re-allow only the specific paths a worker legitimately needs (credentials,
+    caches, toolchain state). The worktree and workspace are re-allowed for both
+    reads and writes so they remain accessible."""
     workspace_root = workspace_root or os.environ.get("WORKSPACE_ROOT", "")
     home = home if home is not None else os.environ.get("HOME", "")
     protected = protected if protected is not None else _protected_paths(home)
@@ -203,18 +283,50 @@ def build_seatbelt_profile(worktree: str, output_dir: str,
     allow_subpaths = [p for p in (workspace_root, worktree, output_dir) if p]
     allow = "\n".join(f"(subpath {_q(p)})" for p in allow_subpaths)
 
+    # Build the profile with SBPL rule ordering explained in comments below.
+    # In SBPL, the LAST matching rule wins, so we control behavior by careful
+    # ordering of allow/deny clauses.
     lines = ["(version 1)", "(allow default)"]
+
+    # Write access control (file-write*):
+    # 1. deny writes to protected paths (repo sources + credential dirs)
+    # 2. re-allow writes to workspace areas (which may be inside protected repos)
+    # 3. (later) re-deny writes to the daemon's own database
     if deny:
         lines.append(f"(deny file-write* {deny})")
     if allow:
         lines.append("(allow file-write*\n" + allow + "\n)")
-    # LAST, because the workspace allow above re-opens everything under it —
-    # and the daemon's own database lives there. Nothing inside the sandbox has
-    # any business writing it: a worker reaches the daemon over its HTTP/MCP
-    # bridge, never through sqlite. The Python-level guard (SISYPHUS_DB_PROTECT,
-    # core/db.py) only governs connections core.db opens, so `sqlite3 <path>`
-    # from the agent's bash tool walked straight past it and could corrupt the
-    # one record of every task. Same for the snapshots that would undo it.
+
+    # Read access control (file-read*) — only if read_isolation is on:
+    # The workspace paths MUST be re-allowed for reads here, even though they
+    # are allowed by default, because the read-deny below will match them
+    # otherwise. The re-allow rules are evaluated AFTER the deny, so they
+    # override it (last matching rule wins).
+    read_deny, read_allow = _read_isolation_rules(home)
+    if read_deny:
+        lines.append(read_deny)
+        # When read_isolation is on, we must re-allow both the allowlisted home
+        # paths AND the workspace paths. Combine them into a single allow rule.
+        ws_read_paths = [f"(subpath {_q(p)})" for p in allow_subpaths]
+        all_read_allow_paths = []
+        if read_allow:
+            # Extract the paths from read_allow (which is already formatted)
+            # and combine with workspace paths
+            allowed_content = read_allow.split("(allow file-read*")[1].rstrip(")")
+            all_read_allow_paths.extend([line.strip() for line in allowed_content.split("\n") if line.strip()])
+        all_read_allow_paths.extend(ws_read_paths)
+        if all_read_allow_paths:
+            combined_allow = "(allow file-read*\n" + "\n".join(all_read_allow_paths) + "\n)"
+            lines.append(combined_allow)
+
+    # Database protection — MUST BE LAST, because the workspace allow above
+    # re-opens everything under it — and the daemon's own database lives there.
+    # Nothing inside the sandbox has any business writing it: a worker reaches
+    # the daemon over its HTTP/MCP bridge, never through sqlite. The Python-level
+    # guard (SISYPHUS_DB_PROTECT, core/db.py) only governs connections core.db
+    # opens, so `sqlite3 <path>` from the agent's bash tool walked straight past
+    # it and could corrupt the one record of every task. Same for the snapshots
+    # that would undo it.
     keep_out = _daemon_state_paths(db_path)
     if keep_out:
         lines.append("(deny file-write*\n"
