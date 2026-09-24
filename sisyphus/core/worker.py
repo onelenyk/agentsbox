@@ -542,6 +542,13 @@ async def spawn_worker(
     if not task:
         raise ValueError(f"unknown task {task_id}")
 
+    # Engineer cannot run on read-only repos
+    repo_name_arg = repo_name or task.get("repo")
+    if role == "engineer" and repo_name_arg:
+        from .repos import is_read_only
+        if is_read_only(repo_name_arg):
+            raise ValueError(f"repo {repo_name_arg} is read-only: engineer cannot run; only explorer and reviewer are allowed")
+
     # The agent's model class picks the runner and model: the first option
     # whose subscription still has room (core.model_classes).
     runner_name, model_override, provider = _pick_runner(role_def)
@@ -679,15 +686,21 @@ def _set_aside_note(provider: str, result) -> str:
 
 
 def _build_decider_prompt(agent: dict, thread_text: str, roster: list,
-                          prefix: str = f"{_MCP_SERVER_NAME}_") -> str:
+                          prefix: str = f"{_MCP_SERVER_NAME}_", read_only: bool = False) -> str:
     """Prompt for the orchestrator agent: read the thread, call exactly one
     decision tool. The persona (decision doctrine) comes from the agent row;
     *roster* is the exact set of worker agents it may spawn (so it can't invent
     an agent name that doesn't exist — a real hallucination we hit in testing).
-    *prefix* is the runner's MCP tool-naming convention (see _build_prompt)."""
+    *prefix* is the runner's MCP tool-naming convention (see _build_prompt).
+    *read_only* removes engineer from the available agents."""
+    # Filter out engineer for read-only repos
+    if read_only:
+        roster = [a for a in roster if a != "engineer"]
+
     tools = ", ".join(prefix + t for t in agent["tools"] if t.startswith("decide_"))
-    names = ", ".join(roster) or "explorer, engineer, reviewer"
-    return (
+    names = ", ".join(roster) or "explorer, reviewer"
+
+    prompt = (
         "# How this run ends — read this first\n"
         "You are an orchestrator. Read the task thread below and choose EXACTLY "
         f"ONE next action by CALLING one of these tools: {tools}. Call it as a "
@@ -701,8 +714,13 @@ def _build_decider_prompt(agent: dict, thread_text: str, roster: list,
         f"When you call decide_spawn_worker, the `agent` argument MUST be one of "
         f"these EXACT names — do not invent any other: {names}.\n\n"
         f"{agent['persona']}\n\n"
-        f"## Task thread\n{thread_text}\n"
     )
+
+    if read_only:
+        prompt += "This repository is read-only: investigate and answer, never change files.\n\n"
+
+    prompt += f"## Task thread\n{thread_text}\n"
+    return prompt
 
 
 async def spawn_decider(task_id: str, agent_name: str, thread_text: str,
@@ -738,9 +756,19 @@ async def spawn_decider(task_id: str, agent_name: str, thread_text: str,
                                       binary=runner_row.get("binary", ""))
 
     roster = [a["name"] for a in agents.list_agents(kind="worker") if a.get("enabled", 1)]
+
+    # Check if task's repo is read-only
+    task = store.get_task(task_id)
+    repo_name = task.get("repo") if task else None
+    read_only = False
+    if repo_name:
+        from .repos import is_read_only
+        read_only = is_read_only(repo_name)
+
     prompt = _build_decider_prompt(
         agent, thread_text, roster,
         prefix=runner_profiles.tool_prefix(rtype, _MCP_SERVER_NAME),
+        read_only=read_only,
     )
 
     # A weaker/cheaper model sometimes finishes its turn without calling a

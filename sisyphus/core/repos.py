@@ -117,7 +117,18 @@ def delete_repo(name):
     repos = config.get("repos", [])
     config["repos"] = [r for r in repos if r.get("name") != name]
     _write_config_file(config)
-def update_repo_config(name, source=None, platform=None, branch=None, auto_merge=None):
+
+
+def is_read_only(repo_name: str) -> bool:
+    """True if a repo is marked read-only: agents may investigate and review,
+    never change it."""
+    repo = get_repo(repo_name)
+    if not repo:
+        return False
+    return (repo.get("mode") or "").strip() == "read-only"
+
+
+def update_repo_config(name, source=None, platform=None, branch=None, auto_merge=None, mode=None):
     """Update repo configuration without re-cloning.
 
     In-place edits of the existing entry, so every other key the UI does not
@@ -136,6 +147,11 @@ def update_repo_config(name, source=None, platform=None, branch=None, auto_merge
                     r.pop("platform", None)
             if auto_merge is not None:
                 r["auto_merge"] = bool(auto_merge)
+            if mode is not None:
+                if mode:
+                    r["mode"] = mode
+                else:
+                    r.pop("mode", None)
             break
     config = _read_config_file()
     config["repos"] = repos
