@@ -290,6 +290,29 @@ def repos_readiness(name):
 
 
 @cli.group()
+def jira():
+    """Jira integration commands."""
+
+
+@jira.command("check")
+def jira_check():
+    """Check Jira connection and configuration.
+
+    Verifies that Jira is configured and accessible. Exit code 0 if connected,
+    1 if not.
+    """
+    from core import jira as jira_module
+
+    result = jira_module.check()
+    if result["ok"]:
+        click.echo(f"✓ connected as {result['detail']}")
+        raise SystemExit(0)
+    else:
+        click.echo(f"✗ {result['detail']}", err=True)
+        raise SystemExit(1)
+
+
+@cli.group()
 def dev():
     """Developer utilities."""
 

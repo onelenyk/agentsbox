@@ -18,6 +18,27 @@ from core import readiness
 class TestReadinessAssess:
     """Test core.readiness.assess() with various configurations."""
 
+    def test_tracker_configured(self):
+        """Tracker item passes when Jira is configured."""
+        repo = {"name": "test", "check": "test"}
+        with patch("core.readiness.get_repo", return_value=repo):
+            with patch("core.jira.configured", return_value=True):
+                result = readiness.assess("test")
+                tracker_item = [i for i in result["items"] if i["key"] == "tracker"][0]
+                assert tracker_item["ok"] is True
+                assert tracker_item["severity"] == "warn"
+
+    def test_tracker_not_configured(self):
+        """Tracker item warns when Jira is not configured."""
+        repo = {"name": "test", "check": "test"}
+        with patch("core.readiness.get_repo", return_value=repo):
+            with patch("core.jira.configured", return_value=False):
+                result = readiness.assess("test")
+                tracker_item = [i for i in result["items"] if i["key"] == "tracker"][0]
+                assert tracker_item["ok"] is False
+                assert tracker_item["severity"] == "warn"
+                assert "fix" in tracker_item and tracker_item["fix"]
+
     def test_missing_repo(self):
         """Assess returns block when repo is not found."""
         with patch("core.readiness.get_repo", return_value=None):
