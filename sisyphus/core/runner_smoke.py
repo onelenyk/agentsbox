@@ -129,6 +129,25 @@ async def smoke_test(runner: dict, timeout: int = DEFAULT_TIMEOUT) -> dict:
             env.pop(var, None)
         env.update(runner_profiles.build_env(rtype, runner))
 
+        # Network egress control: start the proxy if enabled and set env vars.
+        from .config import get_config
+        if get_config("sandbox.egress", False):
+            from . import egress
+            try:
+                proxy_port = await egress.start()
+                proxy_url = f"http://127.0.0.1:{proxy_port}"
+                env["HTTP_PROXY"] = proxy_url
+                env["HTTPS_PROXY"] = proxy_url
+                env["http_proxy"] = proxy_url
+                env["https_proxy"] = proxy_url
+                # NO_PROXY allows direct access to localhost and 127.0.0.1 (daemon's MCP endpoint)
+                env["NO_PROXY"] = "127.0.0.1,localhost"
+                env["no_proxy"] = "127.0.0.1,localhost"
+            except Exception as e:
+                logger.error("failed to start egress proxy for smoke test: %s", e)
+                return _result(False, "spawn", f"egress proxy failed: {e}",
+                               duration_ms=_ms(started), tool_called=False)
+
         if sandbox.enabled():
             argv = sandbox.wrap(argv, workdir, workdir)
 
