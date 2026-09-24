@@ -551,6 +551,158 @@ def _park_on_error(task_id: str) -> None:
 DecideFn = Callable[[dict, str], Awaitable[Decision]]
 
 
+def _obvious_step(task: dict, thread: list) -> Optional[Decision]:
+    """Return a decision for unambiguous thread states, or None to ask the model.
+
+    These are mechanical decisions based on latest message state, not requiring
+    the orchestrator agent: review is needed after an engineer delivers an MR,
+    done when a reviewer approves and the check passes, and re-engineer when
+    a reviewer requests changes. Never decides if a human message arrived after
+    the last worker result, or if the task has children or a pinned agent."""
+    from .config import get_config
+    from . import mergerequests
+
+    # Feature flag: rules can be turned off entirely.
+    if not get_config("orchestrator.rules", True):
+        return None
+
+    # Never decide on a task with a pinned agent or with children.
+    if task.get("agent") or store.list_children(task["id"]):
+        return None
+
+    # Never decide if a human answer or external message arrived after the last
+    # worker result — the model must read those.
+    def _last_worker_result_idx() -> int:
+        """Index of the last result from a worker, or -1 if none."""
+        for i in reversed(range(len(thread))):
+            if thread[i]["kind"] == "result" and thread[i]["author"] != "orchestrator":
+                return i
+        return -1
+
+    def _has_later_human_or_external(start_idx: int) -> bool:
+        """True if a human answer or external message comes after start_idx."""
+        for m in thread[start_idx + 1:]:
+            if m["author"] == "human" or m["kind"] in ("answer", "external"):
+                return True
+        return False
+
+    last_result_idx = _last_worker_result_idx()
+    if last_result_idx >= 0 and _has_later_human_or_external(last_result_idx):
+        return None
+
+    # Case a: engineer delivered an MR, and no reviewer has run since.
+    def _check_engineer_result_needs_review() -> Optional[Decision]:
+        """Spawn reviewer after engineer reports result + MR exists + no reviewer since."""
+        # Find the last result from an engineer (the first role that isn't reviewer/mr-reviewer).
+        engineer_result_idx = -1
+        engineer_role = None
+        for i in reversed(range(len(thread))):
+            m = thread[i]
+            if m["kind"] == "result" and m["author"] != "orchestrator":
+                # This is a result from a worker. Check if it's from a non-reviewer.
+                role = m["author"]
+                if "review" not in (role or "").lower():
+                    engineer_result_idx = i
+                    engineer_role = role
+                    break
+
+        if engineer_result_idx < 0:
+            return None
+
+        # Check that an MR exists.
+        mr = mergerequests.latest_for_task(task["id"])
+        if not mr:
+            return None
+
+        # Check that no reviewer result message comes after the engineer result.
+        for m in thread[engineer_result_idx + 1:]:
+            if m["kind"] == "result" and "review" in (m["author"] or "").lower():
+                return None  # reviewer has already run
+
+        instruction = (f"Verify the task goal is fully met: {task['goal']}. "
+                      "Start your final result with the single word APPROVED "
+                      "or with CHANGES REQUESTED.")
+        return Decision(
+            action="spawn_worker", role="reviewer",
+            instruction=instruction,
+            why="rule: engineer delivered an MR; review is next"
+        )
+
+    # Case b: reviewer approved and the MR check passed.
+    def _check_reviewer_approved() -> Optional[Decision]:
+        """Mark done when reviewer approved and MR check passed, no newer engineer commit."""
+        # Find the last result from a reviewer that starts with APPROVED.
+        reviewer_approval_idx = -1
+        for i in reversed(range(len(thread))):
+            m = thread[i]
+            if m["kind"] == "result" and "review" in (m["author"] or "").lower():
+                t = (m["text"] or "").lstrip().upper()
+                if t.startswith("APPROVED") and not t.startswith("NOT APPROVED"):
+                    reviewer_approval_idx = i
+                    break
+
+        if reviewer_approval_idx < 0:
+            return None
+
+        # Check that the MR's check passed (merge_block_reason is None).
+        mr = mergerequests.latest_for_task(task["id"])
+        if not mr:
+            return None
+
+        if mergerequests.merge_block_reason(mr) is not None:
+            return None  # check hasn't passed
+
+        # Check that no commit messages come after the reviewer approval.
+        for m in thread[reviewer_approval_idx + 1:]:
+            if m["kind"] == "commit":
+                return None  # newer engineer commit exists
+
+        return Decision(action="done", why="rule: reviewer approved and the check passed")
+
+    # Case c: reviewer requested changes, no engineer since.
+    def _check_reviewer_requested_changes() -> Optional[Decision]:
+        """Spawn engineer when reviewer requests changes and no engineer has run since."""
+        # Find the last result from a reviewer that starts with CHANGES REQUESTED.
+        reviewer_request_idx = -1
+        for i in reversed(range(len(thread))):
+            m = thread[i]
+            if m["kind"] == "result" and "review" in (m["author"] or "").lower():
+                t = (m["text"] or "").lstrip().upper()
+                if t.startswith("CHANGES REQUESTED"):
+                    reviewer_request_idx = i
+                    break
+
+        if reviewer_request_idx < 0:
+            return None
+
+        # Check that no engineer has run since (no worker activity for engineer).
+        for m in thread[reviewer_request_idx + 1:]:
+            if m["kind"] in ("worker_started", "worker_queued", "worker_finished"):
+                if "engineer" in (m["text"] or "").lower():
+                    return None  # engineer has already run
+
+        return Decision(
+            action="spawn_worker", role="engineer",
+            instruction="Address the reviewer's requested changes on this branch (see the latest reviewer result in the thread), commit, and update the merge request with open_mr.",
+            why="rule: reviewer requested changes"
+        )
+
+    # Try the three cases in order.
+    result = _check_engineer_result_needs_review()
+    if result:
+        return result
+
+    result = _check_reviewer_approved()
+    if result:
+        return result
+
+    result = _check_reviewer_requested_changes()
+    if result:
+        return result
+
+    return None
+
+
 async def handle_event(
     task_id: str, event_type: str, decide_fn: Optional[DecideFn] = None,
 ) -> tuple:
@@ -615,8 +767,14 @@ async def handle_event(
         return Decision(action="noop", why="the branch's own review is still running"), None
 
     thread_text = store.render_thread(task_id, for_prompt=True)
-    decide = decide_fn or _decide
-    decision = await decide(task, thread_text)
+
+    # Try obvious rules first, before asking the model.
+    thread = store.get_thread(task_id)
+    decision = _obvious_step(task, thread)
+    if decision is None:
+        # No obvious rule matched; ask the model.
+        decide = decide_fn or _decide
+        decision = await decide(task, thread_text)
 
     # The orchestrator must not self-certify quality — a 'done' needs a
     # reviewer's approval on the thread. Otherwise, spawn one.
