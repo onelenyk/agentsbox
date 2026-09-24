@@ -62,6 +62,7 @@ def init_agents_table() -> None:
     else:
         _refresh_orchestrator_persona(conn)
     _ensure_pinned_workers(conn)
+    _append_builtin_agent_tools(conn)
     conn.close()
 
 
@@ -91,6 +92,30 @@ def _ensure_pinned_workers(conn) -> None:
             (f"agent-{uuid4().hex[:8]}", name, spec["persona"],
              json.dumps(spec["tools"]), now, now),
         )
+    conn.commit()
+
+
+def _append_builtin_agent_tools(conn) -> None:
+    """Append new tools defined in ROLES to built-in agents, never removing
+    existing ones. This carries tool improvements from code changes onto
+    existing databases — a persona tune is a user's; a tool-list upgrade is
+    a code improvement, like _refresh_orchestrator_persona."""
+    from .roles import ROLES
+
+    for agent in conn.execute("SELECT id, name, tools FROM agents WHERE is_builtin = 1").fetchall():
+        role_spec = ROLES.get(agent["name"])
+        if not role_spec:
+            continue
+        current = json.loads(agent["tools"] or "[]")
+        target = role_spec["tools"]
+        # Only append tools that are in ROLES but missing from the agent
+        missing = [t for t in target if t not in current]
+        if missing:
+            new_tools = current + missing
+            conn.execute(
+                "UPDATE agents SET tools = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(new_tools), _now(), agent["id"])
+            )
     conn.commit()
 
 
