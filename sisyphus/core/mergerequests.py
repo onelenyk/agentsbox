@@ -305,6 +305,13 @@ def init_mr_table() -> None:
     if "merge_resolved" not in cols:
         conn.execute("ALTER TABLE merge_requests ADD COLUMN merge_resolved TEXT")
 
+    # The (head, reason) pairs an auto-merge attempt has already announced as
+    # waiting, as a JSON list. Per MR, because two MRs can be waiting for
+    # different reasons at the same commit; persisted, because the point is that
+    # a sweep every 300s does not re-post the same note on every tick.
+    if "auto_merge_notes" not in cols:
+        conn.execute("ALTER TABLE merge_requests ADD COLUMN auto_merge_notes TEXT")
+
     conn.commit()
     conn.close()
 
@@ -484,6 +491,166 @@ def verdict_line(mr: dict) -> str:
     return f"review {review} · {chk}"
 
 
+# ── Auto-merge ──────────────────────────────────────────────────────────
+#
+# A repo can opt in (config.yaml: repos[].auto_merge). When it does, an MR that
+# has cleared the merge gate merges itself — the gate already encodes when a
+# merge is safe, and a human pressing Merge added up to 15 days of latency
+# (four MRs approved 09-04 and merged 09-19). The rule is absolute: auto-merge
+# enforces exactly the guards the manual Merge button enforces, in the same
+# order, and never forces and never resolves a conflict with a model. A merge
+# the button would refuse is a merge auto-merge refuses.
+
+
+def record_merge_success(mr: dict, res: dict, prefix: str = "Merged",
+                         cite: Optional[str] = None) -> None:
+    """The single place a successful merge is marked and announced, shared by
+    the manual merge route and auto-merge so the two can never drift apart.
+    ``mark_merged`` first, then a thread note on the origin task naming the
+    evidence (``verdict_line``). *prefix* is the verb in the note ("Merged",
+    "Auto-merged"); *cite* overrides the evidence line for a force-override."""
+    from . import store
+    mark_merged(mr["id"], res["sha"])
+    if cite is None:
+        cite = verdict_line(mr)
+    store.post_message(
+        mr["task_id"], "system", kind="note",
+        text=(f"{prefix} {mr['source_branch']} into {res['target']} "
+              f"({res['sha'][:8]}) in {mr['source_path']} — {cite}"))
+
+
+def _auto_merge_waiting_keys(mr_id: str) -> set:
+    """The (head, reason) pairs already announced for *mr_id* — the dedup ledger
+    that stops repeated sweeps from spamming the origin thread."""
+    conn = get_conn()
+    row = conn.execute("SELECT auto_merge_notes FROM merge_requests WHERE id = ?",
+                       (mr_id,)).fetchone()
+    conn.close()
+    raw = (row[0] if row else None) or ""
+    if not raw:
+        return set()
+    try:
+        return set(json.loads(raw))
+    except (ValueError, TypeError):
+        return set()
+
+
+def _note_auto_merge_waiting(mr: dict, reason: str) -> None:
+    """Post one 'auto-merge waiting: …' note on the origin task, once per
+    (head, reason): a sweep that finds the same block on the next tick adds
+    nothing. Best-effort — a note must never fail the attempt that produced it."""
+    if not mr.get("task_id"):
+        return
+    head = current_head(mr)
+    key = f"{head or '?'}::{reason}"
+    if key in _auto_merge_waiting_keys(mr["id"]):
+        return
+    from . import store
+    store.post_message(mr["task_id"], author="system", kind="note",
+                       text=f"auto-merge waiting: {reason}")
+    keys = _auto_merge_waiting_keys(mr["id"])
+    keys.add(key)
+    conn = get_conn()
+    conn.execute(
+        "UPDATE merge_requests SET auto_merge_notes = ?, updated_at = ? WHERE id = ?",
+        (json.dumps(sorted(keys)), _now(), mr["id"]))
+    conn.commit()
+    conn.close()
+
+
+def try_auto_merge(mr: dict) -> Optional[str]:
+    """Merge *mr* automatically when the repo opted in and the gate is clear.
+    Returns the merge sha, or None when nothing merged.
+
+    Every guard the manual Merge button enforces is enforced here, in the same
+    order, so auto-merge never lands something the button would refuse:
+
+      * the repo carries ``auto_merge: true`` in config.yaml;
+      * the MR is open;
+      * ``merge_block_reason`` is None — approved, and the recorded check
+        passed against the branch's current head;
+      * ``check_mergeability`` says the branch merges cleanly;
+      * ``merge_branch`` succeeds — it refuses a dirty checkout of the target.
+
+    On a block, one deduplicated 'auto-merge waiting' note goes to the origin
+    task. Never forces, never resolves conflicts with a model.
+    """
+    from core.repos import get_repo
+    if not (get_repo(mr.get("repo", "")) or {}).get("auto_merge"):
+        return None
+    # Decide on the CURRENT row, not the caller's possibly stale snapshot: a
+    # concurrent merge or a moved branch must be seen, not guessed from memory.
+    mr = get_mr(mr["id"]) or mr
+    if mr.get("status") != "open":
+        return None
+    head = current_head(mr)
+    blocked = merge_block_reason(mr, head)
+    if blocked:
+        _note_auto_merge_waiting(mr, blocked)
+        return None
+    merge = check_mergeability(mr["bare_path"], mr["source_path"],
+                               mr["source_branch"], mr["target_branch"])
+    if not merge.get("ok"):
+        _note_auto_merge_waiting(mr, merge.get("error") or "cannot check mergeability")
+        return None
+    if not merge.get("mergeable"):
+        _note_auto_merge_waiting(
+            mr, "the branch does not merge cleanly — resolve the conflicts first")
+        return None
+    res = merge_branch(mr, mr["target_branch"])
+    if not res.get("ok"):
+        _note_auto_merge_waiting(mr, res.get("error") or "merge failed")
+        return None
+    record_merge_success(mr, res, prefix="Auto-merged")
+    return res.get("sha")
+
+
+def schedule_auto_merge(mr_id: str) -> None:
+    """Attempt an auto-merge for *mr_id* off the event loop, best-effort: the
+    verdict or check result is recorded either way.
+
+    With a running loop (an MCP tool call on the daemon's loop) the attempt is
+    scheduled on a worker thread via ``asyncio.to_thread``, because it runs git
+    and the repo's check. Without one (a daemon worker thread) it runs inline,
+    where blocking is already expected and the loop is not at risk.
+    """
+    mr = get_mr(mr_id)
+    if not mr:
+        return
+
+    def _run() -> None:
+        try:
+            try_auto_merge(mr)
+        except Exception:  # noqa: BLE001 — a failed attempt must not break the caller
+            logger.exception("auto-merge attempt failed for %s", mr_id)
+
+    try:
+        import asyncio
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop is not None:
+        loop.create_task(asyncio.to_thread(_run))
+    else:
+        _run()
+
+
+def sweep_auto_merge() -> int:
+    """One sweep: try auto-merge on every open MR. Returns how many merged.
+
+    Runs from the daemon's periodic loop (core.forge_poll, every 300s) so an MR
+    blocked only by a dirty target checkout lands once the tree is clean — the
+    one block no event fires to clear."""
+    merged = 0
+    for mr in list_mrs(status="open"):
+        try:
+            if try_auto_merge(mr):
+                merged += 1
+        except Exception:  # noqa: BLE001 — one bad MR must not end the sweep
+            logger.exception("auto-merge sweep failed for %s", mr.get("id"))
+    return merged
+
+
 def set_check_result(mr_id: str, status: str, output: str = "", command: str = "",
                      head: str = "") -> None:
     """Record what the daemon's own check found: 'passed', 'failed' or
@@ -501,6 +668,10 @@ def set_check_result(mr_id: str, status: str, output: str = "", command: str = "
     )
     conn.commit()
     conn.close()
+    # A passing check is one half of the gate; attempt auto-merge right away so
+    # an opted-in repo does not wait for the next sweep.
+    if status == "passed":
+        schedule_auto_merge(mr_id)
 
 
 # ── Forge-side state (what core.forge_poll observed on GitHub/GitLab) ────
@@ -564,6 +735,10 @@ def set_review_status(mr_id: str, review_status: str) -> None:
     )
     conn.commit()
     conn.close()
+    # An approval is the other half of the gate — the review and the check may
+    # land in either order, so each of them attempts auto-merge on its own.
+    if review_status == "approved":
+        schedule_auto_merge(mr_id)
 
 
 def _dict(row) -> Optional[dict]:

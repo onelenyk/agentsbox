@@ -313,6 +313,52 @@ class TestUpdateRepoConfig:
         updated = mock_dump.call_args[0][0]["repos"][0]
         assert "platform" not in updated
 
+    def test_toggling_auto_merge_keeps_every_other_key(self):
+        """_save_repo_config rebuilds the entry and would drop `check`, so the
+        toggle must route through update_repo_config's in-place edit — and the
+        save must keep check/setup/platform untouched while flipping the flag."""
+        repos = [{"name": "repo1", "source": "old-src", "branch": "old-br",
+                  "platform": "gitlab", "check": "pytest -q",
+                  "setup": {"copy": ["local.properties"]}}]
+        with patch("core.repos.load_repos", return_value=[r.copy() for r in repos]):
+            fake_config = {"repos": [r.copy() for r in repos]}
+            with patch("core.repos.yaml.safe_load", return_value=fake_config):
+                with patch("core.repos.yaml.dump", return_value="dumped-yaml") as mock_dump:
+                    with patch("core.config.reload_config"):
+                        with patch.object(core.repos.Path, "read_text", return_value=""):
+                            with patch.object(core.repos.Path, "write_text"):
+                                core.repos.update_repo_config("repo1", auto_merge=True)
+
+        updated = mock_dump.call_args[0][0]["repos"][0]
+        assert updated["auto_merge"] is True
+        assert updated["check"] == "pytest -q"
+        assert updated["setup"] == {"copy": ["local.properties"]}
+        assert updated["platform"] == "gitlab"
+        assert updated["source"] == "old-src"
+        assert updated["branch"] == "old-br"
+
+    def test_unchecking_auto_merge_sets_it_false(self):
+        repos = [{"name": "repo1", "source": "old-src", "branch": "old-br",
+                  "check": "pytest -q", "auto_merge": True}]
+        with patch("core.repos.load_repos", return_value=[r.copy() for r in repos]):
+            fake_config = {"repos": [r.copy() for r in repos]}
+            with patch("core.repos.yaml.safe_load", return_value=fake_config):
+                with patch("core.repos.yaml.dump", return_value="dumped-yaml") as mock_dump:
+                    with patch("core.config.reload_config"):
+                        with patch.object(core.repos.Path, "read_text", return_value=""):
+                            with patch.object(core.repos.Path, "write_text"):
+                                core.repos.update_repo_config("repo1", auto_merge=False)
+
+        updated = mock_dump.call_args[0][0]["repos"][0]
+        assert updated["auto_merge"] is False
+        assert updated["check"] == "pytest -q"
+
+    def test_auto_merge_absent_by_default(self):
+        """A repo entry without the key reads as off — auto_merge is an opt-in."""
+        with patch("core.repos.load_repos",
+                   return_value=[{"name": "p", "source": "s", "branch": "main"}]):
+            assert core.repos.get_repo("p").get("auto_merge") in (None, False)
+
 
 class TestRepoCredential:
     """A single global token per forge holds only until there are two
