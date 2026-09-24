@@ -262,7 +262,6 @@ def poll_once(actor: str = "daemon:jira-poll") -> dict:
 
     last_seen is written only after a successful pass.
     """
-    from .config import get_config
 
     intake_config = get_config("jira", {}).get("intake", {})
 
@@ -322,7 +321,6 @@ async def poll_forever() -> None:
     Polls once every jira.intake.interval_seconds (default 300, floor 60).
     Registers a heartbeat and never lets an exception end the loop.
     """
-    from .config import get_config
 
     intake_config = get_config("jira", {}).get("intake", {})
     interval = int(intake_config.get("interval_seconds", DEFAULT_INTERVAL) or DEFAULT_INTERVAL)

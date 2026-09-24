@@ -1,6 +1,5 @@
 """Tests for Jira issue intake — creating tasks from Jira issues."""
 import pytest
-from datetime import datetime, timezone
 from core import jira_intake, store, integrations
 from core.jira import JiraError
 
@@ -126,7 +125,7 @@ class TestImportIssues:
     def test_import_skips_existing(self, db_path, monkeypatch):
         """import_issues skips issues that were already imported."""
         # Create an existing task with origin
-        existing_task = store.create_task("old goal", "test-repo", origin="jira:ABC-1")
+        store.create_task("old goal", "test-repo", origin="jira:ABC-1")
 
         # Mock jira.search
         issues = [_issue("ABC-1", "First bug"), _issue("ABC-2", "New bug")]
