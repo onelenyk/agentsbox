@@ -1937,6 +1937,29 @@ async def mr_land(request: Request, mr_id: str):
         ctx["error"] = res.get("error", "land failed")
     return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
 
+async def _recheck_stale_gate(mr: dict, blocked: str):
+    """When the only thing blocking a merge is a stale check — the daemon's
+    verdict covers an older commit, not the branch's current head — re-run the
+    check against the current head and re-read the gate before refusing
+    (SIS-115, mr-acbf1f50: the merge sat blocked until someone re-ran the check
+    by hand). A fresh failure blocks with itself; a clean pass clears the gate.
+    Returns (current row, blocked reason).
+
+    The run is long (~80s on this repo), so it stays off the event loop.
+    ``blocked and gate_state == 'check-stale'`` is exactly "the only blocker is
+    the stale check": gate_state reaches 'check-stale' only when the review is
+    approved and the recorded check did not fail, so the stale verdict is the
+    whole reason. ``force`` never reaches here — an explicit override does not
+    wait for a re-run.
+    """
+    from core import verify
+    if mergerequests.gate_state(mr) == "check-stale":
+        await asyncio.to_thread(verify.run_and_record, mr)
+        mr = mergerequests.get_mr(mr["id"])
+        blocked = mergerequests.merge_block_reason(mr)
+    return mr, blocked
+
+
 @router.post("/api/mr/{mr_id}/merge", response_class=HTMLResponse)
 async def mr_merge(request: Request, mr_id: str, force: str = Form("")):
     from core import mergerequests, store
@@ -1949,9 +1972,14 @@ async def mr_merge(request: Request, mr_id: str, force: str = Form("")):
         return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
     blocked = mergerequests.merge_block_reason(mr)
     if blocked and not force:
-        ctx = _mr_view_ctx(request, mr)
-        ctx["error"] = f"{blocked} — merge blocked; use Merge anyway to override"
-        return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
+        # A stale check is not a refusal — the branch may simply have moved
+        # since the daemon's check ran. Re-run against the current head first,
+        # then re-evaluate the gate.
+        mr, blocked = await _recheck_stale_gate(mr, blocked)
+        if blocked:
+            ctx = _mr_view_ctx(request, mr)
+            ctx["error"] = f"{blocked} — merge blocked; use Merge anyway to override"
+            return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
     res = mergerequests.merge_branch(mr, mr["target_branch"])
     if res.get("ok"):
         mergerequests.mark_merged(mr_id, res["sha"])
@@ -1996,9 +2024,13 @@ async def mr_merge_resolve(request: Request, mr_id: str, force: str = Form("")):
         return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
     blocked = mergerequests.merge_block_reason(mr)
     if blocked and not force:
-        ctx = _mr_view_ctx(request, mr)
-        ctx["error"] = f"{blocked} — merge blocked; use Merge anyway to override"
-        return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
+        # Same as the plain merge route: a stale check re-runs rather than
+        # refuses.
+        mr, blocked = await _recheck_stale_gate(mr, blocked)
+        if blocked:
+            ctx = _mr_view_ctx(request, mr)
+            ctx["error"] = f"{blocked} — merge blocked; use Merge anyway to override"
+            return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
 
     ctx = _mr_view_ctx(request, mr)
     merge = ctx["merge"]

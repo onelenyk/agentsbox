@@ -780,6 +780,101 @@ def test_open_mr_fires_review_hook(db_path):
     assert (review_tasks[0]["id"], "created") in emitted
 
 
+def test_open_mr_on_a_moved_head_rechecks_the_new_commit(db_path, tmp_path):
+    """A second open_mr after the branch head moved re-runs the daemon's check
+    against the new head; the dedup at the top of ensure_review_task must not
+    skip it (SIS-115, mr-acbf1f50: b7e0920 was never checked because a review
+    task already existed, so the merge sat blocked on check-stale)."""
+    import web.agent_mcp as am
+    from core import mergerequests, sessions
+
+    sessions.clear()
+    task = store.create_task("build recheck", repo="test-repo")
+    token = sessions.mint(task["id"], "engineer", worktree="/tmp/wt")
+    c = _client()
+
+    real = tmp_path / "real"; real.mkdir()
+    for a in (["init", "-b", "main"], ["config", "user.email", "t@t"],
+              ["config", "user.name", "T"]):
+        subprocess.run(["git", "-C", str(real), *a], capture_output=True)
+    (real / "f.txt").write_text("1\n")
+    subprocess.run(["git", "-C", str(real), "add", "-A"], capture_output=True)
+    subprocess.run(["git", "-C", str(real), "commit", "-m", "init"], capture_output=True)
+    subprocess.run(["git", "-C", str(real), "branch", "sisyphus/task-recheck"],
+                   capture_output=True)
+    bare = tmp_path / "bare"
+    subprocess.run(["git", "clone", "--bare", str(real), str(bare)], capture_output=True)
+
+    def _pub(session, title, description):
+        existing = mergerequests.find_open_mr(session["task_id"], "sisyphus/task-recheck", "main")
+        if existing:
+            mr = mergerequests.update_mr(existing["id"], title=title)
+        else:
+            mr = mergerequests.create_mr(
+                task_id=session["task_id"], repo="test-repo",
+                source_branch="sisyphus/task-recheck", target_branch="main",
+                title=title, bare_path=str(bare), base_branch="main",
+                source_path=str(real))
+        return {"ok": True, "platform": "local", "branch": "sisyphus/task-recheck",
+                "stat": " f | 1 +", "patch_file": "change.patch", "mr_id": mr["id"]}
+
+    def _passing(mr, timeout=900):
+        return {"ran": True, "ok": True, "exit_code": 0, "command": "pytest -q",
+                "output": "1095 passed", "duration_ms": 1, "reason": ""}
+
+    with patch("core.git_ops.is_git_repo", return_value=True), \
+         patch("core.git_ops.commit_all", return_value="a" * 40), \
+         patch("core.providers.publish_change", side_effect=_pub), \
+         patch("core.orchestrator.emit", lambda t, e: None), \
+         patch("core.verify.run_check", side_effect=_passing):
+        _call(c, token, "commit", {"message": "x"})
+        _call(c, token, "open_mr", {"title": "first"})
+        am._last_review_hook.join(timeout=10)
+
+    mr = mergerequests.latest_for_task(task["id"])
+    assert mr["check_status"] == "passed"
+    head_a = mr["check_head"]
+    assert head_a == subprocess.run(
+        ["git", "-C", str(bare), "rev-parse", "sisyphus/task-recheck"],
+        capture_output=True, text=True).stdout.strip()
+
+    # The branch head moves after the first check.
+    wt = tmp_path / "wt"
+    subprocess.run(["git", "-C", str(bare), "worktree", "add", str(wt),
+                    "sisyphus/task-recheck"], capture_output=True)
+    (wt / "f.txt").write_text("2\n")
+    subprocess.run(["git", "-C", str(wt), "add", "-A"], capture_output=True)
+    subprocess.run(["git", "-C", str(wt), "-c", "user.email=t@t", "-c", "user.name=T",
+                    "commit", "-m", "head moves"], capture_output=True)
+    subprocess.run(["git", "-C", str(bare), "worktree", "remove", "--force", str(wt)],
+                   capture_output=True)
+    head_b = subprocess.run(
+        ["git", "-C", str(bare), "rev-parse", "sisyphus/task-recheck"],
+        capture_output=True, text=True).stdout.strip()
+    assert head_b != head_a
+
+    # Second open_mr: the review task already exists (dedup → None), but the
+    # moved head must still trigger a re-run recorded against the new commit.
+    with patch("core.providers.publish_change", side_effect=_pub), \
+         patch("core.orchestrator.emit", lambda t, e: None), \
+         patch("core.verify.run_check", side_effect=_passing):
+        _call(c, token, "open_mr", {"title": "second"})
+        am._last_review_hook.join(timeout=10)
+
+    row = mergerequests.get_mr(mr["id"])
+    assert row["check_head"] == head_b
+    assert row["check_status"] == "passed"
+
+    # The re-run's verdict line lands on the EXISTING review task's thread, so
+    # its reviewer reads the current result (the goal still carries the old line).
+    review_tasks = [t for t in store.list_tasks()
+                    if t.get("agent") == "mr-reviewer"
+                    and f"Review-of-MR: {mr['id']}" in t["goal"]]
+    assert len(review_tasks) == 1
+    thread = store.get_thread(review_tasks[0]["id"])
+    assert any("Automated check PASSED" in m["text"] for m in thread)
+
+
 def test_second_decision_in_one_pass_is_rejected(db_path):
     """Exactly one decision per decider pass: the first wins, a second decide_*
     call errors instead of silently overwriting (live incident task-1e23e9e8:

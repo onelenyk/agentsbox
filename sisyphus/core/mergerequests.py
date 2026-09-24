@@ -358,6 +358,31 @@ def current_head(mr: dict) -> str:
     return res.stdout.strip() if res.returncode == 0 else ""
 
 
+def needs_recheck(mr: dict, head: Optional[str] = None) -> bool:
+    """True when the recorded check does not cover the source branch's current
+    head — a re-run would give the reviewer a verdict for the commit that is
+    actually there.
+
+    The daemon's check only ever ran inside reviews.ensure_review_task, which
+    dedups at the top, so a second open_mr after the branch moved never
+    re-checked the new head and the merge sat blocked on check-stale (SIS-115,
+    mr-acbf1f50). Both the review hook and the merge gate re-run the check when
+    this is true.
+
+    False when the record is silent about its commit — every MR checked before
+    the check_head column existed. That is a gap in our bookkeeping, not
+    evidence the branch moved, for the same reason the gate never calls a
+    silent record stale. *head* of None resolves the branch's current head the
+    same way the gate does when it decides "check-stale".
+    """
+    ran_head = (mr.get("check_head") or "").strip()
+    if not ran_head:
+        return False
+    if head is None:
+        head = current_head(mr)
+    return bool(head) and ran_head != head
+
+
 def _stale_check_reason(mr: dict, head: Optional[str]) -> Optional[str]:
     """Why a recorded pass does not cover the branch as it stands, or None.
 
