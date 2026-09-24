@@ -12,6 +12,7 @@ state of its own, so it cannot drift away from the truth it reports on.
 """
 import argparse
 import json
+import re
 import os
 import subprocess
 import sys
@@ -209,15 +210,10 @@ def readiness(conn, days: int) -> dict:
            AND text LIKE '%set aside%'
     """, (cut,)).fetchall()
     for fault_row in faults:
-        text = fault_row["text"]
-        # Try to extract provider name from the text (e.g., "set aside: anthropic")
-        # Common pattern: "set aside" followed by provider name
-        if "anthropic" in text.lower():
-            provider_faults["anthropic"] = provider_faults.get("anthropic", 0) + 1
-        elif "openai" in text.lower():
-            provider_faults["openai"] = provider_faults.get("openai", 0) + 1
-        else:
-            provider_faults["unknown"] = provider_faults.get("unknown", 0) + 1
+        # core.worker._set_aside_note writes "The <provider> runner is set aside".
+        m = re.search(r"The (\S+) runner is set aside", fault_row["text"] or "")
+        name = m.group(1) if m else "unknown"
+        provider_faults[name] = provider_faults.get(name, 0) + 1
 
     # Duplicate workers: tasks with two worker_started with no worker_finished between
     duplicates = 0
@@ -372,7 +368,7 @@ def render(r: dict) -> str:
         faults_str = ", ".join(f"{k}: {v}" for k, v in rd['provider_faults'].items())
         lines.append(f"    provider faults    {faults_str}")
     else:
-        lines.append(f"    provider faults    none")
+        lines.append("    provider faults    none")
     lines.extend([
         f"    duplicate workers  {rd['duplicates']} tasks with concurrent starts",
         f"    lost work          {rd['lost_work']} done tasks with commits but no MR",

@@ -177,21 +177,15 @@ def test_readiness_wasted_runs_zero_when_no_finished(db_path):
 
 
 def test_readiness_provider_faults_counts_cooldowns(db_path):
-    t1 = store.create_task("anthropic cooldown", repo="sisyphus")
-    store.post_message(t1["id"], "orchestrator", kind="worker_finished",
-                      text="set aside: anthropic rate limit")
-
-    t2 = store.create_task("anthropic again", repo="sisyphus")
-    store.post_message(t2["id"], "orchestrator", kind="worker_finished",
-                      text="set aside by anthropic")
-
-    t3 = store.create_task("openai issue", repo="sisyphus")
-    store.post_message(t3["id"], "orchestrator", kind="worker_finished",
-                      text="set aside: openai quota exceeded")
+    """Counted per provider, from the sentence core.worker._set_aside_note writes."""
+    note = ("engineer ended without reporting a result. The {} runner is set aside "
+            "until 14:05 UTC: its run never reached the model.")
+    for provider in ("claude", "claude", "opencode-go"):
+        t = store.create_task(f"{provider} fault", repo="sisyphus")
+        store.post_message(t["id"], "system", kind="worker_finished", text=note.format(provider))
 
     r = readiness(get_conn(), days=30)
-    assert r["provider_faults"]["anthropic"] == 2
-    assert r["provider_faults"]["openai"] == 1
+    assert r["provider_faults"] == {"claude": 2, "opencode-go": 1}
 
 
 def test_readiness_provider_faults_empty_when_no_cooldowns(db_path):
@@ -383,13 +377,13 @@ def test_readiness_human_turns_per_delivered_task(db_path):
 
     # Task 1: delivered, no human answers
     t1 = store.create_task("auto delivery", repo="sisyphus")
-    mr1 = mrs.create_mr(t1["id"], "sisyphus", "sisyphus/task-1", "main")
+    mrs.create_mr(t1["id"], "sisyphus", "sisyphus/task-1", "main")
 
     # Task 2: delivered, 1 human answer
     t2 = store.create_task("one question", repo="sisyphus")
     store.post_message(t2["id"], "orchestrator", kind="question", text="ok?")
     store.post_message(t2["id"], "human", kind="answer", text="yes")
-    mr2 = mrs.create_mr(t2["id"], "sisyphus", "sisyphus/task-2", "main")
+    mrs.create_mr(t2["id"], "sisyphus", "sisyphus/task-2", "main")
 
     # Task 3: delivered, 2 human answers
     t3 = store.create_task("two questions", repo="sisyphus")
@@ -397,7 +391,7 @@ def test_readiness_human_turns_per_delivered_task(db_path):
     store.post_message(t3["id"], "human", kind="answer", text="left")
     store.post_message(t3["id"], "orchestrator", kind="question", text="really?")
     store.post_message(t3["id"], "human", kind="answer", text="yes")
-    mr3 = mrs.create_mr(t3["id"], "sisyphus", "sisyphus/task-3", "main")
+    mrs.create_mr(t3["id"], "sisyphus", "sisyphus/task-3", "main")
 
     # Task 4: not delivered (no MR)
     t4 = store.create_task("not delivered", repo="sisyphus")
@@ -409,7 +403,7 @@ def test_readiness_human_turns_per_delivered_task(db_path):
 
 
 def test_readiness_human_turns_zero_when_no_delivered(db_path):
-    t = store.create_task("not delivered", repo="sisyphus")
+    store.create_task("not delivered", repo="sisyphus")
     r = readiness(get_conn(), days=30)
     assert r["human_per_delivered"] == 0.0
 
