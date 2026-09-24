@@ -44,6 +44,9 @@ def assess(repo_name: str) -> dict:
 
     items = []
 
+    # Tracker: Jira must be configured for issues to become tasks
+    items.append(_assess_tracker())
+
     # Determine platform (explicit or inferred)
     source = repo.get("source", "")
     platform = (repo.get("platform") or "").strip() or detect_platform(source)
@@ -79,6 +82,21 @@ def assess(repo_name: str) -> dict:
         "repo": repo_name,
         "ready": ready,
         "items": items
+    }
+
+
+def _assess_tracker() -> dict:
+    """Jira must be configured for issues to become tasks (optional but recommended)."""
+    from core import jira
+    ok = jira.configured()
+    return {
+        "key": "tracker",
+        "ok": ok,
+        "severity": "warn",
+        "text": "Jira is configured; issues can become tasks on their own."
+                if ok else "No tracker configured; issues will not become tasks on their own.",
+        "fix": "Set JIRA_BASE_URL, JIRA_EMAIL and JIRA_API_TOKEN in .env"
+               if not ok else ""
     }
 
 
