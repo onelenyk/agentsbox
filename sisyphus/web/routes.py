@@ -168,6 +168,10 @@ async def startup():
     from core import forge_poll
     lifecycle.start_loop(forge_poll.poll_forever(), "forge poll")
 
+    # Poll Jira for new issues matching the configured intake JQL — creates tasks on demand.
+    from core import jira_intake
+    lifecycle.start_loop(jira_intake.poll_forever(), "jira poll")
+
     # A consistent snapshot at boot and daily after — restore is only as good
     # as the last time anything actually called snapshot().
     from core import backup
@@ -2419,3 +2423,28 @@ async def task_delete(task_id: str):
     resp = Response(status_code=200)
     resp.headers["HX-Redirect"] = "/tasks"   # navigate back to the board
     return resp
+
+
+@router.post("/api/integrations/jira/import", response_class=HTMLResponse)
+async def jira_import(jql: str = Form(...), repo: str = Form(...), max_results: int = Form(200)):
+    """Import tasks from Jira issues matching a JQL.
+
+    Returns an HTML fragment with the result (created count, skipped count).
+    JiraError responses render as error text, never a 500.
+    """
+    from core import jira_intake
+    from core.jira import JiraError
+
+    try:
+        result = await asyncio.to_thread(jira_intake.import_issues, jql, repo, "human:ui", max_results)
+        created = len(result.get("created", []))
+        skipped = len(result.get("skipped", []))
+        message = f"Created {created} task{'s' if created != 1 else ''}"
+        if skipped:
+            message += f", skipped {skipped}"
+        return HTMLResponse(f'<div class="flash">{message}</div>')
+    except JiraError as exc:
+        return HTMLResponse(f'<div class="flash error">{exc}</div>', status_code=200)
+    except Exception as exc:
+        logger.exception("jira_import failed")
+        return HTMLResponse(f'<div class="flash error">Import failed: {exc}</div>', status_code=200)
