@@ -1,0 +1,7 @@
+<div class="card-check">
+  {% if ok %}
+  <span class="probe probe--ok"><span>✓ {{ detail }}</span></span>
+  {% else %}
+  <span class="probe probe--bad"><span>{{ detail }}</span></span>
+  {% endif %}
+</div>

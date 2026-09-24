@@ -1,0 +1,144 @@
+{# Provider cards #}
+<div class="integrations-providers">
+  {% for p, prov in providers.items() %}
+  <div class="integration-card">
+    <div class="card-header">
+      <div class="card-title">{{ prov.name }}</div>
+      <div class="card-status">
+        {% if prov.configured %}
+        <span class="badge badge--ok">Configured</span>
+        {% else %}
+        <span class="badge badge--warn">Not configured — set JIRA_EMAIL and JIRA_API_TOKEN in .env</span>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if prov.configured %}
+    <div class="card-check">
+      <button class="btn btn--ghost btn--sm" hx-post="/api/integrations/{{ p }}/check" hx-target="closest .card-check" hx-swap="outerHTML">Check connection</button>
+    </div>
+
+    {% set summary = prov.summary %}
+    <div class="card-stats">
+      {% if summary.last %}
+      <div class="stat-line">
+        <span class="label">Last event:</span>
+        <span class="value">{{ summary.last.created_at | when }} — {{ summary.last.detail }}</span>
+      </div>
+      {% endif %}
+
+      <div class="stat-line">
+        <span class="label">Today:</span>
+        <span class="value">{{ summary.calls }} call{{ 's' if summary.calls != 1 else '' }}{% if summary.failed %} · {{ summary.failed }} failed{% endif %}</span>
+      </div>
+
+      {% for action in summary.actions %}
+      <div class="stat-line">
+        <span class="label">{{ action.action }}:</span>
+        <span class="value">{{ action.calls }} call{{ 's' if action.calls != 1 else '' }}{% if action.things %} · {{ action.things }} item{{ 's' if action.things != 1 else '' }}{% endif %}{% if action.failed %} · {{ action.failed }} failed{% endif %}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="card-empty">
+      No events recorded yet.
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+{# Filter row #}
+<div class="integrations-filters">
+  <div class="fbar">
+    <label class="fbar__pick">
+      <span class="fbar__label">Provider</span>
+      <select data-f-field="provider" onchange="updateIntegrationsFilter()">
+        <option value="">all</option>
+        <option value="jira" {% if selected_provider == 'jira' %}selected{% endif %}>Jira</option>
+        <option value="gitlab" {% if selected_provider == 'gitlab' %}selected{% endif %}>GitLab</option>
+        <option value="github" {% if selected_provider == 'github' %}selected{% endif %}>GitHub</option>
+      </select>
+    </label>
+    <label class="fbar__pick">
+      <input type="checkbox" id="errors-toggle" {% if errors_only %}checked{% endif %} onchange="updateIntegrationsFilter()">
+      <span class="fbar__label">only errors</span>
+    </label>
+  </div>
+</div>
+
+{# Events table #}
+<div class="integrations-events">
+  {% if events %}
+  <table class="events-table">
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Actor</th>
+        <th>Action</th>
+        <th>Subject</th>
+        <th>Detail</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ev in events %}
+      <tr class="{% if not ev.ok %}row-error{% endif %}">
+        <td class="col-time">{{ ev.created_at | when }}</td>
+        <td class="col-actor">
+          {% if ev.actor.startswith('agent:') %}
+          {%- set parts = ev.actor.split('@') %}
+          {%- set role = parts[0].replace('agent:', '') %}
+          {%- if ev.task_id %}
+          <a href="/tasks/{{ ev.task_id }}" class="actor-link">{{ role }} <span class="actor-task">{{ ev.task_id[:8] }}</span></a>
+          {%- else %}
+          <span>{{ role }}</span>
+          {%- endif %}
+          {% elif ev.actor.startswith('daemon:') %}
+          <span class="actor-daemon">{{ ev.actor.replace('daemon:', '') }}</span>
+          {% elif ev.actor == 'human:ui' %}
+          <span class="actor-human">you (UI)</span>
+          {% else %}
+          <span>{{ ev.actor }}</span>
+          {% endif %}
+        </td>
+        <td class="col-action">{{ ev.action }}</td>
+        <td class="col-subject">
+          {% if ev.subject and ev.provider == 'jira' and jira_base_url %}
+          {%- if not ev.subject.startswith('find') and not ev.subject.startswith('SELECT') %}
+          <a href="{{ jira_base_url }}/browse/{{ ev.subject }}" class="subject-link" target="_blank">{{ ev.subject }}</a>
+          {%- else %}
+          <code class="subject-code" title="{{ ev.subject }}">{{ ev.subject[:60] }}{% if ev.subject|length > 60 %}…{% endif %}</code>
+          {%- endif %}
+          {% elif ev.subject %}
+          {% if ev.provider == 'jira' and not ev.subject.startswith('find') and not ev.subject.startswith('SELECT') %}
+          {{ ev.subject }}
+          {% else %}
+          <code class="subject-code" title="{{ ev.subject }}">{{ ev.subject[:60] }}{% if ev.subject|length > 60 %}…{% endif %}</code>
+          {% endif %}
+          {% else %}
+          <span class="muted">—</span>
+          {% endif %}
+        </td>
+        <td class="col-detail">
+          {{ ev.detail }}
+          {% if not ev.ok and ev.error %}
+          <div class="error-text">✗ {{ ev.error }}</div>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">Nothing yet — the first Jira import will show here.</div>
+  {% endif %}
+</div>
+
+<script>
+function updateIntegrationsFilter() {
+  var provider = document.querySelector('[data-f-field="provider"]').value || '';
+  var errors = document.getElementById('errors-toggle').checked ? 1 : 0;
+  var url = '/api/integrations/view?provider=' + encodeURIComponent(provider) + '&errors=' + errors + '&limit=100';
+  htmx.ajax('GET', url, '#integrations-view');
+}
+</script>
