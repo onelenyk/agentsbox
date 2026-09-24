@@ -106,7 +106,6 @@ class TestRetryLogic:
 
     def test_429_with_retry_after_is_retried_and_succeeds(self, monkeypatch, db_path, jira_config):
         """A 429 with Retry-After sleeps and retries, succeeds, and journals retries=1."""
-        import time as time_module
 
         call_count = [0]
         sleep_calls = []
