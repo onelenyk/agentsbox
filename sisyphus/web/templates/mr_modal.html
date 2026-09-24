@@ -59,6 +59,11 @@
 
             {% if mr.status == 'open' %}
             <div class="mr-actions">
+                {% if mr.forge_url %}
+                {# Forge MR: merging happens on the forge, not locally. Show a link instead of a merge button. #}
+                <a href="{{ mr.forge_url }}" target="_blank" class="btn btn--primary btn--sm">🔗 Open on forge</a>
+                {% else %}
+                {# Local MR: merge button and land branch option. #}
                 <button type="button" class="btn btn--ghost btn--sm" hx-post="/api/mr/{{ mr.id }}/land" hx-target="#modal-container" hx-swap="innerHTML"
                         hx-confirm="Fetch {{ mr.source_branch }} into your real repo ({{ mr.source_path }})? Adds a branch — nothing else is touched.">Land branch</button>
                 {% if blocked %}
@@ -76,6 +81,7 @@
                         hx-post="/api/mr/{{ mr.id }}/merge-resolve" hx-target="#modal-container" hx-swap="innerHTML"
                         {% if blocked %}hx-vals='{"force": "1"}'{% endif %}
                         hx-confirm="Let the local model rewrite {{ merge.conflicts|length }} conflicting file(s) — {{ merge.conflicts|join(', ') }} — preserving both sides, then merge into {{ mr.target_branch }}{% if blocked %} ({{ blocked }} — this overrides it){% endif %}. If any file cannot be resolved, nothing is merged and {{ mr.target_branch }} stays untouched. The merged hunks will be model-written — read them before pushing.">🤖 Resolve conflicts with AI &amp; merge</button>
+                {% endif %}
                 {% endif %}
                 <button type="button" class="btn btn--danger btn--sm" hx-post="/api/mr/{{ mr.id }}/close" hx-target="#modal-container" hx-swap="innerHTML"
                         hx-confirm="Close this merge request without merging?">Close MR</button>
