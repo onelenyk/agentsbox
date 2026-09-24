@@ -1143,7 +1143,7 @@ async def integrations_view(request: Request, provider: str = "", errors: int = 
 
 @router.post("/api/integrations/jira/check", response_class=HTMLResponse)
 async def integrations_jira_check(request: Request):
-    from core import jira, integrations
+    from core import jira
 
     try:
         result = jira.myself(actor="human:ui")
