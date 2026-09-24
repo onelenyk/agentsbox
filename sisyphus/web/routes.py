@@ -338,7 +338,7 @@ async def runtime_page(request: Request):
     # ghost-daemon question. Config alone can't: a stale process serves stale
     # config just as confidently.
     import datetime as _dt, os as _os
-    from core import worker as _worker
+    from core import runner_profiles
     from web.api import _GIT_COMMIT, _PROCESS_START_TIME
     started = _dt.datetime.fromisoformat(_PROCESS_START_TIME)
     uptime_s = int((_dt.datetime.now(_dt.timezone.utc) - started).total_seconds())
@@ -353,6 +353,19 @@ async def runtime_page(request: Request):
         "workers_in_flight": len(sessions.list_active()),
     }
 
+    # The real per-runner limits, one line each — resolved the same way the
+    # launcher resolves them (core.runner_profiles.effective_timeouts), not a
+    # single constant. Marks the row's own override when one is set.
+    worker_limits = []
+    for r in list_runners():
+        idle_s, total_s = runner_profiles.effective_timeouts(r)
+        worker_limits.append({
+            "name": r["name"],
+            "idle_min": idle_s // 60,
+            "total_min": total_s // 60,
+            "override": bool(r.get("idle_timeout")) or bool(r.get("timeout")),
+        })
+
     return _tmpl().TemplateResponse(
         request,
         "runtime.html",
@@ -363,10 +376,9 @@ async def runtime_page(request: Request):
             "default_runner": default_runner,
             "integrations": integrations,
             "process": process,
-            # from the code that enforces them, not from a config key — see
-            # core.worker for why this page used to advertise a 6x-wrong number
-            "limits": {"worker_timeout": _worker.WORKER_TIMEOUT_SECONDS,
-                       "worker_idle_timeout": _worker.WORKER_IDLE_TIMEOUT_SECONDS},
+            # per-runner, from the code that enforces them — see core.worker
+            # for why this page used to advertise a 6x-wrong number
+            "worker_limits": worker_limits,
             "runner_store": _runner_store_view(),
             "loops": _loops(),
         },
@@ -847,7 +859,7 @@ async def runners_new_form(request: Request):
 async def runners_form_body(request: Request, type: str = "opencode", runner_id: str = ""):
     """The part of the runner form that depends on the runner type: its own
     sign-in, the models it accepts, and how a key would reach it."""
-    from core import keychain, runner_catalog
+    from core import keychain, runner_catalog, runner_profiles
     from core.runner_detect import KNOWN, resolve
     from core.runners import RUNNER_TYPES, auth_mode, get_runner, list_runners
 
@@ -893,6 +905,11 @@ async def runners_form_body(request: Request, type: str = "opencode", runner_id:
         "key_hint": key_hint,
         "api_key_env": (runner.get("api_key_env") or "") if same and mode == "env" else "",
         "base_url": (runner.get("base_url") or "") if same else "",
+        # Blank field = NULL = the type default; prefill only the runner's own.
+        "idle_timeout": (runner.get("idle_timeout") or "") if same else "",
+        "timeout": (runner.get("timeout") or "") if same else "",
+        "idle_default_min": (runner_profiles.TIMEOUT_DEFAULTS.get(rtype, runner_profiles.FALLBACK_TIMEOUTS)[0]) // 60,
+        "total_default_min": (runner_profiles.TIMEOUT_DEFAULTS.get(rtype, runner_profiles.FALLBACK_TIMEOUTS)[1]) // 60,
     })
 
 
@@ -958,10 +975,27 @@ def _runner_auth(rtype: str, model: str, auth_mode: str, api_key: str, api_key_e
     raise ValueError(f"unknown sign-in mode {mode!r}")
 
 
+def _seconds_field(value: str, label: str):
+    """A runner timeout field: blank → None (use the type default), else a
+    positive whole number of seconds. Junk is rejected the way the rest of the
+    form rejects junk — a ValueError that rides _runner_error to the page."""
+    value = (value or "").strip()
+    if not value:
+        return None
+    try:
+        n = int(value)
+    except ValueError:
+        raise ValueError(f"{label} must be a whole number of seconds")
+    if n <= 0:
+        raise ValueError(f"{label} must be a positive number of seconds")
+    return n
+
+
 @router.post("/api/runners")
 async def runners_add(name: str = Form(...), binary: str = Form(...), type: str = Form("opencode"),
                        model: str = Form(""), model_custom: str = Form(""), api_key_env: str = Form(""),
-                       base_url: str = Form(""), auth_mode: str = Form(""), api_key: str = Form("")):
+                       base_url: str = Form(""), auth_mode: str = Form(""), api_key: str = Form(""),
+                       idle_timeout: str = Form(""), timeout: str = Form("")):
     import sqlite3
     from core import keychain
     from core.runners import add_runner, delete_runner
@@ -969,7 +1003,9 @@ async def runners_add(name: str = Form(...), binary: str = Form(...), type: str 
     model = (model_custom or model or "").strip()
     try:
         mode, key_env, key = _runner_auth(type, model, auth_mode, api_key, api_key_env)
-        row = add_runner(name, binary, type, model, key_env, base_url, auth_mode=mode)
+        row = add_runner(name, binary, type, model, key_env, base_url, auth_mode=mode,
+                         idle_timeout=_seconds_field(idle_timeout, "Idle timeout"),
+                         timeout=_seconds_field(timeout, "Total timeout"))
     except ValueError as e:
         return _runner_error(str(e))
     except sqlite3.IntegrityError:
@@ -996,7 +1032,8 @@ async def runners_edit_form(request: Request, runner_id: str):
 async def runners_edit(runner_id: str, name: str = Form(""), binary: str = Form(""),
                         type: str = Form(""), model: str = Form(""), model_custom: str = Form(""),
                         api_key_env: str = Form(""), base_url: str = Form(""),
-                        auth_mode: str = Form(""), api_key: str = Form("")):
+                        auth_mode: str = Form(""), api_key: str = Form(""),
+                        idle_timeout: str = Form(""), timeout: str = Form("")):
     import sqlite3
     from core import keychain
     from core.runners import get_runner, update_runner
@@ -1014,7 +1051,11 @@ async def runners_edit(runner_id: str, name: str = Form(""), binary: str = Form(
     # every save. name/binary/type stay skip-if-blank: they are required.
     fields["model"] = model
     fields["base_url"] = base_url
+    # Blank idle/timeout also means "clear it": the row override is dropped and
+    # the run falls back to the type default.
     try:
+        fields["idle_timeout"] = _seconds_field(idle_timeout, "Idle timeout")
+        fields["timeout"] = _seconds_field(timeout, "Total timeout")
         mode, key_env, key = _runner_auth(type or current.get("type") or "opencode", model,
                                           auth_mode, api_key, api_key_env, runner_id)
         fields["auth_mode"], fields["api_key_env"] = mode, key_env

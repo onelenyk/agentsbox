@@ -146,13 +146,17 @@ class TestIndicatorsTrackTheData:
         """The page advertised `default_timeout: 300` from a config key no code
         has ever read, while workers actually get 1800s. Sizing a long job off
         that page was wrong by 6x — it misled a reader the day this was found.
-        Tie the displayed number to the constant that enforces it.
+        Tie the displayed number to the per-runner limits that are enforced
+        (core.runner_profiles.effective_timeouts), named runner by runner.
         """
-        from core.worker import WORKER_TIMEOUT_SECONDS, WORKER_IDLE_TIMEOUT_SECONDS
+        from core.runner_profiles import effective_timeouts
+        from core.runners import list_runners
 
         body = _text(_client().get("/runtime"))
-        assert f"{WORKER_TIMEOUT_SECONDS // 60} min in all" in body
-        assert f"{WORKER_IDLE_TIMEOUT_SECONDS // 60} min silent" in body
+        for runner in list_runners():
+            idle_s, total_s = effective_timeouts(runner)
+            assert f"{runner['name']}: {total_s // 60} min in all" in body
+            assert f"{idle_s // 60} min silent" in body
         assert "default_timeout" not in body, "dead config key is back on the page"
 
     def test_review_task_links_to_the_mr_it_reviews(self, db_path):
