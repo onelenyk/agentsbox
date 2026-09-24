@@ -337,6 +337,20 @@ and the total/idle timeouts, which is why this is recorded rather than fixed:
 closing it means streaming cost out of the runner mid-run, and neither CLI
 exposes that today. Revisit if a runner grows a usage stream.
 
+### Read isolation holds for Claude Code; opencode does not run under it yet
+**Status:** open, recorded 2026-09-25 while landing `sandbox.read_isolation`.
+With the flag on, a worker cannot read `~/.ssh`, `~/.config/gh` or a `.env`
+next to the daemon (proved with `sandbox-exec` against the generated profile),
+and the `claude` runner completes the smoke test under it. `opencode` does
+not: `opencode --version` from a denied cwd fails, and `opencode run` from an
+allowed cwd hangs producing nothing, so the daemon's own smoke test under the
+flag ends with `EPERM lstat` of the daemon's directory. Metadata reads across
+the home are already allowed; the missing read is something the bun binary
+does at startup that the unified log did not show. Until it is found, the
+flag is documented as verified for Claude Code only, and `readiness` still
+counts it as required. Reproduce: force `sandbox.read_isolation` on and run
+`core.runner_smoke.smoke_test_by_name('opencode-default')`.
+
 ## Review loop
 
 ### A pass is evidence for one commit, and the gate never asked which

@@ -27,6 +27,7 @@ TIERS = {
         "test_repos", "test_reviews",
         "test_runlogs", "test_runner_detect", "test_runner_profiles",
         "test_runner_home", "test_runner_smoke", "test_runners",
+        "test_sandbox_read_isolation",
         "test_sessions",
         "test_small_modules", "test_store", "test_usage", "test_worker_env",
     ],
