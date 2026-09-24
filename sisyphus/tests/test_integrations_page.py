@@ -1,7 +1,6 @@
 """Tests for the Integrations page (GET /integrations, GET /api/integrations/view, POST /api/integrations/jira/check)."""
 import pytest
 from fastapi.testclient import TestClient
-from datetime import datetime, timezone
 
 
 @pytest.fixture(scope="function")
