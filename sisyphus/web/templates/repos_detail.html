@@ -17,6 +17,8 @@
        connection fills that slot with what was actually proved. #}
     <div id="repo-check-detail"></div>
 
+    <div id="repo-readiness-detail"></div>
+
     <div class="section-title">Tasks <span class="chip">{{ done }}/{{ tasks|length }} done</span></div>
     {% for t in tasks %}
     <a class="subtask" href="/tasks/{{ t.id }}">
@@ -70,6 +72,10 @@
                     hx-target="#repo-check-detail" hx-swap="innerHTML" hx-disabled-elt="this"
                     hx-on:htmx:before-request="this.textContent='Checking…'"
                     hx-on:htmx:after-request="this.textContent='Check connection'">Check connection</button>
+            <button class="btn btn--ghost btn--sm" hx-get="/api/repos/{{ repo.name }}/readiness"
+                    hx-target="#repo-readiness-detail" hx-swap="innerHTML" hx-disabled-elt="this"
+                    hx-on:htmx:before-request="this.textContent='Checking…'"
+                    hx-on:htmx:after-request="this.textContent='Production readiness'">Production readiness</button>
             <button class="btn btn--ghost btn--sm" hx-post="/api/repos/{{ repo.name }}/update" hx-swap="none">Fetch</button>
             <button class="btn btn--ghost btn--sm" hx-get="/api/repos/{{ repo.name }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
         </div>

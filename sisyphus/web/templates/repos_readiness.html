@@ -1,0 +1,32 @@
+{# Production readiness assessment. `result` is from core.readiness.assess(). #}
+<div class="readiness">
+    <div class="readiness__header">
+        <div class="readiness__title">Production readiness</div>
+        {% if result['ready'] %}
+        <span class="status status--done">Ready</span>
+        {% else %}
+        <span class="status status--failed">Not ready</span>
+        {% endif %}
+    </div>
+    <div class="readiness__items">
+        {% for item in result['items'] %}
+        {% set icon = '✓' if item.ok else '✗' %}
+        {% set tone = 'var(--good)' if item.ok else ('var(--bad)' if item.severity == 'block' else 'var(--warn)') %}
+        <div class="readiness__item" style="--item-tone: {{ tone }}">
+            <div class="readiness__item-head">
+                <span class="readiness__icon">{{ icon }}</span>
+                <span class="readiness__key mono">{{ item.key }}</span>
+                <span class="readiness__severity">
+                    {% if item.severity == 'block' %}
+                    <span class="chip chip--err">block</span>
+                    {% else %}
+                    <span class="chip chip--warn">warn</span>
+                    {% endif %}
+                </span>
+            </div>
+            <div class="readiness__text">{{ item.text }}</div>
+            {% if item.fix %}<div class="readiness__fix">→ {{ item.fix }}</div>{% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
