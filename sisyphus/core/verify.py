@@ -153,4 +153,8 @@ def run_and_record(mr: dict, timeout: int = DEFAULT_TIMEOUT) -> dict:
             store.post_message(task_id, author="system", kind="note", text=body)
         except Exception:  # noqa: BLE001
             logger.exception("could not post check result for %s", mr.get("id"))
+    # Carry the commit this run saw on the result, so a caller posting its own
+    # note (e.g. the recheck path in web/agent_mcp.py) can name the head it
+    # actually covered instead of guessing from a pre-run snapshot.
+    res["head"] = head
     return res
