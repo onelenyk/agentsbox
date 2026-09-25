@@ -262,14 +262,40 @@ def readiness(conn, days: int) -> dict:
             elif msg["kind"] == "worker_finished":
                 prev_started_idx = -1
 
-    # Lost work: done tasks with commit but no merge_requests
+    # Lost work: done tasks whose work never reached main. Three ways that
+    # happens, all counted: commits with no MR at all (the original gap), an MR
+    # that was never merged (done before delivery — task-df5a3fcc: done while
+    # auto-merge was blocked and the MR stayed open), and a reviewer's CHANGES
+    # REQUESTED unanswered on the head (done despite a request that was never
+    # addressed — the thread tracks heads as commit messages, so a request with
+    # no commit after it still stands).
     lost = conn.execute("""
-        SELECT t.id FROM tasks t
+        SELECT DISTINCT t.id FROM tasks t
          WHERE t.created_at >= ? AND t.status = 'done'
            AND EXISTS (SELECT 1 FROM messages m
                         WHERE m.task_id = t.id AND m.kind = 'commit')
-           AND NOT EXISTS (SELECT 1 FROM merge_requests mr
-                            WHERE mr.task_id = t.id)
+           AND (
+                NOT EXISTS (SELECT 1 FROM merge_requests mr
+                             WHERE mr.task_id = t.id)
+                OR EXISTS (SELECT 1 FROM merge_requests mr
+                            WHERE mr.task_id = t.id AND mr.status != 'merged')
+                OR EXISTS (
+                    SELECT 1 FROM messages m
+                     WHERE m.task_id = t.id
+                       AND (
+                           (m.kind = 'result' AND m.author LIKE '%review%'
+                            AND m.text LIKE 'CHANGES REQUESTED%')
+                           OR (m.kind = 'note'
+                               AND m.text LIKE 'review verdict for %: CHANGES REQUESTED%')
+                       )
+                       AND NOT EXISTS (
+                           SELECT 1 FROM messages m2
+                            WHERE m2.task_id = t.id
+                              AND m2.kind = 'commit'
+                              AND m2.seq > m.seq
+                       )
+                )
+           )
     """, (cut,)).fetchall()
     lost_count = len(lost)
 
@@ -425,7 +451,7 @@ def render(r: dict) -> str:
         lines.append("    provider faults    none")
     lines.extend([
         f"    duplicate workers  {rd['duplicates']} tasks with concurrent starts",
-        f"    lost work          {rd['lost_work']} done tasks with commits but no MR",
+        f"    lost work          {rd['lost_work']} done tasks with commits, work not on main",
         f"    merge latency      {rd['median_latency_hours']}h median from MR to merged "
         f"({rd['merged_count']} merges)",
         f"    stale-check blocks {rd['stale_blocks']} notes waiting on check status, "
