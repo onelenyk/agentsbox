@@ -31,6 +31,13 @@ _CACHE_SECONDS = 60  # refresh every minute
 # this process is alive, and after a restart the new daemon runs new code.
 _PENDING_RESTART = False
 
+# The last time a restart was handed to a detached subprocess. The subprocess
+# sleeps, then stops this daemon and starts the new one; while it is in flight
+# the loop must not stack a second restart (auto-restart would otherwise keep
+# re-spawning one every pass until the process dies, flapping the daemon).
+_RESTART_SPAWNED_AT: Optional[datetime] = None
+_RESTART_SPAWN_WINDOW_SECONDS = 120.0
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -211,6 +218,8 @@ def perform_restart() -> dict:
             stdout=log or subprocess.DEVNULL,
             stderr=log or subprocess.DEVNULL,
         )
+        global _RESTART_SPAWNED_AT
+        _RESTART_SPAWNED_AT = _now()
         return {"spawned": True}
     except Exception:  # noqa: BLE001
         logger.exception("self-update: could not spawn restart process")
@@ -254,6 +263,15 @@ def _restart_pass(start_commit: str, checkout_root: str) -> None:
                        note=f"restart pending — {len(busy)} worker(s) running")
         return
 
+    global _RESTART_SPAWNED_AT
+    if _RESTART_SPAWNED_AT is not None and (
+        _now() - _RESTART_SPAWNED_AT
+    ).total_seconds() < _RESTART_SPAWN_WINDOW_SECONDS:
+        # A restart is already on its way (the subprocess sleeps, stops us,
+        # starts the new daemon). Do not stack another on top of it.
+        heartbeat.beat("self-update", note="restart in flight — not spawning another")
+        return
+
     clear_pending_restart()
     spawned = perform_restart().get("spawned")
     heartbeat.beat("self-update",
@@ -262,5 +280,7 @@ def _restart_pass(start_commit: str, checkout_root: str) -> None:
 
 def reset() -> None:
     """Test helper — clear the cache and any pending restart."""
+    global _RESTART_SPAWNED_AT
     clear_cache()
     clear_pending_restart()
+    _RESTART_SPAWNED_AT = None
