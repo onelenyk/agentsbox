@@ -130,3 +130,90 @@ class TestTrackedRunnerConfigNeverDirtiesTheTree:
         r = subprocess.run(["git", "-C", str(src), "diff", "--cached", "--name-only"],
                            capture_output=True, text=True)
         assert ".opencode/opencode.json" not in r.stdout
+
+
+def _repo_with_exec_script(tmp_path):
+    """A source repo whose `main` tracks a 100755 script, plus a bare clone."""
+    src = tmp_path / "src"
+    src.mkdir()
+    _git(["init", "-b", "main"], src)
+    _git(["config", "user.email", "t@t"], src)
+    _git(["config", "user.name", "T"], src)
+    (src / "run.sh").write_text("#!/bin/sh\necho hi\n")
+    (src / "run.sh").chmod(0o755)
+    _git(["add", "-A"], src)
+    _git(["commit", "-m", "init"], src)
+    bare = tmp_path / "bare.git"
+    _git(["clone", "--bare", str(src), str(bare)], tmp_path)
+    return bare
+
+
+class TestCommitGuardRestoresDroppedExecBit:
+    """The commit-time guard: a staged mode-only 100755 -> 100644 change (same
+    blob — a sandbox checkout artifact) is restored before commit, unless the
+    goal explicitly asks for a mode change or the caller opts out."""
+
+    def _worktree(self, tmp_path, bare, task="task-1"):
+        branch = git_ops.ensure_task_branch(str(bare), task, "main")
+        wt = _attached_worktree(tmp_path, bare, branch)
+        return wt
+
+    def test_mode_only_drop_is_restored_and_reported(self, tmp_path):
+        bare = _repo_with_exec_script(tmp_path)
+        wt = self._worktree(tmp_path, bare)
+        # The sandbox artifact: exec bit gone on disk, content untouched.
+        (wt / "run.sh").chmod(0o644)
+        (wt / "feature.txt").write_text("x\n")   # something real to commit
+
+        restored = git_ops.restore_dropped_exec_bits(str(wt), goal="")
+        sha = git_ops.commit_all(str(wt), "work")
+        assert sha
+        assert restored == ["run.sh"]
+        ls = _git(["ls-files", "-s", "run.sh"], wt).strip()
+        assert ls.startswith("100755"), f"guard did not keep the exec bit: {ls}"
+
+    def test_drop_with_content_change_is_left_alone(self, tmp_path):
+        """A real edit that also happens to remove the exec bit is the agent's
+        intent — the guard must not silently force the bit back."""
+        bare = _repo_with_exec_script(tmp_path)
+        wt = self._worktree(tmp_path, bare)
+        (wt / "run.sh").chmod(0o644)
+        (wt / "run.sh").write_text("#!/bin/sh\necho changed\n")   # content changed
+
+        restored = git_ops.restore_dropped_exec_bits(str(wt), goal="")
+        sha = git_ops.commit_all(str(wt), "work")
+        assert sha
+        assert restored == []
+        ls = _git(["ls-files", "-s", "run.sh"], wt)
+        assert ls.startswith("100644"), f"guard wrongly forced exec bit: {ls}"
+
+    def test_opt_out_allow_mode_change_leaves_the_drop_alone(self, tmp_path):
+        bare = _repo_with_exec_script(tmp_path)
+        wt = self._worktree(tmp_path, bare)
+        (wt / "run.sh").chmod(0o644)
+
+        restored = git_ops.restore_dropped_exec_bits(str(wt), goal="",
+                                                     allow_mode_change=True)
+        sha = git_ops.commit_all(str(wt), "work")
+        assert sha
+        assert restored == []
+        ls = _git(["ls-files", "-s", "run.sh"], wt)
+        assert ls.startswith("100644")
+
+    def test_goal_mentioning_a_mode_change_also_opts_out(self, tmp_path):
+        bare = _repo_with_exec_script(tmp_path)
+        wt = self._worktree(tmp_path, bare)
+        (wt / "run.sh").chmod(0o644)
+
+        restored = git_ops.restore_dropped_exec_bits(
+            str(wt), goal="make run.sh non-executable (chmod -x)")
+        assert restored == []
+
+    def test_plain_goal_still_guards(self, tmp_path):
+        bare = _repo_with_exec_script(tmp_path)
+        wt = self._worktree(tmp_path, bare)
+        (wt / "run.sh").chmod(0o644)
+
+        restored = git_ops.restore_dropped_exec_bits(
+            str(wt), goal="add a feature flag")
+        assert restored == ["run.sh"]
