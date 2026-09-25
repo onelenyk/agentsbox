@@ -61,10 +61,22 @@ class TestLoadConfig:
         assert result == {}
 
     def test_env_var_substitution(self, tmp_path, monkeypatch):
-        """${ENV_VAR} placeholders are substituted from os.environ."""
-        monkeypatch.setenv("TEST_BASE_URL", "https://substituted.example.com")
-        monkeypatch.setenv("TEST_API_KEY", "sk-substituted")
+        """A plain ${ENV_VAR} placeholder is substituted from os.environ."""
+        monkeypatch.setenv("TEST_LOG_LEVEL", "debug")
+        _write_config(tmp_path, "log_level: ${TEST_LOG_LEVEL}\n")
 
+        core.config._config = None
+        with patch("core.config.Path", _make_fake_path(tmp_path)):
+            result = core.config.load_config()
+
+        assert result == {"log_level": "debug"}
+
+    def test_credential_placeholders_come_from_the_vault_not_the_environment(self, tmp_path, monkeypatch):
+        """A credential line resolves from the vault only; the environment is ignored."""
+        from core import credentials
+        monkeypatch.setenv("TEST_API_KEY", "sk-from-env")
+        monkeypatch.setitem(credentials._cache, "TEST_BASE_URL", "https://substituted.example.com")
+        monkeypatch.setitem(credentials._cache, "TEST_API_KEY", None)
         _write_config(
             tmp_path,
             "openrouter:\n  base_url: ${TEST_BASE_URL}\n  api_key: ${TEST_API_KEY}\n",
@@ -77,7 +89,7 @@ class TestLoadConfig:
         assert result == {
             "openrouter": {
                 "base_url": "https://substituted.example.com",
-                "api_key": "sk-substituted",
+                "api_key": "${TEST_API_KEY}",
             }
         }
 

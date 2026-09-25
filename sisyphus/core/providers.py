@@ -188,7 +188,7 @@ def _publish_gitlab(bare, source, branch, base_branch, title, description, repo_
     token = cred["token"] or _token(cfg)
     if not token:
         return {"error": f"GitLab token not configured for {repo_name or 'this repo'} "
-                         f"(set {cred.get('env_hint') or 'GITLAB_TOKEN'}, or a token: on the repo)"}
+                         f"(set {cred.get('env_hint') or 'GITLAB_TOKEN'}, or this repo's own token, in Integrations → Keys & tokens)"}
     api = (cfg.get("base_url") or "https://gitlab.com")
     if api.startswith("${"):
         api = "https://gitlab.com"
@@ -226,7 +226,7 @@ def _publish_github(bare, source, branch, base_branch, title, description, repo_
     token = cred["token"] or _token(cfg)
     if not token:
         return {"error": f"GitHub token not configured for {repo_name or 'this repo'} "
-                         f"(set {cred.get('env_hint') or 'GITHUB_TOKEN'}, or a token: on the repo)"}
+                         f"(set {cred.get('env_hint') or 'GITHUB_TOKEN'}, or this repo's own token, in Integrations → Keys & tokens)"}
     api = (cfg.get("base_url") or "https://api.github.com")
     if api.startswith("${"):
         api = "https://api.github.com"

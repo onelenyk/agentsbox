@@ -1,7 +1,6 @@
 """Tests for webhook authentication (core/webhooks.py and web/api.py)."""
 import hmac
 import hashlib
-import os
 from contextlib import contextmanager
 from unittest.mock import patch
 
@@ -13,21 +12,17 @@ from web.app import app
 
 @contextmanager
 def _webhook_secret(value):
-    """Enable webhook auth by setting the env var, then reload config.
-    Always restores on exit."""
-    prev = os.environ.get("SISYPHUS_WEBHOOK_SECRET")
-    if value is None:
-        os.environ.pop("SISYPHUS_WEBHOOK_SECRET", None)
-    else:
-        os.environ["SISYPHUS_WEBHOOK_SECRET"] = value
+    """Enable webhook auth by putting the secret where the config placeholder
+    resolves from — the vault (its per-process cache stands in for it) — then
+    reload config. Always restores on exit."""
+    from core import credentials
+    prev = credentials._cache.get("SISYPHUS_WEBHOOK_SECRET")
+    credentials._cache["SISYPHUS_WEBHOOK_SECRET"] = value
     config.reload_config()
     try:
         yield
     finally:
-        if prev is None:
-            os.environ.pop("SISYPHUS_WEBHOOK_SECRET", None)
-        else:
-            os.environ["SISYPHUS_WEBHOOK_SECRET"] = prev
+        credentials._cache["SISYPHUS_WEBHOOK_SECRET"] = prev
         config.reload_config()
 
 

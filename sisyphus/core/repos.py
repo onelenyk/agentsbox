@@ -135,9 +135,13 @@ def update_repo_config(name, source=None, platform=None, branch=None, auto_merge
     know about — ``check``, ``setup``, ``token``, … — survives the save.
     ``_save_repo_config`` cannot be used here: it rebuilds the entry from
     scratch and would drop those keys."""
-    repos = load_repos()
+    # The raw entries, placeholders intact: the loaded config has every
+    # ${VAR} already filled from the vault, and writing that back would put
+    # a token into config.yaml in plain text.
+    config = _read_config_file()
+    repos = config.get("repos") or []
     for r in repos:
-        if r["name"] == name:
+        if r.get("name") == name:
             if source: r["source"] = source
             if branch: r["branch"] = branch
             if platform is not None:
@@ -153,7 +157,6 @@ def update_repo_config(name, source=None, platform=None, branch=None, auto_merge
                 else:
                     r.pop("mode", None)
             break
-    config = _read_config_file()
     config["repos"] = repos
     _write_config_file(config)
 
@@ -188,10 +191,12 @@ def repo_credential(name: str) -> dict:
     from core.config import get_config
     from core.providers import detect_platform
 
+    from core.credentials import get as credential, repo_token_name
+
     repo = get_repo(name) or {}
     platform = (repo.get("platform") or "").strip() or detect_platform(repo.get("source", ""))
 
-    own = _resolved(repo.get("token"))
+    own = credential(repo_token_name(name)) or _resolved(repo.get("token"))
     if own:
         return {"token": own, "source": "repo", "platform": platform, "env_hint": ""}
 

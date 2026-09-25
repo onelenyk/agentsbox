@@ -94,6 +94,7 @@ class TestSignIn:
 class TestKeychain:
     def test_the_key_goes_over_stdin_never_argv(self):
         with patch.object(keychain, "available", return_value=True), \
+             patch.object(keychain, "_vault_password", return_value="vaultpw"), \
              patch("core.keychain.subprocess.run", return_value=_proc()) as run:
             keychain.store("runner-1", "sk-ant-abc123456")
         argv, kw = run.call_args[0][0], run.call_args[1]

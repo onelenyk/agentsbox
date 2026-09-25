@@ -1,5 +1,4 @@
 """Tests for the /api/v1 shared-token guard (web/auth.py)."""
-import os
 from contextlib import contextmanager
 from unittest.mock import patch
 
@@ -12,21 +11,17 @@ from web import auth
 
 @contextmanager
 def _api_token(value):
-    """Enable API auth by setting the env the config placeholder resolves from,
-    then reload the cached config. Always restores on exit."""
-    prev = os.environ.get("SISYPHUS_API_TOKEN")
-    if value is None:
-        os.environ.pop("SISYPHUS_API_TOKEN", None)
-    else:
-        os.environ["SISYPHUS_API_TOKEN"] = value
+    """Enable API auth by putting the token where the config placeholder
+    resolves from — the vault (its per-process cache stands in for it) — then
+    reload the cached config. Always restores on exit."""
+    from core import credentials
+    prev = credentials._cache.get("SISYPHUS_API_TOKEN")
+    credentials._cache["SISYPHUS_API_TOKEN"] = value
     config.reload_config()
     try:
         yield
     finally:
-        if prev is None:
-            os.environ.pop("SISYPHUS_API_TOKEN", None)
-        else:
-            os.environ["SISYPHUS_API_TOKEN"] = prev
+        credentials._cache["SISYPHUS_API_TOKEN"] = prev
         config.reload_config()
 
 
