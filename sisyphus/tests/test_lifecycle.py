@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from core import cancellation, lifecycle, orphans, store
+from tests.sandbox_probe import needs_kill
 
 
 @pytest.fixture(autouse=True)
@@ -50,8 +51,14 @@ async def test_a_running_worker_is_stopped_and_its_task_parked(db_path):
                in m["text"] for m in store.get_thread(t["id"]))
 
 
+@needs_kill
 async def test_no_process_the_daemon_owns_outlives_it(db_path):
-    """A decider mid-run is not in the cancellation registry — it is killed by pid."""
+    """A decider mid-run is not in the cancellation registry — it is killed by pid.
+
+    Skipped inside the worker's Seatbelt sandbox (see tests/sandbox_probe.py):
+    `ps` is blocked there, so a killed child's corpse is invisible and
+    `_terminate` reports "survived" for a kill that actually worked — the
+    process does die, only the death cannot be observed."""
     proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     orphans._OWNED.add(proc.pid)
     try:
