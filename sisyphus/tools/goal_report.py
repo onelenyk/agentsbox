@@ -276,11 +276,35 @@ def readiness(conn, days: int) -> dict:
         else:
             median_latency = (latencies_sorted[n // 2 - 1] + latencies_sorted[n // 2]) / 2.0
 
-    # Stale-check blocks: notes with "check-stale" or "auto-merge waiting"
+    # Stale-check blocks: the merge held because the recorded check was for an
+    # older head or had not run (SIS-115, SIS-117). The daemon announces exactly
+    # one such block per (head, reason), with the one text that means
+    # check-stale — `_note_auto_merge_waiting` on `_stale_check_reason`. The
+    # bare 'check-stale' substring matches prose (an engineer describing the
+    # fix), and 'auto-merge waiting' matches every other block — review pending,
+    # dirty checkout — which never were about the check. Both used to inflate
+    # the count with notes that were never a stale-check block at all.
+    #
+    # A genuine block note is history, not a live problem, the moment it was
+    # resolved automatically: the daemon re-checked the current head
+    # (check_ran_at after the note) or auto-merged the MR. Only blocks no
+    # automatic path cleared still count.
     stale_blocks = conn.execute("""
-        SELECT COUNT(*) as cnt FROM messages
-         WHERE created_at >= ? AND kind = 'note'
-           AND (text LIKE '%check-stale%' OR text LIKE '%auto-merge waiting%')
+        SELECT COUNT(*) as cnt FROM messages m
+         WHERE m.created_at >= ? AND m.kind = 'note'
+           AND m.text LIKE 'auto-merge waiting: the check passed against%'
+           AND NOT EXISTS (
+               SELECT 1 FROM messages m2
+                WHERE m2.task_id = m.task_id
+                  AND m2.created_at > m.created_at
+                  AND m2.text LIKE 'Auto-merged %'
+           )
+           AND NOT EXISTS (
+               SELECT 1 FROM merge_requests mr
+                WHERE mr.task_id = m.task_id
+                  AND mr.check_ran_at IS NOT NULL
+                  AND mr.check_ran_at > m.created_at
+           )
     """, (cut,)).fetchone()["cnt"]
 
     # Human turns per delivered task: answer messages by human per task with MR
@@ -392,7 +416,8 @@ def render(r: dict) -> str:
         f"    lost work          {rd['lost_work']} done tasks with commits but no MR",
         f"    merge latency      {rd['median_latency_hours']}h median from MR to merged "
         f"({rd['merged_count']} merges)",
-        f"    stale-check blocks {rd['stale_blocks']} notes waiting on check status",
+        f"    stale-check blocks {rd['stale_blocks']} notes waiting on check status, "
+        f"never auto-resolved",
         f"    human turns        {rd['human_per_delivered']} per delivered task",
         "",
         f"  known gaps   {gaps['open']} open, {gaps['closed']} closed",
