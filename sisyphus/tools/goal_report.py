@@ -177,6 +177,24 @@ def open_gaps(path: str = KNOWN_GAPS) -> dict:
     return _parse(path)
 
 
+def _wasted_counts(conn, cut: str) -> tuple:
+    """(all worker_finished, those that ended without a result) since *cut*."""
+    wasted_texts = ["ended without reporting a result", "vanished", "failed to start",
+                    "agent_no_result"]
+    all_finished = conn.execute("""
+        SELECT COUNT(*) as cnt FROM messages
+         WHERE created_at >= ? AND kind = 'worker_finished'
+    """, (cut,)).fetchone()["cnt"]
+    if not all_finished:
+        return 0, 0
+    wasted = conn.execute(f"""
+        SELECT COUNT(*) as cnt FROM messages
+         WHERE created_at >= ? AND kind = 'worker_finished'
+           AND ({' OR '.join(['text LIKE ?' for _ in wasted_texts])})
+    """, (cut, *[f"%{t}%" for t in wasted_texts])).fetchone()["cnt"]
+    return all_finished, wasted
+
+
 def readiness(conn, days: int) -> dict:
     """Production readiness metrics: wasted runs, provider faults, duplicate
     workers, lost work, merge latency, stale-check blocks, human turns.
@@ -186,21 +204,15 @@ def readiness(conn, days: int) -> dict:
     """
     cut = _cutoff(days)
 
-    # Wasted runs: worker_finished without a result
-    wasted_texts = ["ended without reporting a result", "vanished", "failed to start",
-                    "agent_no_result"]
-    all_finished = conn.execute("""
-        SELECT COUNT(*) as cnt FROM messages
-         WHERE created_at >= ? AND kind = 'worker_finished'
-    """, (cut,)).fetchone()["cnt"]
-    wasted_finished = 0
-    if all_finished > 0:
-        wasted_finished = conn.execute(f"""
-            SELECT COUNT(*) as cnt FROM messages
-             WHERE created_at >= ? AND kind = 'worker_finished'
-               AND ({' OR '.join(['text LIKE ?' for _ in wasted_texts])})
-        """, (cut, *[f"%{t}%" for t in wasted_texts])).fetchone()["cnt"]
+    # Wasted runs: worker_finished without a result. Counted over the report
+    # window AND over the last 7 days, so the 30-day figure shows whether the
+    # recent fixes (per-runner timeouts, queued-not-vanished, provider-fault
+    # cooldown) are actually shrinking the rate — a 30-day window alone would
+    # keep carrying history long after the cause is gone.
+    all_finished, wasted_finished = _wasted_counts(conn, cut)
     wasted_rate = _rate(wasted_finished, all_finished)
+    all_7d, wasted_7d = _wasted_counts(conn, _cutoff(7))
+    wasted_rate_7d = _rate(wasted_7d, all_7d)
 
     # Provider faults: worker_finished with "set aside"
     provider_faults = {}
@@ -296,6 +308,9 @@ def readiness(conn, days: int) -> dict:
         "wasted_finished": wasted_finished,
         "all_finished": all_finished,
         "wasted_rate": wasted_rate,
+        "wasted_finished_7d": wasted_7d,
+        "all_finished_7d": all_7d,
+        "wasted_rate_7d": wasted_rate_7d,
         "provider_faults": provider_faults,
         "duplicates": duplicates,
         "lost_work": lost_count,
@@ -363,6 +378,9 @@ def render(r: dict) -> str:
         f"    wasted runs       {rd['wasted_rate']:5.1f}%  {_bar(100-rd['wasted_rate'])}",
         f"                      {rd['wasted_finished']} of {rd['all_finished']} "
         f"worker runs ended without a result",
+        f"    wasted runs 7d    {rd['wasted_rate_7d']:5.1f}%  {_bar(100-rd['wasted_rate_7d'])}",
+        f"                      {rd['wasted_finished_7d']} of {rd['all_finished_7d']} "
+        f"worker runs ended without a result (last 7 days)",
     ]
     if rd['provider_faults']:
         faults_str = ", ".join(f"{k}: {v}" for k, v in rd['provider_faults'].items())
