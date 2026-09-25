@@ -3,6 +3,7 @@
 decide_fn is always a scripted stub here: these tests prove the orchestrator's
 own logic (dispatch, guards, action execution), never a real LLM call.
 """
+import asyncio
 import pytest
 from unittest.mock import patch
 
@@ -510,6 +511,122 @@ class TestWorkerInFlightGuard:
         decisions = _scripted([Decision(action="ask_human", question="ok?", why="check")])
         decision, bg = await handle_event(task["id"], "worker_finished", decide_fn=decisions)
         assert decision.action == "ask_human"  # not blocked — worker is done
+
+
+class TestOneWorkerPerTask:
+    """Spawn is idempotent per task: a reply or resume landing while a worker
+    is live or queued must not start (or queue) a second worker for the same
+    task. Reproduces the double starts behind task-cf2a500f and task-09b4492e —
+    two engineers mutating one worktree — through the spawn choke point the
+    reply/resume pass goes through (_execute -> _start_worker -> _queue_worker).
+    """
+
+    @pytest.mark.asyncio
+    async def test_reply_while_a_worker_is_live_starts_one(self, db_path):
+        task = store.create_task("fix it", repo="sisyphus")
+        store.set_status(task["id"], "active")
+
+        async def fake_spawn(tid, role, instruction, repo_name=None, **kw):
+            store.post_message(tid, "system", kind="worker_started",
+                               text=f"spawning {role}: {instruction}")
+            sessions.mint(tid, role)
+
+        with patch("core.orchestrator.spawn_worker", side_effect=fake_spawn):
+            first = orchestrator._start_worker(task["id"], "engineer", "do it", None)
+            await first
+
+            # The reply lands while that worker is live; the pass decides to
+            # spawn again — the [spawn_worker] Human resumed decision from the
+            # evidence. It must be dropped at the choke point, not queued.
+            store.post_message(task["id"], "human", kind="answer", text="one more thing")
+            bg = await orchestrator._execute(task["id"], Decision(
+                action="spawn_worker", role="engineer", instruction="also do this",
+                why="Human resumed"))
+            if bg:
+                await bg
+
+        kinds = [m["kind"] for m in store.get_thread(task["id"])]
+        assert kinds.count("worker_started") == 1
+        assert kinds.count("worker_queued") == 1
+        notes = [m["text"] for m in store.get_thread(task["id"])
+                 if m["author"] == "orchestrator"]
+        assert any("dropped" in n for n in notes)
+
+    @pytest.mark.asyncio
+    async def test_reply_while_a_worker_is_queued_queues_one(self, db_path):
+        """The queued state (_AWAITING_SLOT): a spawn arriving while a worker
+        waits for a slot must not create a second queue entry — the worker_queued
+        marker alone cannot be trusted, because a worker_queued followed by an
+        older worker_finished reads as 'not in flight'."""
+        task = store.create_task("fix it", repo="sisyphus")
+        store.set_status(task["id"], "active")
+
+        orchestrator._worker_gate = orchestrator._PriorityGate(1)
+        held = orchestrator._worker_gate.acquire()   # hold the only slot
+        await held
+
+        started = []
+
+        async def fake_spawn(tid, role, instruction, repo_name=None, **kw):
+            started.append(role)
+            store.post_message(tid, "system", kind="worker_started",
+                               text=f"spawning {role}: {instruction}")
+
+        with patch("core.orchestrator.spawn_worker", side_effect=fake_spawn):
+            first = orchestrator._start_worker(task["id"], "engineer", "do it", None)
+            await asyncio.sleep(0)                    # it registers _AWAITING_SLOT
+            assert task["id"] in orchestrator._AWAITING_SLOT
+
+            store.post_message(task["id"], "human", kind="answer", text="one more thing")
+            bg = await orchestrator._execute(task["id"], Decision(
+                action="spawn_worker", role="engineer", instruction="also do this",
+                why="Human resumed"))
+
+            orchestrator._worker_gate.release()
+            if first:
+                await first
+            if bg:
+                await bg
+
+        kinds = [m["kind"] for m in store.get_thread(task["id"])]
+        assert kinds.count("worker_queued") == 1
+        assert kinds.count("worker_started") == 1
+        assert started == ["engineer"]
+        notes = [m["text"] for m in store.get_thread(task["id"])
+                 if m["author"] == "orchestrator"]
+        assert any("dropped" in n for n in notes)
+
+    @pytest.mark.asyncio
+    async def test_resume_while_a_worker_is_live_starts_one(self, db_path):
+        """The Resume button end to end: a Stop pauses the task while its
+        worker is still live (worker_started, no worker_finished yet, session
+        minted). Pressing Resume before that worker reports back must not start
+        a second worker — the pass is a no-op while the first is in flight."""
+        task = store.create_task("fix it", repo="sisyphus")
+        store.set_status(task["id"], "active")
+
+        async def fake_spawn(tid, role, instruction, repo_name=None, **kw):
+            store.post_message(tid, "system", kind="worker_started",
+                               text=f"spawning {role}: {instruction}")
+            sessions.mint(tid, role)
+
+        with patch("core.orchestrator.spawn_worker", side_effect=fake_spawn):
+            first = orchestrator._start_worker(task["id"], "engineer", "do it", None)
+            await first
+
+            store.set_status(task["id"], "paused", cause="stopped by you", pause_kind="stopped")
+            assert orchestrator.resume(task["id"], "resumed by you") is True
+
+            decision, bg = await handle_event(task["id"], "continue", decide_fn=_scripted([
+                Decision(action="spawn_worker", role="engineer", instruction="again",
+                         why="resumed")]))
+            assert decision.action == "noop"
+            if bg:
+                await bg
+
+        kinds = [m["kind"] for m in store.get_thread(task["id"])]
+        assert kinds.count("worker_started") == 1
+        assert kinds.count("worker_queued") == 1
 
 
 class TestDoneRequiresReview:
