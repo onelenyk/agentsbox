@@ -314,6 +314,87 @@ def test_request_changes_requires_reason(db_path):
     assert out["result"]["isError"] is True
 
 
+def _commit_guard_repo(tmp_path, bare, task_id):
+    """Attached worktree on the task branch whose `main` tracks a 100755 script."""
+    from core import git_ops
+    branch = git_ops.ensure_task_branch(str(bare), task_id, "main")
+    wt = tmp_path / "wt"
+    subprocess.run(["git", "-C", str(bare), "worktree", "add", str(wt), branch],
+                   capture_output=True)
+    return wt
+
+
+def test_commit_guard_restores_a_dropped_exec_bit(db_path, tmp_path):
+    """The commit tool itself (not a mocked commit_all) restores a mode-only
+    100755 -> 100644 drop and says so — the sandbox artifact that flipped
+    build.sh / goal_report.py four times."""
+    import os
+    src = tmp_path / "src"
+    src.mkdir()
+    for a in (["init", "-b", "main"], ["config", "user.email", "t@t"],
+              ["config", "user.name", "T"]):
+        subprocess.run(["git", "-C", str(src), *a], capture_output=True)
+    (src / "build.sh").write_text("#!/bin/sh\n")
+    (src / "build.sh").chmod(0o755)
+    subprocess.run(["git", "-C", str(src), "add", "-A"], capture_output=True)
+    subprocess.run(["git", "-C", str(src), "commit", "-m", "init"],
+                   capture_output=True)
+    bare = tmp_path / "bare.git"
+    subprocess.run(["git", "clone", "--bare", str(src), str(bare)],
+                   capture_output=True)
+
+    task_id, _ = _session(db_path, "engineer")
+    wt = _commit_guard_repo(tmp_path, bare, task_id)
+    os.chmod(wt / "build.sh", 0o644)          # the drop, content untouched
+    (wt / "feature.txt").write_text("x\n")     # something real to commit
+
+    token = sessions.mint(task_id, "engineer", worktree=str(wt))
+    out = _call(_client(), token, "commit", {"message": "add feature"})
+    assert out["result"]["isError"] is False
+    text = json.loads(out["result"]["content"][0]["text"])
+    assert text["restored_exec_bit"] == ["build.sh"]
+
+    ls = subprocess.run(["git", "-C", str(wt), "ls-files", "-s", "build.sh"],
+                        capture_output=True, text=True).stdout.strip()
+    assert ls.startswith("100755"), f"commit tool dropped the exec bit: {ls}"
+    thread = store.get_thread(task_id)
+    assert any("restored exec bit on build.sh" in m["text"] for m in thread)
+
+
+def test_commit_guard_opt_out_keeps_the_drop(db_path, tmp_path):
+    """allow_mode_change=true on the commit tool leaves the mode alone — a goal
+    that explicitly wants a non-executable file isn't overruled."""
+    import os
+    src = tmp_path / "src"
+    src.mkdir()
+    for a in (["init", "-b", "main"], ["config", "user.email", "t@t"],
+              ["config", "user.name", "T"]):
+        subprocess.run(["git", "-C", str(src), *a], capture_output=True)
+    (src / "build.sh").write_text("#!/bin/sh\n")
+    (src / "build.sh").chmod(0o755)
+    subprocess.run(["git", "-C", str(src), "add", "-A"], capture_output=True)
+    subprocess.run(["git", "-C", str(src), "commit", "-m", "init"],
+                   capture_output=True)
+    bare = tmp_path / "bare.git"
+    subprocess.run(["git", "clone", "--bare", str(src), str(bare)],
+                   capture_output=True)
+
+    task_id, _ = _session(db_path, "engineer")
+    wt = _commit_guard_repo(tmp_path, bare, task_id)
+    os.chmod(wt / "build.sh", 0o644)
+    (wt / "feature.txt").write_text("x\n")
+
+    token = sessions.mint(task_id, "engineer", worktree=str(wt))
+    out = _call(_client(), token, "commit",
+                {"message": "drop exec bit", "allow_mode_change": True})
+    assert out["result"]["isError"] is False
+    text = json.loads(out["result"]["content"][0]["text"])
+    assert "restored_exec_bit" not in text
+    ls = subprocess.run(["git", "-C", str(wt), "ls-files", "-s", "build.sh"],
+                        capture_output=True, text=True).stdout.strip()
+    assert ls.startswith("100644"), "opt-out must leave the mode as committed"
+
+
 def test_reviewer_approve_finishes(db_path):
     task_id, token = _session(db_path, "reviewer")
     out = _call(_client(), token, "approve", {"summary": "looks good"})
