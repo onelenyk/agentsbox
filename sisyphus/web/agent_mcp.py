@@ -100,7 +100,7 @@ def _finish(session, summary="", **_):
     return {"ok": True}
 
 
-def _commit(session, message="", **_):
+def _commit(session, message="", allow_mode_change=False, **_):
     if not message.strip():
         return {"error": "commit message required"}
     from core import git_ops, repos
@@ -113,15 +113,31 @@ def _commit(session, message="", **_):
     if repo_name and repos.is_read_only(repo_name):
         return {"error": f"repo {repo_name} is read-only: report findings with finish() instead"}
 
+    # The exec-bit guard: a staged 100755 -> 100644 change with no content
+    # change is a sandbox checkout artifact (build.sh / goal_report.py lost it
+    # four times), not work. Restore the bit before committing and say so in
+    # the result, unless the goal explicitly asks for a mode change or the
+    # caller opts out.
+    goal = task.get("goal") if task else ""
     try:
+        restored = git_ops.restore_dropped_exec_bits(
+            session["worktree"], goal=goal, allow_mode_change=allow_mode_change)
         sha = git_ops.commit_all(session["worktree"], message)
     except Exception as exc:  # noqa: BLE001
         return {"error": f"commit failed: {exc}"}
     if sha is None:
         return {"error": "nothing to commit — no changes in the working tree"}
+    note = ""
+    if restored:
+        note = f" restored exec bit on {', '.join(restored)}"
+        store.post_message(session["task_id"], session["role"], kind="note",
+                           text=note)
     store.post_message(session["task_id"], session["role"], kind="commit",
-                       text=f"{message} ({sha[:8]})")
-    return {"ok": True, "sha": sha}
+                       text=f"{message} ({sha[:8]}){note}")
+    result = {"ok": True, "sha": sha}
+    if restored:
+        result["restored_exec_bit"] = restored
+    return result
 
 
 def _open_mr(session, title="", description="", **_):
@@ -610,8 +626,14 @@ TOOLS = {
                              "required": ["goal"]}}}, "required": ["items"]}, _propose_subtasks),
     "finish": ("Report your final result. Mandatory last action.",
                {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}, _finish),
-    "commit": ("Commit your changes in the working tree.",
-               {"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]}, _commit),
+    "commit": ("Commit your changes in the working tree. A tracked file whose only "
+               "change is a dropped executable bit (100755 -> 100644, no content "
+               "change) gets the bit restored automatically and the result lists "
+               "the paths — unless the task goal asks for a mode change or you "
+               "set allow_mode_change=true.",
+               {"type": "object", "properties": {"message": {"type": "string"},
+                                                 "allow_mode_change": {"type": "boolean"}},
+                "required": ["message"]}, _commit),
     "open_mr": ("Open a merge request. Requires a prior commit.",
                  {"type": "object", "properties": {"title": {"type": "string"}, "description": {"type": "string"}}, "required": ["title"]}, _open_mr),
     "list_mrs": ("List open merge requests and their statuses.",

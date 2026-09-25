@@ -5,6 +5,8 @@ default branch. The engineer commits onto it; open_mr publishes it (a real
 PR/MR for a forge, a diff for a local repo). This module is platform-agnostic
 plumbing — the publish step lives in core.providers.
 """
+import os
+import stat
 import subprocess
 
 TASK_BRANCH_PREFIX = "sisyphus/"
@@ -104,6 +106,62 @@ def commit_all(worktree: str, message: str) -> "str | None":
     if c.returncode != 0:
         raise RuntimeError(f"commit failed: {c.stderr.strip()}")
     return _run(["git", "-C", worktree, "rev-parse", "HEAD"]).stdout.strip()
+
+
+# A goal that explicitly asks for a mode change opts the commit guard out.
+# Terms are intentionally loose (case-insensitive) — "executable bit", "chmod",
+# "file mode", "mode change" — so a goal that wants e.g. build.sh non-executable
+# isn't silently overruled by the guard restoring it.
+_MODE_CHANGE_TERMS = ("executable bit", "chmod", "file mode", "mode change")
+
+
+def goal_allows_mode_change(goal: str) -> bool:
+    """True when the task goal explicitly asks for a mode change, which disables
+    the commit-time exec-bit guard (see restore_dropped_exec_bits)."""
+    g = (goal or "").lower()
+    return any(t in g for t in _MODE_CHANGE_TERMS)
+
+
+def restore_dropped_exec_bits(worktree: str, goal: str = "",
+                              allow_mode_change: bool = False) -> list:
+    """The agent commit-time guard.
+
+    Stages the worktree exactly like commit_all, then inspects the staged diff
+    (`git diff --cached --raw`) for entries whose ONLY change is a mode drop
+    100755 -> 100644 with an identical blob (no content change) — the sandbox
+    checkout artifact that kept stripping the exec bit on tools/goal_report.py
+    and desktop/build.sh. Each such file gets its exec bit restored, both in
+    the index (`git update-index --chmod=+x`) and on disk, so the subsequent
+    `git add -A` in commit_all cannot re-stage the drop.
+
+    Guarded by the task goal: when it explicitly asks for a mode change
+    (goal_allows_mode_change) or the caller passes *allow_mode_change*, modes
+    are left untouched. Returns the list of paths whose exec bit was restored,
+    so the commit tool can append a note to its result text."""
+    if allow_mode_change or goal_allows_mode_change(goal):
+        return []
+    _run(["git", "-C", worktree, "add", "-A", "--", "."] + _COMMIT_EXCLUDES)
+    raw = _run(["git", "-C", worktree, "diff", "--cached", "--raw", "--abbrev=40"])
+    restored = []
+    if raw.returncode != 0:
+        return restored
+    for line in raw.stdout.splitlines():
+        # format: :100755 100644 <old-blob> <new-blob> M<TAB>path
+        meta, _, path = line.partition("\t")
+        parts = meta.split()
+        if len(parts) < 5:
+            continue
+        old_mode, new_mode, old_sha, new_sha = parts[0], parts[1], parts[2], parts[3]
+        if old_mode == ":100755" and new_mode == "100644" and old_sha == new_sha:
+            _run(["git", "-C", worktree, "update-index", "--chmod=+x", path])
+            full = os.path.join(worktree, path)
+            try:
+                os.chmod(full, os.stat(full).st_mode
+                         | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+            except OSError:
+                pass
+            restored.append(path)
+    return restored
 
 
 def diff_stat(bare_path: str, base_branch: str, branch: str) -> str:
