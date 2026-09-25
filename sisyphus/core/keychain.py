@@ -36,22 +36,33 @@ def valid_key(key: str) -> bool:
     return bool(_KEY_RE.match(key or ""))
 
 
-def store(account: str, key: str) -> None:
+# Any other value kept here (core.credentials): URLs and emails too, so only
+# what would break the quoted `security -i` line is refused.
+_VALUE_RE = re.compile(r"^[^\s\"'\\$`]{1,2048}$")
+
+
+def valid_value(value: str) -> bool:
+    return bool(_VALUE_RE.match(value or ""))
+
+
+def store(account: str, key: str, service: str = SERVICE) -> None:
     if not available():
         raise KeychainError("the macOS keychain is not available on this machine")
-    if not valid_key(key):
+    if service == SERVICE and not valid_key(key):
         raise KeychainError("that does not look like an API key (no spaces or quotes, 8+ characters)")
-    line = f'add-generic-password -U -s "{SERVICE}" -a "{account}" -w "{key}"\n'
+    if not valid_value(key):
+        raise KeychainError("that value has spaces, quotes or a $ in it — paste it again without them")
+    line = f'add-generic-password -U -s "{service}" -a "{account}" -w "{key}"\n'
     proc = subprocess.run(["security", "-i"], input=line, capture_output=True, text=True, timeout=15)
     if proc.returncode != 0 or "error" in (proc.stderr or "").lower():
         raise KeychainError(f"could not save the key to the keychain: {(proc.stderr or '').strip()[:200]}")
 
 
-def read(account: str) -> Optional[str]:
+def read(account: str, service: str = SERVICE) -> Optional[str]:
     if not account or not available():
         return None
     try:
-        proc = subprocess.run(["security", "find-generic-password", "-s", SERVICE, "-a", account, "-w"],
+        proc = subprocess.run(["security", "find-generic-password", "-s", service, "-a", account, "-w"],
                               capture_output=True, text=True, timeout=15)
     except Exception:  # noqa: BLE001 — a locked or missing keychain reads as "no key"
         logger.debug("keychain read failed for %s", account, exc_info=True)
@@ -61,8 +72,8 @@ def read(account: str) -> Optional[str]:
     return (proc.stdout or "").strip() or None
 
 
-def delete(account: str) -> None:
+def delete(account: str, service: str = SERVICE) -> None:
     if not account or not available():
         return
-    subprocess.run(["security", "delete-generic-password", "-s", SERVICE, "-a", account],
+    subprocess.run(["security", "delete-generic-password", "-s", service, "-a", account],
                    capture_output=True, text=True, timeout=15)

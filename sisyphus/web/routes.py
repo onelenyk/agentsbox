@@ -1203,6 +1203,69 @@ async def integrations_jira_check(request: Request):
             "detail": str(e),
         })
 
+# ── Keys & tokens ───────────────────────────────────────────────────────
+
+def _from_this_page(request: Request) -> bool:
+    """A credential write must come from the UI itself. Any other site the
+    user has open could otherwise post a form at localhost:7677 and point
+    JIRA_BASE_URL at a host of its own."""
+    site = request.headers.get("sec-fetch-site")
+    if site and site not in ("same-origin", "none"):
+        return False
+    origin = request.headers.get("origin")
+    if origin and origin.split("://", 1)[-1] != request.headers.get("host", ""):
+        return False
+    return True
+
+
+async def _credentials_view(request: Request, note: str = "", error: str = ""):
+    from core import credentials
+    groups = await asyncio.to_thread(credentials.view)
+    pending = await asyncio.to_thread(credentials.env_file_pending)
+    return _tmpl().TemplateResponse(request, "credentials_view.html", {
+        "groups": groups, "pending": pending, "note": note, "error": error,
+    })
+
+
+@router.get("/api/credentials/view", response_class=HTMLResponse)
+async def credentials_view(request: Request):
+    return await _credentials_view(request)
+
+
+@router.post("/api/credentials/import-env", response_class=HTMLResponse)
+async def credentials_import_env(request: Request):
+    from core import credentials
+    if not _from_this_page(request):
+        return HTMLResponse("refused: not sent from the Sisyphus UI", status_code=403)
+    res = await asyncio.to_thread(credentials.import_env_file)
+    note = f"Moved {len(res['moved'])} to the keychain and out of .env" if res["moved"] else ""
+    error = "; ".join(f"{k}: {v}" for k, v in res["failed"].items())
+    resp = await _credentials_view(request, note=note, error=error)
+    resp.headers["HX-Trigger"] = "integrationsUpdated"
+    return resp
+
+
+@router.post("/api/credentials/{name}", response_class=HTMLResponse)
+async def credentials_set(request: Request, name: str, value: str = Form(""), action: str = Form("save")):
+    from core import credentials
+    if not _from_this_page(request):
+        return HTMLResponse("refused: not sent from the Sisyphus UI", status_code=403)
+    if not credentials.is_managed(name):
+        return await _credentials_view(request, error=f"{name} is not a credential Sisyphus reads")
+    try:
+        if action == "clear":
+            await asyncio.to_thread(credentials.clear, name)
+            note = f"{name} removed from the keychain"
+        else:
+            await asyncio.to_thread(credentials.set_value, name, value)
+            note = f"{name} saved to the keychain"
+    except credentials.CredentialError as e:
+        return await _credentials_view(request, error=f"{name}: {e}")
+    resp = await _credentials_view(request, note=note)
+    resp.headers["HX-Trigger"] = "integrationsUpdated"
+    return resp
+
+
 # ── Live Workers ─────────────────────────────────────────────────────────
 
 @router.get("/api/workers/live", response_class=HTMLResponse)

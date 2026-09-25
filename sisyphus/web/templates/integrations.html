@@ -2,7 +2,10 @@
 {% block title %}Integrations — Sisyphus{% endblock %}
 {% import "_ui.html" as ui %}
 {% block content %}
-{{ ui.toolbar([{'label': 'Integrations'}], 'what Sisyphus did in Jira and the forges, and who did it') }}
+{{ ui.toolbar([{'label': 'Integrations'}], 'keys for Jira and the forges, and what Sisyphus did with them') }}
+<div id="credentials-view" hx-get="/api/credentials/view" hx-trigger="load" hx-swap="innerHTML">
+    <div class="empty">Loading…</div>
+</div>
 <div id="integrations-view" hx-get="/api/integrations/view?provider=jira&errors=0&limit=100" hx-trigger="load, every 60s, integrationsUpdated from:body" hx-swap="innerHTML">
     <div class="empty">Loading…</div>
 </div>

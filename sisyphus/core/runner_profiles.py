@@ -690,7 +690,8 @@ def build_env(rtype: str, runner: dict) -> dict:
             overlay[api_env] = pasted
         key = ""
     else:
-        key = os.environ.get(api_env, "") if api_env else ""
+        from .credentials import get as _credential
+        key = _credential(api_env) if api_env else ""
 
     if rtype == "claude-cli":
         # No key configured is a valid, common setup: Claude Code also
