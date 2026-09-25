@@ -526,20 +526,28 @@ def verdict_line(mr: dict) -> str:
 
 
 def record_merge_success(mr: dict, res: dict, prefix: str = "Merged",
-                         cite: Optional[str] = None) -> None:
+                         cite: Optional[str] = None,
+                         resolved: Optional[List[str]] = None,
+                         note: Optional[str] = None) -> None:
     """The single place a successful merge is marked and announced, shared by
-    the manual merge route and auto-merge so the two can never drift apart.
-    ``mark_merged`` first, then a thread note on the origin task naming the
-    evidence (``verdict_line``). *prefix* is the verb in the note ("Merged",
-    "Auto-merged"); *cite* overrides the evidence line for a force-override."""
+    the manual merge route, auto-merge and the AI conflict-resolution route so
+    the three can never drift apart. ``mark_merged`` first, then a thread note
+    on the origin task naming the evidence (``verdict_line``). *prefix* is the
+    verb in the note ("Merged", "Auto-merged"); *cite* overrides the evidence
+    line for a force-override; *resolved* is the file list ``merge_resolving``
+    returns, recorded on the row so a merged MR says how it was merged; *note*
+    overrides the note text entirely (the AI-resolve route spells out what a
+    model rewrote)."""
     from . import store, self_update
-    mark_merged(mr["id"], res["sha"])
+    mark_merged(mr["id"], res["sha"], resolved)
     if cite is None:
         cite = verdict_line(mr)
+    if note is None:
+        note = (f"{prefix} {mr['source_branch']} into {res['target']} "
+                f"({res['sha'][:8]}) in {mr['source_path']} — {cite}")
     store.post_message(
         mr["task_id"], "system", kind="note",
-        text=(f"{prefix} {mr['source_branch']} into {res['target']} "
-              f"({res['sha'][:8]}) in {mr['source_path']} — {cite}"))
+        text=note)
 
     # Check if this merge is for the daemon's own checkout — if so, drop the
     # cached behind-status so the next render (or self-update loop pass) sees
