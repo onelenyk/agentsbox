@@ -27,6 +27,16 @@
     </a>
 </div>
 
+{% if self_update.behind_message %}
+<div class="notification notification--warn" role="status">
+    <span class="notification__text">{{ self_update.behind_message }}</span>
+    <button type="button" class="btn btn--primary btn--sm"
+            hx-post="/api/daemon/restart" hx-target="closest .notification" hx-swap="outerHTML">
+        Restart
+    </button>
+</div>
+{% endif %}
+
 {% if readiness %}
 <section class="sect">
     <h2 class="sect__h">Readiness <span class="sect__meta">{{ readiness|length }} repo{{ 's' if readiness|length != 1 }} configured</span></h2>

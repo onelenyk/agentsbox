@@ -532,7 +532,8 @@ def record_merge_success(mr: dict, res: dict, prefix: str = "Merged",
     ``mark_merged`` first, then a thread note on the origin task naming the
     evidence (``verdict_line``). *prefix* is the verb in the note ("Merged",
     "Auto-merged"); *cite* overrides the evidence line for a force-override."""
-    from . import store
+    from . import store, self_update
+    import pathlib
     mark_merged(mr["id"], res["sha"])
     if cite is None:
         cite = verdict_line(mr)
@@ -540,6 +541,13 @@ def record_merge_success(mr: dict, res: dict, prefix: str = "Merged",
         mr["task_id"], "system", kind="note",
         text=(f"{prefix} {mr['source_branch']} into {res['target']} "
               f"({res['sha'][:8]}) in {mr['source_path']} — {cite}"))
+
+    # Check if this merge is for the daemon's own repo — if so, refresh self-update cache
+    # to detect that the daemon is now behind.
+    daemon_repo_root = pathlib.Path(__file__).resolve().parent.parent
+    merged_repo = pathlib.Path(mr.get("source_path", "")).resolve()
+    if merged_repo == daemon_repo_root:
+        self_update.clear_cache()
 
 
 def _auto_merge_waiting_keys(mr_id: str) -> set:
