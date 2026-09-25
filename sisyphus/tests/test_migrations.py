@@ -42,6 +42,8 @@ def test_an_old_database_upgrades_in_place(old_db):
     assert "agent" in tasks_cols
     assert "base_branch" in tasks_cols
     assert "title" in tasks_cols
+    assert "no_result_role" in tasks_cols
+    assert "no_result_streak" in tasks_cols
 
     # Check merge_requests table has all migrated columns
     mr_cols = {r["name"] for r in conn.execute("PRAGMA table_info(merge_requests)").fetchall()}

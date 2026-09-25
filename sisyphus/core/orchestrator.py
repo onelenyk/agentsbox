@@ -347,6 +347,157 @@ _WORKER_FAILURE_MARKERS = ("ended without reporting", "agent_no_result", "failed
 MAX_CONSECUTIVE_WORKER_FAILURES = 3  # catch a broken runner/config in ~3 tries, not 25
 
 
+# ── No-result escalation ladder ─────────────────────────────────────────
+# A role whose runs keep ending without a result is likely pointed at a broken
+# runner/config — and blindly re-rolling onto the SAME runner just spends runs
+# (task-f8d07317 rolled eight times before succeeding; task-97a05500 failed
+# both retries). Escalate instead:
+#   NO_RESULT_SWITCH_AFTER in a row  → the next attempt runs on the NEXT runner
+#                                      option of the role's model class.
+#   NO_RESULT_PAUSE_AFTER in a row    → stop re-rolling; park the task with ONE
+#                                      message naming the failures and last
+#                                      output, instead of retrying again.
+# The count is persisted per task per role (core.store bump/reset/get) and a
+# delivered result — or a human reply — resets it.
+NO_RESULT_SWITCH_AFTER = 2
+NO_RESULT_PAUSE_AFTER = 3
+
+# Substrings marking a worker_finished message as a NO-RESULT ending: the run
+# ended without delivering a result. A delivered run ("<role> finished") and a
+# human/daemon stop are NOT no-result endings and must not feed the ladder.
+_NO_RESULT_MARKERS = (
+    "ended without reporting",       # core.worker's timeout/crash fallback
+    "agent_no_result",               # a run isolated from a broken model/runner
+    "failed to start",               # _spawn_worker_safe startup failure
+    "vanished without reporting",    # watchdog rescue_stalled (find_abandoned)
+    "orphaned by a daemon restart",  # reconcile_on_boot
+)
+
+
+def _is_no_result_ending(text: str) -> bool:
+    return any(marker in (text or "") for marker in _NO_RESULT_MARKERS)
+
+
+def _role_in_text(text: str) -> Optional[str]:
+    """The role named in a thread message's text, or None if it carries none.
+    Handles "spawning <role>: …" (worker_started), "<role> ended without
+    reporting …", "<role> failed to start: …", "<role> queued — …"."""
+    t = (text or "").strip()
+    if not t:
+        return None
+    if t.startswith("spawning "):
+        parts = t.split()
+        return parts[1].rstrip(":.,;") if len(parts) > 1 else None
+    words = t.split()
+    if not words or words[0] in ("worker", "system", "orchestrator", "human"):
+        return None
+    if (" ended without reporting" in t or " failed to start" in t
+            or " queued " in t):
+        return words[0].rstrip(":.,;")
+    return None
+
+
+def _role_of_no_result_ending(thread: list) -> Optional[str]:
+    """The role of the thread's latest no-result worker_finished ending. Read
+    from the message text when it carries a "<role> …" prefix; the vanished /
+    orphaned endings don't, so fall back to the nearest preceding
+    worker_started/worker_queued. None when it cannot be told — the caller then
+    leaves the counter untouched rather than guess."""
+    for m in reversed(thread):
+        if m["kind"] == "worker_finished":
+            if not _is_no_result_ending(m.get("text") or ""):
+                return None          # the latest ending delivered — nothing to escalate
+            role = _role_in_text(m["text"])
+            if role:
+                return role
+            continue                 # no role in text — keep looking back
+        if m["kind"] in ("worker_started", "worker_queued"):
+            return _role_in_text(m["text"]) or None
+        if m["kind"] == "result":
+            return None              # a delivery before the ending — ambiguous
+    return None
+
+
+def _recount_no_result_streak(task_id: str) -> None:
+    """Fold the thread's latest worker_finished into the persisted no-result
+    counter: a no-result ending bumps it (per role); any other ending resets it.
+    Called on worker_finished passes so every path that closes a run — worker.py's
+    timeout fallback, the watchdog's vanished handler, reconcile_on_boot's
+    orphans, a startup failure — feeds the SAME counter."""
+    thread = store.get_thread(task_id)
+    for m in reversed(thread):
+        if m["kind"] != "worker_finished":
+            continue
+        if _is_no_result_ending(m.get("text") or ""):
+            role = _role_of_no_result_ending(thread)
+            if role:
+                store.bump_no_result(task_id, role)
+        else:
+            store.reset_no_result(task_id)
+        return
+
+
+def _no_result_kind(text: str) -> str:
+    if "vanished without reporting" in text:
+        return "worker vanished"
+    if "orphaned by a daemon restart" in text:
+        return "orphaned by a daemon restart"
+    if "failed to start" in text:
+        return "failed to start"
+    if "status=timeout" in text:
+        return "timeout"
+    if "ended without reporting" in text:
+        return "ended without reporting a result"
+    if "agent_no_result" in text:
+        return "agent_no_result"
+    return "no result"
+
+
+def _recent_no_result_endings(task_id: str, n: int) -> list:
+    """The last *n* consecutive no-result endings on the thread, oldest first.
+    By construction (bump resets on a different role or a delivery) these are
+    the same role's runs — the ones the ladder is escalating."""
+    out = []
+    for m in reversed(store.get_thread(task_id)):
+        if m["kind"] == "worker_finished" and _is_no_result_ending(m.get("text") or ""):
+            out.append(m)
+            if len(out) >= n:
+                break
+        elif m["kind"] == "result":
+            break
+    out.reverse()
+    return out
+
+
+def _pause_for_repeated_no_results(task_id: str, role: Optional[str], streak: int) -> None:
+    """NO_RESULT_PAUSE_AFTER no-result endings on one role: stop re-rolling and
+    park the task with ONE message to the human naming the failures (count,
+    kinds, seq/timestamps) and each failed run's last output (its
+    worker_finished text — the diagnosis carries the last output where one was
+    captured). `waiting`, not a plain pause: only a human reply resumes it, and
+    the reply resets the counter (core.store.reset_no_result)."""
+    task = store.get_task(task_id)
+    lines = [
+        f"  #{m['seq']} ({_no_result_kind(m['text'])}) {m['created_at']}: {m['text']}"
+        for m in _recent_no_result_endings(task_id, streak)
+    ]
+    question = (
+        f"The worker role {role or 'on this task'} has ended without reporting a "
+        f"result {streak} times in a row. I am not retrying again — pausing here "
+        f"for you to check before I spend another run.\n\n"
+        f"Failed runs:\n" + ("\n".join(lines) if lines else "(none recorded)") +
+        "\n\nEach failed run's last output is in its message above (and in the "
+        "run logs). Fix the runner (Runners → Smoke test) or the config, then "
+        "reply here to resume."
+    )
+    store.post_message(task_id, "orchestrator", kind="question", text=question)
+    store.set_status(task_id, "waiting",
+                     cause=f"{role or 'a worker'} ended without a result {streak} times in a row")
+    notify.send("task_parked", task_id=task_id,
+                title=store.task_display_title(task) if task else task_id,
+                reason=f"worker {role or '?'} kept ending without a result")
+
+
 def _consecutive_worker_failures(task_id: str) -> int:
     """How many of the most recent worker_finished messages, counting back
     from the latest, were crash/timeout fallbacks rather than a real
@@ -757,20 +908,20 @@ async def handle_event(
         await _terminate(task_id, "failed", reason="pass budget exceeded — stopped to avoid runaway cost")
         return Decision(action="fail", reason="pass budget exceeded", why="budget"), None
 
-    if _consecutive_worker_failures(task_id) >= MAX_CONSECUTIVE_WORKER_FAILURES:
-        question = (
-            "The last few worker runs failed without reporting a result "
-            "(agent_no_result) — the runner or its config may be broken. "
-            "Please check before I try again."
-        )
-        store.post_message(task_id, "orchestrator", kind="note",
-                           text="[ask_human] workers keep failing to report a result")
-        store.post_message(task_id, "orchestrator", kind="question", text=question)
-        store.set_status(task_id, "waiting")
-        notify.send("task_parked", task_id=task_id,
-                    title=store.task_display_title(task),
-                    reason="workers keep failing to report a result")
-        return Decision(action="ask_human", question=question, why="repeated worker failures"), None
+    # No-result escalation ladder: a role whose runs keep ending without a
+    # result stops being re-rolled onto the same runner. A worker_finished
+    # event folds the just-ended run into the persisted counter; at
+    # NO_RESULT_PAUSE_AFTER in a row the task parks with ONE message naming the
+    # failures and their last output. The next spawn after NO_RESULT_SWITCH_AFTER
+    # runs on the next runner option (see _queue_worker/_start_worker).
+    if event_type == "worker_finished":
+        _recount_no_result_streak(task_id)
+    streak_role, streak = store.get_no_result_streak(task_id)
+    if streak >= NO_RESULT_PAUSE_AFTER:
+        _pause_for_repeated_no_results(task_id, streak_role, streak)
+        return Decision(action="ask_human",
+                        question=f"worker {streak_role} kept ending without a result",
+                        why="repeated no-result endings"), None
 
     # Someone else is already reviewing this task's branch: wait for that
     # verdict instead of paying for a pass that can only decide to wait — or,
@@ -1006,6 +1157,13 @@ def _queue_worker(task_id: str, role: str) -> bool:
     Idempotent per task: every spawn — queue and start alike — passes through
     here, so a spawn request for a task that already has a live or queued
     worker is dropped, with a note on the thread saying why.
+
+    The no-result escalation ladder acts here: once a role's runs have ended
+    without a result NO_RESULT_SWITCH_AFTER times in a row, the runner choice
+    skips the first usable option — the one that failed — for the next option
+    in the role's model class. When the class has no second option (or the
+    choice is a pin, which cannot move), it says so on the thread and continues
+    on the same runner; the next failure then crosses the pause threshold.
     """
     from . import agents, model_classes
     # Never run (or queue) two workers on one task. A reply or resume arriving
@@ -1018,8 +1176,39 @@ def _queue_worker(task_id: str, role: str) -> bool:
         return False
     # A run with no runner is not a run: it must not spend one of a pinned
     # task's attempts or look like a worker in flight.
-    choice = model_classes.choose(role)
-    if choice.runner is None and choice.source == "class":
+    streak_role, streak = store.get_no_result_streak(task_id)
+    want_switch = streak_role == role and streak >= NO_RESULT_SWITCH_AFTER
+    choice = model_classes.choose(role, skip=1 if want_switch else 0)
+
+    if want_switch:
+        if choice.source in ("pin", "default"):
+            # A pin is an explicit choice and a class with no options has no
+            # alternative to switch to. Say so; the next failure pauses.
+            store.post_message(
+                task_id, "orchestrator", kind="note",
+                text=(f"[spawn_worker] {role} ended without a result {streak} times in a "
+                      f"row but has no alternative runner — retrying on the same one; the "
+                      f"next failure will pause the task"))
+        elif choice.source == "class" and choice.runner is None:
+            # skip=1 exhausted the class. If the FIRST option is usable this is
+            # "no alternative to switch to", not "everything at its limit".
+            first = model_classes.choose(role)
+            if first.runner is None:
+                cls = model_classes.class_of(agents.get_agent(role) or {})
+                _park_for_limits(task_id, role, choice.why_none(cls))
+                return False
+            store.post_message(
+                task_id, "orchestrator", kind="note",
+                text=(f"[spawn_worker] {role} ended without a result {streak} times in a "
+                      f"row but its model class has no second runner — retrying on the "
+                      f"same one; the next failure will pause the task"))
+            choice = first
+        else:
+            store.post_message(
+                task_id, "orchestrator", kind="note",
+                text=(f"[spawn_worker] {role} ended without a result {streak} times in a "
+                      f"row — switching to the next runner in its model class"))
+    elif choice.runner is None and choice.source == "class":
         cls = model_classes.class_of(agents.get_agent(role) or {})
         _park_for_limits(task_id, role, choice.why_none(cls))
         return False
@@ -1035,15 +1224,19 @@ def _queue_worker(task_id: str, role: str) -> bool:
 
 def _start_worker(task_id: str, role: str, instruction: str, repo_name) -> Optional[asyncio.Task]:
     """Queue a worker now and run it in the background; None if the task was
-    paused instead."""
+    paused instead. The actual runner is picked in core.worker.spawn_worker;
+    this hands down whether the no-result ladder wants the NEXT runner option."""
     if not _queue_worker(task_id, role):
         return None
+    streak_role, streak = store.get_no_result_streak(task_id)
+    prefer_next = streak_role == role and streak >= NO_RESULT_SWITCH_AFTER
     return asyncio.create_task(
-        _spawn_worker_safe(task_id, role, instruction, repo_name, queued=True))
+        _spawn_worker_safe(task_id, role, instruction, repo_name, queued=True,
+                           prefer_next_runner=prefer_next))
 
 
 async def _spawn_worker_safe(task_id: str, role: str, instruction: str, repo_name,
-                             queued: bool = False):
+                             queued: bool = False, prefer_next_runner: bool = False):
     """Run a worker, but never let a startup failure (an unknown/hallucinated
     agent name, a clone error, …) vanish into a lost background task and leave
     the task stalled 'active'. Any exception before the worker reports is turned
@@ -1058,7 +1251,8 @@ async def _spawn_worker_safe(task_id: str, role: str, instruction: str, repo_nam
         finally:
             _release_slot_wait(task_id)
         try:
-            await spawn_worker(task_id, role, instruction, repo_name=repo_name)
+            await spawn_worker(task_id, role, instruction, repo_name=repo_name,
+                               prefer_next_runner=prefer_next_runner)
         finally:
             gate.release()
     except Exception as exc:  # noqa: BLE001
