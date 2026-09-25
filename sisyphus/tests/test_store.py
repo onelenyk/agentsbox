@@ -431,3 +431,46 @@ class TestStatusChangesAreRecorded:
         for s in ("waiting", "active", "done"):
             store.set_status(t["id"], s)
         assert [e["to_status"] for e in store.list_events(t["id"])] == ["waiting", "active", "done"]
+
+
+class TestNoResultEscalationCounter:
+    """T12: the persisted consecutive no-result counter the orchestrator's
+    escalation ladder reads. Stored on the task so every re-roll path — worker
+    timeout, watchdog vanished, boot orphan, failed to start — feeds the same
+    count, and reset on a delivered result or a human answer."""
+
+    def test_a_fresh_task_has_no_streak(self, db_path):
+        t = create_task("x")
+        assert store.get_no_result_streak(t["id"]) == (None, 0)
+
+    def test_the_same_role_continues_the_streak(self, db_path):
+        t = create_task("x")
+        assert store.bump_no_result(t["id"], "engineer") == 1
+        assert store.bump_no_result(t["id"], "engineer") == 2
+        assert store.get_no_result_streak(t["id"]) == ("engineer", 2)
+
+    def test_a_different_role_starts_a_fresh_streak(self, db_path):
+        t = create_task("x")
+        store.bump_no_result(t["id"], "engineer")
+        store.bump_no_result(t["id"], "engineer")
+        assert store.bump_no_result(t["id"], "reviewer") == 1
+        assert store.get_no_result_streak(t["id"]) == ("reviewer", 1)
+
+    def test_a_delivered_result_resets_the_streak(self, db_path):
+        t = create_task("x")
+        store.bump_no_result(t["id"], "engineer")
+        store.bump_no_result(t["id"], "engineer")
+        post_message(t["id"], "engineer", kind="result", text="APPROVED: done")
+        assert store.get_no_result_streak(t["id"]) == (None, 0)
+
+    def test_a_human_answer_resets_the_streak(self, db_path):
+        t = create_task("x")
+        store.bump_no_result(t["id"], "engineer")
+        post_message(t["id"], "human", kind="answer", text="fixed the runner, go")
+        assert store.get_no_result_streak(t["id"]) == (None, 0)
+
+    def test_reset_is_idempotent(self, db_path):
+        t = create_task("x")
+        store.reset_no_result(t["id"])
+        store.reset_no_result(t["id"])
+        assert store.get_no_result_streak(t["id"]) == (None, 0)

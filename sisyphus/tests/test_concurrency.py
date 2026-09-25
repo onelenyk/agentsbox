@@ -11,7 +11,7 @@ async def test_worker_gate_bounds_concurrency(db_path, monkeypatch):
     live = 0
     peak = 0
 
-    async def fake_spawn(task_id, role, instruction, repo_name=None):
+    async def fake_spawn(task_id, role, instruction, repo_name=None, **kw):
         nonlocal live, peak
         live += 1
         peak = max(peak, live)
@@ -65,7 +65,7 @@ async def test_a_queued_reviewer_overtakes_queued_engineers(db_path, monkeypatch
     tasks = [store.create_task(f"goal {i}") for i in range(4)]
     holder_id = tasks[0]["id"]
 
-    async def fake_spawn(task_id, role, instruction, repo_name=None):
+    async def fake_spawn(task_id, role, instruction, repo_name=None, **kw):
         started.append(role)
         if task_id == holder_id:
             holder_running.set()

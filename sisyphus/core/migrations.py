@@ -24,7 +24,9 @@ logger = logging.getLogger(__name__)
 #     (2026-09-23).
 # 5 = integration_events, the journal of calls to Jira and the forges (2026-09-25).
 # 6 = jira_sync, tracks polling state per JQL for intake polling (2026-09-25).
-CURRENT_VERSION = 6
+# 7 = tasks.no_result_role / no_result_streak, the per-task no-result escalation
+#     counter (2026-09-26).
+CURRENT_VERSION = 7
 
 # Tables of features that are gone. Dropped on upgrade so a database does not
 # keep carrying — and a reader keep wondering about — data nothing reads.
