@@ -164,10 +164,16 @@ def test_view_masks_secrets_and_shows_addresses(kc):
     from core import credentials
     credentials.set_value("JIRA_API_TOKEN", "atl-token-abcdWXYZ")
     credentials.set_value("JIRA_BASE_URL", "https://team.atlassian.net")
-    rows = {r["name"]: r for g in credentials.view() for r in g["rows"]}
+    cards = {c["group"]: c for c in credentials.view()}
+    rows = {r["name"]: r for c in cards.values() for r in c["fields"]}
     assert rows["JIRA_API_TOKEN"]["shown"] == "••••WXYZ"
     assert rows["JIRA_BASE_URL"]["shown"] == "https://team.atlassian.net"
     assert rows["GITLAB_TOKEN"]["set"] is False
+    assert cards["Jira"]["status"] == "Incomplete · 2/3" and cards["Jira"]["tone"] == "warn"
+    assert cards["GitLab"]["status"] == "Not set up" and not cards["GitLab"]["open"]
+    assert cards["Daemon"]["status"] == "Not used"
+    credentials.set_value("JIRA_EMAIL", "me@example.com")
+    assert {c["group"]: c for c in credentials.view()}["Jira"]["status"] == "Connected"
 
 
 def test_bad_names_and_values_are_refused(kc):
@@ -249,4 +255,4 @@ def test_integrations_page_has_the_keys_section(client):
     r = client.get("/integrations")
     assert "credentials-view" in r.text
     v = client.get("/api/credentials/view")
-    assert "Keys &amp; tokens" in v.text and "JIRA_API_TOKEN" in v.text
+    assert "Sisyphus vault" in v.text and "JIRA_API_TOKEN" in v.text and "keycard" in v.text
