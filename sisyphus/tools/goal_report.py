@@ -262,13 +262,12 @@ def readiness(conn, days: int) -> dict:
             elif msg["kind"] == "worker_finished":
                 prev_started_idx = -1
 
-    # Lost work: done tasks whose work never reached main. Three ways that
-    # happens, all counted: commits with no MR at all (the original gap), an MR
-    # that was never merged (done before delivery — task-df5a3fcc: done while
-    # auto-merge was blocked and the MR stayed open), and a reviewer's CHANGES
-    # REQUESTED unanswered on the head (done despite a request that was never
-    # addressed — the thread tracks heads as commit messages, so a request with
-    # no commit after it still stands).
+    # Lost work: done tasks whose work never reached main. Two ways that
+    # happens, all counted: commits with no MR at all (the original gap), and an
+    # MR that was never merged (done before delivery — task-df5a3fcc: done while
+    # auto-merge was blocked and the MR stayed open). An MR that DID merge is on
+    # main even when a reviewer asked for changes — that is counted separately
+    # below as merged over an objection, never as lost.
     lost = conn.execute("""
         SELECT DISTINCT t.id FROM tasks t
          WHERE t.created_at >= ? AND t.status = 'done'
@@ -279,25 +278,39 @@ def readiness(conn, days: int) -> dict:
                              WHERE mr.task_id = t.id)
                 OR EXISTS (SELECT 1 FROM merge_requests mr
                             WHERE mr.task_id = t.id AND mr.status != 'merged')
-                OR EXISTS (
-                    SELECT 1 FROM messages m
-                     WHERE m.task_id = t.id
-                       AND (
-                           (m.kind = 'result' AND m.author LIKE '%review%'
-                            AND m.text LIKE 'CHANGES REQUESTED%')
-                           OR (m.kind = 'note'
-                               AND m.text LIKE 'review verdict for %: CHANGES REQUESTED%')
-                       )
-                       AND NOT EXISTS (
-                           SELECT 1 FROM messages m2
-                            WHERE m2.task_id = t.id
-                              AND m2.kind = 'commit'
-                              AND m2.seq > m.seq
-                       )
-                )
            )
     """, (cut,)).fetchall()
     lost_count = len(lost)
+
+    # Merged over an objection: a done task whose MR merged while a reviewer's
+    # CHANGES REQUESTED on the head was left unanswered — no commit on the
+    # branch after the verdict (the thread tracks heads as commit messages, so
+    # a request with no commit after it still stands). The work DID reach main,
+    # so this is not lost work; the merge overrode a standing objection.
+    objected = conn.execute("""
+        SELECT DISTINCT t.key FROM tasks t
+         WHERE t.created_at >= ? AND t.status = 'done'
+           AND EXISTS (SELECT 1 FROM merge_requests mr
+                        WHERE mr.task_id = t.id AND mr.status = 'merged')
+           AND EXISTS (
+               SELECT 1 FROM messages m
+                WHERE m.task_id = t.id
+                  AND (
+                      (m.kind = 'result' AND m.author LIKE '%review%'
+                       AND m.text LIKE 'CHANGES REQUESTED%')
+                      OR (m.kind = 'note'
+                          AND m.text LIKE 'review verdict for %: CHANGES REQUESTED%')
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM messages m2
+                       WHERE m2.task_id = t.id
+                         AND m2.kind = 'commit'
+                         AND m2.seq > m.seq
+                  )
+           )
+    """, (cut,)).fetchall()
+    objected_tasks = sorted(r["key"] for r in objected)
+    objected_count = len(objected_tasks)
 
     # Merge latency: median hours from MR created_at to merged_at
     latencies = conn.execute("""
@@ -376,6 +389,8 @@ def readiness(conn, days: int) -> dict:
         "provider_faults": provider_faults,
         "duplicates": duplicates,
         "lost_work": lost_count,
+        "merged_over_objection": objected_count,
+        "merged_over_objection_tasks": objected_tasks,
         "merged_count": len(latencies),
         "median_latency_hours": round(median_latency, 1),
         "stale_blocks": stale_blocks,
@@ -452,6 +467,10 @@ def render(r: dict) -> str:
     lines.extend([
         f"    duplicate workers  {rd['duplicates']} tasks with concurrent starts",
         f"    lost work          {rd['lost_work']} done tasks with commits, work not on main",
+        f"    merged over obj.   {rd['merged_over_objection']} done tasks whose MR merged over an "
+        f"unanswered CHANGES REQUESTED",
+        *([f"                      {', '.join(rd['merged_over_objection_tasks'])}"]
+          if rd['merged_over_objection_tasks'] else []),
         f"    merge latency      {rd['median_latency_hours']}h median from MR to merged "
         f"({rd['merged_count']} merges)",
         f"    stale-check blocks {rd['stale_blocks']} notes waiting on check status, "
