@@ -19,6 +19,15 @@ def kc(monkeypatch, tmp_path):
     monkeypatch.setattr(credentials, "_kc_write", write)
     env = tmp_path / ".env"
     monkeypatch.setattr(credentials, "_env_path", lambda: env)
+    # Never the real config.yaml: move_leftovers rewrites the file it reads.
+    import yaml
+    from core import repos
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("jira:\n  base_url: ${JIRA_BASE_URL}\n  email: ${JIRA_EMAIL}\n  token: ${JIRA_API_TOKEN}\n"
+                   "gitlab:\n  token: ${GITLAB_TOKEN}\n")
+    monkeypatch.setattr(config, "config_file", lambda: cfg)
+    monkeypatch.setattr(repos, "_write_config_file", lambda data: cfg.write_text(yaml.dump(data)))
+    config.reload_config()
     credentials._cache.clear()
     for n in ("JIRA_API_TOKEN", "JIRA_EMAIL", "JIRA_BASE_URL", "GITLAB_TOKEN"):
         monkeypatch.delenv(n, raising=False)
@@ -27,57 +36,128 @@ def kc(monkeypatch, tmp_path):
     config.reload_config()
 
 
-def test_keychain_value_wins_over_environment(kc, monkeypatch):
+def test_credentials_come_from_the_vault_only(kc, monkeypatch):
     from core import credentials
-    monkeypatch.setenv("GITLAB_TOKEN", "from-env-file")
-    assert credentials.get("GITLAB_TOKEN") == "from-env-file"
-    credentials.set_value("GITLAB_TOKEN", "glpat-fromthekeychain")
-    assert credentials.get("GITLAB_TOKEN") == "glpat-fromthekeychain"
-    assert credentials.source("GITLAB_TOKEN") == "keychain"
+    monkeypatch.setenv("GITLAB_TOKEN", "from-the-shell")
+    assert credentials.get("GITLAB_TOKEN") == ""
+    credentials.set_value("GITLAB_TOKEN", "glpat-fromthevault")
+    assert credentials.get("GITLAB_TOKEN") == "glpat-fromthevault"
     credentials.clear("GITLAB_TOKEN")
-    assert credentials.get("GITLAB_TOKEN") == "from-env-file"
+    assert credentials.get("GITLAB_TOKEN") == ""
 
 
-def test_config_placeholder_reads_the_keychain_without_touching_os_environ(kc, monkeypatch):
+def test_a_name_that_is_not_a_credential_still_reads_the_environment(kc, monkeypatch):
+    from core import credentials
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
+    assert credentials.get("ANTHROPIC_API_KEY") == "sk-ant-x"
+
+
+def test_config_placeholder_reads_the_vault_without_touching_os_environ(kc, monkeypatch):
     import os
     from core import credentials
+    monkeypatch.setenv("JIRA_API_TOKEN", "from-env")
+    managed = credentials.managed_names("jira:\n  token: ${JIRA_API_TOKEN}\n")
+    assert credentials.resolve_placeholder("JIRA_API_TOKEN", managed) is None
     credentials.set_value("JIRA_API_TOKEN", "atl-token-123456")
-    raw = "jira:\n  token: ${JIRA_API_TOKEN}\n"
-    managed = credentials.managed_names(raw)
     assert credentials.resolve_placeholder("JIRA_API_TOKEN", managed) == "atl-token-123456"
-    assert "JIRA_API_TOKEN" not in os.environ
+    assert os.environ["JIRA_API_TOKEN"] == "from-env"
 
 
-def test_a_repo_token_named_in_config_is_managed(kc):
+def test_every_repo_gets_a_token_name(kc):
     from core import credentials
-    raw = "repos:\n  - name: kmp\n    token: ${KMP_GITLAB_TOKEN}\nworker_env:\n  PATH: ${PATH}\n"
+    raw = "repos:\n  - name: kmp-app\n    source: /x\nworker_env:\n  PATH: ${PATH}\n"
     names = credentials.managed_names(raw)
-    assert "KMP_GITLAB_TOKEN" in names
+    assert "REPO_KMP_APP_TOKEN" in names
     assert "PATH" not in names
+    assert credentials.repo_token_name("kmp-app") == "REPO_KMP_APP_TOKEN"
 
 
-def test_placeholders_that_are_not_credentials_never_hit_the_keychain(kc, monkeypatch):
+def test_placeholders_that_are_not_credentials_never_hit_the_vault(kc, monkeypatch):
     from core import credentials
     kc["PATH"] = "/evil"
     monkeypatch.setenv("PATH", "/usr/bin")
     assert credentials.resolve_placeholder("PATH", credentials.managed_names("")) == "/usr/bin"
 
 
-def test_import_moves_env_file_values_and_comments_them_out(kc, monkeypatch):
+def test_changing_an_address_clears_the_token_sent_to_it(kc):
+    from core import credentials
+    credentials.set_value("JIRA_BASE_URL", "https://team.atlassian.net")
+    credentials.set_value("JIRA_API_TOKEN", "atl-token-123456")
+    assert credentials.set_value("JIRA_BASE_URL", "https://team.atlassian.net") == []
+    assert kc["JIRA_API_TOKEN"] == "atl-token-123456"
+    assert credentials.set_value("JIRA_BASE_URL", "https://evil.example") == ["JIRA_API_TOKEN"]
+    assert "JIRA_API_TOKEN" not in kc
+
+
+def test_env_file_leftovers_move_into_the_vault_and_leave_the_file(kc, monkeypatch):
     import os
     from core import credentials
     credentials._env_path().write_text(
         "# keep me\nJIRA_EMAIL=me@example.com\nJIRA_API_TOKEN='atl-secret-999'\nWORKSPACE_ROOT=/x\n")
     monkeypatch.setenv("JIRA_API_TOKEN", "atl-secret-999")
-    assert set(credentials.env_file_pending()) == {"JIRA_EMAIL", "JIRA_API_TOKEN"}
-    res = credentials.import_env_file()
+    assert {lo["name"] for lo in credentials.leftovers()} == {"JIRA_EMAIL", "JIRA_API_TOKEN"}
+    res = credentials.move_leftovers()
     assert sorted(res["moved"]) == ["JIRA_API_TOKEN", "JIRA_EMAIL"]
     assert kc["JIRA_API_TOKEN"] == "atl-secret-999"
     text = credentials._env_path().read_text()
-    assert "atl-secret-999" not in text and "me@example.com" not in text
+    assert "atl-secret-999" not in text and "me@example.com" not in text and "JIRA" not in text
     assert "# keep me" in text and "WORKSPACE_ROOT=/x" in text
     assert "JIRA_API_TOKEN" not in os.environ
-    assert credentials.env_file_pending() == []
+    assert credentials.leftovers() == []
+
+
+def test_a_token_typed_into_config_yaml_moves_into_the_vault(kc, monkeypatch, tmp_path):
+    import yaml
+    from core import credentials, config, repos
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(yaml.dump({"gitlab": {"base_url": "https://gitlab.com", "token": "glpat-plain-123"},
+                              "repos": [{"name": "kmp", "source": "/x", "token": "glpat-repo-456"}]}))
+    monkeypatch.setattr(config, "config_file", lambda: cfg)
+    monkeypatch.setattr(repos, "_write_config_file", lambda data: cfg.write_text(yaml.dump(data)))
+    names = {lo["name"] for lo in credentials.leftovers()}
+    assert {"GITLAB_TOKEN", "REPO_KMP_TOKEN", "GITLAB_BASE_URL"} <= names
+    credentials.move_leftovers()
+    assert kc["GITLAB_TOKEN"] == "glpat-plain-123" and kc["REPO_KMP_TOKEN"] == "glpat-repo-456"
+    text = cfg.read_text()
+    assert "glpat" not in text and "${GITLAB_TOKEN}" in text
+    assert credentials.leftovers() == []
+
+
+def test_repo_credential_prefers_the_repos_own_vault_token(kc, monkeypatch):
+    from core import credentials, repos
+    monkeypatch.setattr(repos, "get_repo", lambda n: {"name": n, "source": "https://gitlab.com/a/b.git"})
+    credentials.set_value("GITLAB_TOKEN", "glpat-shared-000")
+    assert repos.repo_credential("kmp")["source"] == "global"
+    monkeypatch.setattr(credentials, "managed_names", lambda raw=None: ["GITLAB_TOKEN", "REPO_KMP_TOKEN"])
+    credentials.set_value("REPO_KMP_TOKEN", "glpat-own-111")
+    cred = repos.repo_credential("kmp")
+    assert cred["token"] == "glpat-own-111" and cred["source"] == "repo"
+
+
+def test_editing_a_repo_never_writes_a_resolved_token_to_config(kc, monkeypatch, tmp_path):
+    import yaml
+    from core import config, repos
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(yaml.dump({"repos": [{"name": "kmp", "source": "/x", "token": "${KMP_TOKEN}"}]}))
+    monkeypatch.setattr(config, "config_file", lambda: cfg)
+    monkeypatch.setattr(repos, "_write_config_file", lambda data: cfg.write_text(yaml.dump(data)))
+    kc["KMP_TOKEN"] = "glpat-secret-789"
+    config.reload_config()
+    assert repos.get_repo("kmp")["token"] == "glpat-secret-789"
+    repos.update_repo_config("kmp", branch="dev")
+    text = cfg.read_text()
+    assert "glpat-secret-789" not in text and "${KMP_TOKEN}" in text and "dev" in text
+
+
+def test_env_loader_skips_credentials(kc, monkeypatch, tmp_path):
+    import os
+    from core.env import load_env
+    f = tmp_path / ".env"
+    f.write_text("JIRA_API_TOKEN=atl-x-12345678\nSISYPHUS_SOME_SETTING=1\n")
+    monkeypatch.delenv("SISYPHUS_SOME_SETTING", raising=False)
+    load_env(f)
+    assert "JIRA_API_TOKEN" not in os.environ
+    assert os.environ.pop("SISYPHUS_SOME_SETTING") == "1"
 
 
 def test_view_masks_secrets_and_shows_addresses(kc):
@@ -96,6 +176,15 @@ def test_bad_names_and_values_are_refused(kc):
         credentials.set_value("lower", "x" * 10)
     with pytest.raises(credentials.CredentialError):
         credentials.set_value("JIRA_API_TOKEN", "  ")
+
+
+def test_workers_cannot_open_the_vault(monkeypatch):
+    from core import sandbox
+    monkeypatch.setenv("SISYPHUS_VAULT", "/Users/x/Library/Keychains/sisyphus.keychain-db")
+    profile = sandbox.build_seatbelt_profile("/w/t", "/w/o", workspace_root="/w", home="/Users/x",
+                                             protected=[], db_path="/w/db")
+    last = profile.strip().splitlines()[-1]
+    assert last == '(deny file-read* file-write* (literal "/Users/x/Library/Keychains/sisyphus.keychain-db"))'
 
 
 def test_worker_env_drops_daemon_credentials(kc, monkeypatch):

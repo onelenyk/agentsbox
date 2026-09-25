@@ -36,13 +36,18 @@ Fields in a journal row:
 ## Configuring Jira
 
 Open **Integrations → Keys & tokens** and fill in the Jira site URL, account
-email and API token. They are kept in the macOS login keychain (service
-`sisyphus-secret`), take effect at once, and are never put into a worker's
-environment — agents reach Jira only through the `jira_*` tools.
+email and API token. That page is the only place Sisyphus reads credentials
+from — not `.env`, not the shell, not a value typed into `config.yaml`.
 
-`config.yaml` still names them as placeholders; the keychain is what fills
-them, with the daemon's environment (shell, launchd, an old `.env`) as the
-fallback:
+Where they are kept: Sisyphus's vault, a keychain file of its own
+(`~/Library/Keychains/sisyphus.keychain-db`) that is not on the user's
+keychain search list and whose random password lives in the login keychain.
+Every worker's sandbox denies any access to that file, so even `security
+find-generic-password` from an agent's shell finds nothing. Values are never
+put into a worker's environment; agents reach Jira only through the `jira_*`
+tools.
+
+`config.yaml` names them as placeholders, filled from the vault at load:
 
 ```yaml
 jira:
@@ -51,10 +56,12 @@ jira:
   token: ${JIRA_API_TOKEN}
 ```
 
-A value still in `.env` shows as "from .env"; **Move to the keychain** moves
-every such value and comments its line out of the file. The same page covers
-GitLab, GitHub, OpenRouter, the daemon's API token and webhook secrets, and any
-`token: ${NAME}` a repo in `config.yaml` refers to.
+The same page covers GitLab, GitHub, OpenRouter, the daemon's API token and
+webhook secrets, and one forge token per repo (`REPO_<NAME>_TOKEN`, which wins
+over the shared one). Changing a site URL or email clears the token that goes
+with it, so a token is never sent to an address nobody re-confirmed. Anything
+an older setup left in `.env` or typed into `config.yaml` is listed there —
+**Move into the vault** moves it and removes it from the file.
 
 The token is not your password. Generate one in Jira → Personal settings → API tokens.
 

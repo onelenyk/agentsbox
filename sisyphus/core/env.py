@@ -1,9 +1,9 @@
 """Minimal .env loader — zero dependency.
 
-Loads ``KEY=VALUE`` lines from the app's ``.env`` into ``os.environ`` so secrets
-(``OPENROUTER_API_KEY``, ``SISYPHUS_API_TOKEN``, …) are configured in one file
-instead of the shell — which matters once the daemon is supervised (launchd),
-where no interactive shell env exists.
+Loads ``KEY=VALUE`` lines from the app's ``.env`` into ``os.environ`` for the
+daemon's own settings (``WORKSPACE_ROOT``, …) — which matters once the daemon
+is supervised (launchd), where no interactive shell env exists. Never tokens:
+those live in the vault (core.credentials) and are skipped here.
 
 Precedence: an already-set environment variable always wins (shell / launchd >
 .env), matching python-dotenv's non-override default. Call once at process start
@@ -22,6 +22,14 @@ def load_env(path=None) -> int:
     p = Path(path) if path else _ROOT / ".env"
     if not p.exists():
         return 0
+    # Credentials are never read from here — only from the vault (see
+    # core.credentials). A token left in .env is shown on the Integrations
+    # page for moving, and kept out of the environment workers inherit.
+    try:
+        from .credentials import managed_names
+        refused = set(managed_names())
+    except Exception:  # noqa: BLE001 — a broken config must not stop the daemon booting
+        refused = set()
     loaded = 0
     for raw in p.read_text().splitlines():
         line = raw.strip()
@@ -32,6 +40,8 @@ def load_env(path=None) -> int:
         val = val.strip()
         if (len(val) >= 2) and val[0] == val[-1] and val[0] in ("'", '"'):
             val = val[1:-1]
+        if key in refused:
+            continue
         if key and key not in os.environ:
             os.environ[key] = val
             loaded += 1

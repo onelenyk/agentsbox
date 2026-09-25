@@ -1,24 +1,20 @@
 """Tokens, keys and the addresses that go with them — entered in the UI, kept
-in the macOS login keychain.
+in Sisyphus's vault (core.keychain), and nowhere else.
 
 config.yaml names every credential as a ``${VAR}`` placeholder (jira.token:
-${JIRA_API_TOKEN}). Those used to be filled from ``.env``, a plaintext file
-next to the code that every worker can read. They are now filled from here
-first: the Integrations page writes a value into the keychain, core.config
-substitutes it on its next load, and nothing touches a file.
+${JIRA_API_TOKEN}); core.config fills those from the vault and from nothing
+else. There is no file fallback on purpose: not .env, not the shell, not a
+value typed into config.yaml. A credential in a file is a credential every
+worker can read, and one with two possible sources is one nobody can be sure
+about. What an older setup left in files is shown on the page, with a button
+that moves it into the vault and takes it out of the file.
 
-Resolution for one name, first hit wins:
+A repo's own forge token is ``REPO_<NAME>_TOKEN`` (see ``repo_token_name``),
+set on the same page; a repo needs nothing in config.yaml for it.
 
-  1. the keychain (service ``sisyphus-secret``, account = the variable name)
-  2. the daemon's environment — the shell, launchd, or a leftover ``.env``
-
-so an existing ``.env`` keeps working until its values are moved over
-(``import_env_file``, a button on the page).
-
-Values resolved here are deliberately NOT put into ``os.environ``: a worker
-inherits the daemon's environment, and an agent has no business holding the
-Jira token. ``worker_strip`` names what the launcher removes for the same
-reason when a value did come from the environment.
+Values resolved here are never put into ``os.environ`` — a worker inherits the
+daemon's environment — and ``worker_strip`` names what the launcher removes
+in case the shell put one there.
 """
 import logging
 import os
@@ -32,39 +28,48 @@ logger = logging.getLogger(__name__)
 SERVICE = "sisyphus-secret"
 
 # The credentials Sisyphus itself reads. `secret` decides whether the page may
-# show the value back; an address is not a secret, a token is.
+# show the value back; an address is not a secret, a token is. `path` is where
+# config.yaml keeps its placeholder, so a plaintext value there can be found.
 KNOWN: List[dict] = [
     {"name": "JIRA_BASE_URL", "group": "Jira", "label": "Site URL", "secret": False,
-     "hint": "https://yourteam.atlassian.net"},
+     "path": ("jira", "base_url"), "hint": "https://yourteam.atlassian.net"},
     {"name": "JIRA_EMAIL", "group": "Jira", "label": "Account email", "secret": False,
-     "hint": "the Atlassian account the token belongs to"},
+     "path": ("jira", "email"), "hint": "the Atlassian account the token belongs to"},
     {"name": "JIRA_API_TOKEN", "group": "Jira", "label": "API token", "secret": True,
-     "hint": "id.atlassian.com → Security → Create and manage API tokens"},
+     "path": ("jira", "token"), "hint": "id.atlassian.com → Security → Create and manage API tokens"},
     {"name": "GITLAB_BASE_URL", "group": "GitLab", "label": "Instance URL", "secret": False,
-     "hint": "https://gitlab.com, or your own instance"},
+     "path": ("gitlab", "base_url"), "hint": "https://gitlab.com, or your own instance"},
     {"name": "GITLAB_TOKEN", "group": "GitLab", "label": "Personal access token", "secret": True,
-     "hint": "scope: api"},
+     "path": ("gitlab", "token"), "hint": "scope: api — used by every GitLab repo without its own"},
     {"name": "GITHUB_BASE_URL", "group": "GitHub", "label": "API URL", "secret": False,
-     "hint": "https://api.github.com, or your Enterprise API"},
+     "path": ("github", "base_url"), "hint": "https://api.github.com, or your Enterprise API"},
     {"name": "GITHUB_TOKEN", "group": "GitHub", "label": "Personal access token", "secret": True,
-     "hint": "scope: repo"},
+     "path": ("github", "token"), "hint": "scope: repo — used by every GitHub repo without its own"},
     {"name": "OPENROUTER_API_KEY", "group": "Models", "label": "OpenRouter API key", "secret": True,
-     "hint": "only for runners that authenticate through OpenRouter"},
+     "path": ("openrouter", "api_key"), "hint": "only for runners that authenticate through OpenRouter"},
     {"name": "SISYPHUS_API_TOKEN", "group": "Daemon", "label": "API token", "secret": True,
+     "path": ("api", "token"),
      "hint": "set = every caller off this machine must present it; empty = local use only"},
     {"name": "SISYPHUS_WEBHOOK_SECRET", "group": "Daemon", "label": "Webhook secret", "secret": True,
-     "hint": "validates forge webhooks that start autopilots"},
+     "path": ("webhooks", "secret"), "hint": "validates forge webhooks that start autopilots"},
     {"name": "SISYPHUS_NOTIFY_URL", "group": "Daemon", "label": "Notification webhook URL", "secret": True,
-     "hint": "failed or parked tasks are posted here"},
+     "path": ("notify", "webhook_url"), "hint": "failed or parked tasks are posted here"},
 ]
 _KNOWN_BY_NAME = {k["name"]: k for k in KNOWN}
 
-# A config line that carries a credential — a repo's own `token: ${MY_TOKEN}`
-# included. Placeholders elsewhere (worker_env's ${PATH}) are not credentials
-# and are never looked up in the keychain.
+# Changing where a token is sent must not keep sending it: an address edit
+# clears the token that goes with it, so the next one is typed by a person
+# who saw the new address — not reused by whatever changed it.
+_ADDRESS_GUARDS = {"JIRA_BASE_URL": ("JIRA_API_TOKEN",), "JIRA_EMAIL": ("JIRA_API_TOKEN",),
+                   "GITLAB_BASE_URL": ("GITLAB_TOKEN",), "GITHUB_BASE_URL": ("GITHUB_TOKEN",)}
+
+# A config line that names a credential by placeholder — a repo's own
+# `token: ${MY_TOKEN}` included. Placeholders elsewhere (worker_env's ${PATH})
+# are not credentials and never resolve from the vault.
 _CRED_LINE = re.compile(
     r"^\s*(?:token|secret|api_key|password|email|base_url|webhook_url)\s*:\s*[\"']?\$\{(\w+)\}",
     re.MULTILINE)
+_SECRET_KEYS = ("token", "secret", "api_key", "password")
 _NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
 
 _lock = threading.Lock()
@@ -75,23 +80,17 @@ class CredentialError(ValueError):
     pass
 
 
-# ── the keychain, behind two functions tests replace ────────────────────
-
-def _backend_enabled() -> bool:
-    return os.environ.get("SISYPHUS_KEYCHAIN", "on") != "off"
-
+# ── the vault, behind two functions tests replace ───────────────────────
 
 def _kc_read(name: str) -> Optional[str]:
-    if not _backend_enabled():
-        return None
     from . import keychain
     return keychain.read(name, service=SERVICE)
 
 
 def _kc_write(name: str, value: Optional[str]) -> None:
     from . import keychain
-    if not _backend_enabled():
-        raise CredentialError("the keychain is switched off for this process")
+    if not keychain.available():
+        raise CredentialError("the macOS keychain is not available to this process")
     if value is None:
         keychain.delete(name, service=SERVICE)
     else:
@@ -101,26 +100,49 @@ def _kc_write(name: str, value: Optional[str]) -> None:
             raise CredentialError(str(e)) from None
 
 
-# ── lookup ──────────────────────────────────────────────────────────────
+# ── names ───────────────────────────────────────────────────────────────
+
+def repo_token_name(repo: str) -> str:
+    """The vault name of *repo*'s own forge token: kmp-app → REPO_KMP_APP_TOKEN."""
+    return "REPO_" + re.sub(r"[^A-Z0-9]+", "_", (repo or "").upper()).strip("_") + "_TOKEN"
+
+
+def _raw_config() -> str:
+    from .config import config_file
+    try:
+        return config_file().read_text()
+    except OSError:
+        return ""
+
+
+def _repo_names(raw: str) -> List[str]:
+    import yaml
+    try:
+        data = yaml.safe_load(raw) or {}
+    except yaml.YAMLError:
+        return []
+    return [r["name"] for r in (data.get("repos") or []) if isinstance(r, dict) and r.get("name")]
+
 
 def managed_names(raw_config: Optional[str] = None) -> List[str]:
-    """Every credential name: the known ones, then any a config line refers
-    to (a repo's own token), in that order."""
-    if raw_config is None:
-        from .config import config_file
-        try:
-            raw_config = config_file().read_text()
-        except OSError:
-            raw_config = ""
+    """Every credential name: the known ones, one per repo, then any a config
+    line refers to, in that order."""
+    raw = _raw_config() if raw_config is None else raw_config
     names = [k["name"] for k in KNOWN]
-    for n in _CRED_LINE.findall(raw_config or ""):
+    for n in [repo_token_name(r) for r in _repo_names(raw)] + _CRED_LINE.findall(raw or ""):
         if n not in names:
             names.append(n)
     return names
 
 
+def is_managed(name: str) -> bool:
+    return name in managed_names()
+
+
+# ── lookup ──────────────────────────────────────────────────────────────
+
 def stored(name: str) -> Optional[str]:
-    """The keychain's value for *name*, read once per process."""
+    """The vault's value for *name*, read once per process."""
     with _lock:
         if name in _cache:
             return _cache[name]
@@ -131,27 +153,20 @@ def stored(name: str) -> Optional[str]:
 
 
 def get(name: str) -> str:
-    """The value for *name*: keychain, then environment, else ""."""
-    return stored(name) or os.environ.get(name, "") or ""
+    """The value for a credential, from the vault only. A name that is not a
+    credential (a runner reading ANTHROPIC_API_KEY from launchd) still comes
+    from the environment."""
+    if name in managed_names():
+        return stored(name) or ""
+    return os.environ.get(name, "") or ""
 
 
 def resolve_placeholder(name: str, managed: List[str]) -> Optional[str]:
-    """What core.config substitutes for ``${name}``: the keychain value for a
-    credential, else the environment, else None (left as the placeholder)."""
+    """What core.config substitutes for ``${name}``: the vault's value for a
+    credential, the environment's for anything else, None to leave it."""
     if name in managed:
-        v = stored(name)
-        if v:
-            return v
+        return stored(name)
     return os.environ.get(name)
-
-
-def source(name: str) -> str:
-    """Where *name*'s value comes from: keychain | env_file | environment | ""."""
-    if stored(name):
-        return "keychain"
-    if os.environ.get(name):
-        return "env_file" if name in _env_file_values() else "environment"
-    return ""
 
 
 def worker_strip(raw_config: Optional[str] = None) -> List[str]:
@@ -161,29 +176,38 @@ def worker_strip(raw_config: Optional[str] = None) -> List[str]:
 
 # ── writes ──────────────────────────────────────────────────────────────
 
-def set_value(name: str, value: str) -> None:
-    """Keep *value* for *name* in the keychain and make config see it now."""
+def set_value(name: str, value: str) -> List[str]:
+    """Keep *value* for *name* in the vault and make config see it now.
+    Returns the names cleared because an address they go to changed."""
     name = (name or "").strip()
     value = (value or "").strip()
     if not _NAME_RE.match(name):
         raise CredentialError("a name is capitals, digits and underscores, like GITLAB_TOKEN")
     if not value:
         raise CredentialError("the value is empty — use Clear to remove one")
+    before = stored(name)
     _kc_write(name, value)
     with _lock:
         _cache[name] = value
+    cleared = []
+    if before and before != value:
+        for dep in _ADDRESS_GUARDS.get(name, ()):
+            if stored(dep):
+                _kc_write(dep, None)
+                with _lock:
+                    _cache[dep] = None
+                cleared.append(dep)
     _reload()
-    logger.info("credential %s saved to the keychain", name)
+    logger.info("credential %s saved to the vault", name)
+    return cleared
 
 
 def clear(name: str) -> None:
-    """Remove *name* from the keychain. An environment value, if any, shows
-    through again — the page says so."""
     _kc_write(name, None)
     with _lock:
         _cache[name] = None
     _reload()
-    logger.info("credential %s removed from the keychain", name)
+    logger.info("credential %s removed from the vault", name)
 
 
 def _reload() -> None:
@@ -191,7 +215,7 @@ def _reload() -> None:
     reload_config()
 
 
-# ── the .env file, on its way out ───────────────────────────────────────
+# ── what older setups left in files ─────────────────────────────────────
 
 def _env_path() -> Path:
     from .env import _ROOT
@@ -216,37 +240,81 @@ def _env_file_values() -> Dict[str, str]:
     return out
 
 
-def env_file_pending() -> List[str]:
-    """Credential names that still have a value in .env."""
-    managed = managed_names()
-    return [n for n in managed if n in _env_file_values()]
-
-
-def import_env_file() -> dict:
-    """Move every credential in .env into the keychain and take its line out
-    of the file. Returns {moved: [...], failed: {name: why}}."""
-    managed = managed_names()
-    values = _env_file_values()
-    moved, failed = [], {}
-    for name in managed:
-        if name not in values:
+def _config_plaintext(data: dict) -> List[dict]:
+    """Credentials typed into config.yaml as values rather than placeholders:
+    [{name, where, value}]."""
+    found = []
+    for k in KNOWN:
+        block, key = k["path"]
+        v = (data.get(block) or {}).get(key) if isinstance(data.get(block), dict) else None
+        if isinstance(v, str) and v.strip() and not v.strip().startswith("${"):
+            found.append({"name": k["name"], "where": f"{block}.{key}", "value": v.strip(),
+                          "set": (block, key)})
+    for i, r in enumerate(data.get("repos") or []):
+        if not isinstance(r, dict):
             continue
+        v = r.get("token")
+        if isinstance(v, str) and v.strip() and not v.strip().startswith("${"):
+            found.append({"name": repo_token_name(r.get("name", "")),
+                          "where": f"repos[{r.get('name', i)}].token", "value": v.strip(),
+                          "repo_index": i})
+    return found
+
+
+def leftovers() -> List[dict]:
+    """Every credential still sitting in a file: [{name, where}], values
+    withheld. Nothing reads these any more — they are only shown so they can
+    be moved."""
+    import yaml
+    out = [{"name": n, "where": ".env"} for n in managed_names() if n in _env_file_values()]
+    try:
+        data = yaml.safe_load(_raw_config()) or {}
+    except yaml.YAMLError:
+        data = {}
+    out += [{"name": f["name"], "where": "config.yaml " + f["where"]} for f in _config_plaintext(data)]
+    return out
+
+
+def move_leftovers() -> dict:
+    """Move every credential found in .env or typed into config.yaml into the
+    vault, and take it out of the file. Returns {moved: [...], failed: {name: why}}."""
+    moved, failed = [], {}
+
+    def keep(name, value):
         try:
-            set_value(name, values[name])
+            set_value(name, value)
             moved.append(name)
+            return True
         except CredentialError as e:
             failed[name] = str(e)
-    if moved:
+            return False
+
+    # config.yaml: replace the value with the placeholder that reads the vault.
+    from .repos import _read_config_file, _write_config_file
+    data = _read_config_file()
+    changed = False
+    for f in _config_plaintext(data):
+        if not keep(f["name"], f["value"]):
+            continue
+        if "set" in f:
+            block, key = f["set"]
+            data[block][key] = "${" + f["name"] + "}"
+        else:
+            data["repos"][f["repo_index"]].pop("token", None)
+        changed = True
+    if changed:
+        _write_config_file(data)
+
+    # .env: take the line out.
+    values = _env_file_values()
+    env_moved = [n for n in managed_names() if n in values and keep(n, values[n])]
+    if env_moved:
         p = _env_path()
-        lines = []
-        for raw in p.read_text().splitlines():
-            key = raw.split("=", 1)[0].strip() if "=" in raw and not raw.lstrip().startswith("#") else ""
-            if key in moved:
-                lines.append(f"# {key} — moved to the keychain; edit it on the Integrations page")
-            else:
-                lines.append(raw)
-        p.write_text("\n".join(lines) + "\n")
-        for name in moved:
+        kept = [raw for raw in p.read_text().splitlines()
+                if not ("=" in raw and not raw.lstrip().startswith("#")
+                        and raw.split("=", 1)[0].strip() in env_moved)]
+        p.write_text("\n".join(kept) + "\n")
+        for name in env_moved:
             os.environ.pop(name, None)
         _reload()
     return {"moved": moved, "failed": failed}
@@ -259,24 +327,21 @@ def _masked(value: str) -> str:
 
 
 def view() -> List[dict]:
-    """Rows for the page, grouped in KNOWN's order; config-only names last."""
+    """Rows for the page, grouped in KNOWN's order; repo tokens after."""
+    repos = {repo_token_name(r): r for r in _repo_names(_raw_config())}
     rows = []
     for name in managed_names():
-        meta = _KNOWN_BY_NAME.get(name) or {
-            "name": name, "group": "From config.yaml", "label": name, "secret": True,
-            "hint": "a repo's own credential"}
-        value = get(name)
-        rows.append({
-            **meta,
-            "set": bool(value),
-            "source": source(name),
-            "shown": (value if not meta["secret"] else _masked(value)) if value else "",
-        })
+        meta = _KNOWN_BY_NAME.get(name)
+        if not meta:
+            repo = repos.get(name)
+            meta = {"name": name, "group": "Repos", "secret": True,
+                    "label": f"{repo} — forge token" if repo else name,
+                    "hint": "this repo's own token; without one it uses the shared GitLab/GitHub token"
+                    if repo else "named by a token: line in config.yaml"}
+        value = stored(name) or ""
+        rows.append({**meta, "set": bool(value),
+                     "shown": (value if not meta["secret"] else _masked(value)) if value else ""})
     groups: Dict[str, List[dict]] = {}
     for r in rows:
         groups.setdefault(r["group"], []).append(r)
     return [{"group": g, "rows": rs} for g, rs in groups.items()]
-
-
-def is_managed(name: str) -> bool:
-    return name in managed_names()

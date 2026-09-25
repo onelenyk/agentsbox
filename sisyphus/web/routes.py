@@ -1221,9 +1221,9 @@ def _from_this_page(request: Request) -> bool:
 async def _credentials_view(request: Request, note: str = "", error: str = ""):
     from core import credentials
     groups = await asyncio.to_thread(credentials.view)
-    pending = await asyncio.to_thread(credentials.env_file_pending)
+    leftovers = await asyncio.to_thread(credentials.leftovers)
     return _tmpl().TemplateResponse(request, "credentials_view.html", {
-        "groups": groups, "pending": pending, "note": note, "error": error,
+        "groups": groups, "leftovers": leftovers, "note": note, "error": error,
     })
 
 
@@ -1232,13 +1232,14 @@ async def credentials_view(request: Request):
     return await _credentials_view(request)
 
 
-@router.post("/api/credentials/import-env", response_class=HTMLResponse)
-async def credentials_import_env(request: Request):
+@router.post("/api/credentials/move-leftovers", response_class=HTMLResponse)
+async def credentials_move_leftovers(request: Request):
     from core import credentials
     if not _from_this_page(request):
         return HTMLResponse("refused: not sent from the Sisyphus UI", status_code=403)
-    res = await asyncio.to_thread(credentials.import_env_file)
-    note = f"Moved {len(res['moved'])} to the keychain and out of .env" if res["moved"] else ""
+    res = await asyncio.to_thread(credentials.move_leftovers)
+    note = (f"Moved {', '.join(res['moved'])} into the vault and out of the files"
+            if res["moved"] else "")
     error = "; ".join(f"{k}: {v}" for k, v in res["failed"].items())
     resp = await _credentials_view(request, note=note, error=error)
     resp.headers["HX-Trigger"] = "integrationsUpdated"
@@ -1255,10 +1256,13 @@ async def credentials_set(request: Request, name: str, value: str = Form(""), ac
     try:
         if action == "clear":
             await asyncio.to_thread(credentials.clear, name)
-            note = f"{name} removed from the keychain"
+            note = f"{name} removed from the vault"
         else:
-            await asyncio.to_thread(credentials.set_value, name, value)
-            note = f"{name} saved to the keychain"
+            cleared = await asyncio.to_thread(credentials.set_value, name, value)
+            note = f"{name} saved to the vault"
+            if cleared:
+                note += (f" — the address changed, so {', '.join(cleared)} was cleared; "
+                         f"paste it again for the new one")
     except credentials.CredentialError as e:
         return await _credentials_view(request, error=f"{name}: {e}")
     resp = await _credentials_view(request, note=note)

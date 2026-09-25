@@ -13,9 +13,10 @@ path and the current Python interpreter), writes it to
 `~/Library/LaunchAgents/com.sisyphus.daemon.plist`, and loads it. From now on the
 daemon starts at login and is restarted automatically if it crashes.
 
-Secrets come from `.env` in the repo root (see `.env.example`) — **not** the
-plist. Put your real `OPENROUTER_API_KEY` there before relying on the supervised
-daemon, since a launchd process has no interactive shell environment.
+Secrets come from neither the plist nor `.env`: enter tokens and keys in the
+UI (Integrations → Keys & tokens, and a runner's Edit form for its API key).
+They are kept in Sisyphus's own keychain, which the supervised daemon reads
+without any shell environment.
 
 ## Day-to-day
 ```

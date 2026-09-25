@@ -330,6 +330,12 @@ def build_seatbelt_profile(worktree: str, output_dir: str,
     if keep_out:
         lines.append("(deny file-write*\n"
                      + "\n".join(keep_out) + "\n)")
+
+    # Sisyphus's vault (core.keychain): every token entered in the UI. Not
+    # readable at all — with the file denied, `security` inside the sandbox
+    # cannot even find an item in it. Always, whatever read_isolation says.
+    from core.keychain import vault_path
+    lines.append(f"(deny file-read* file-write* (literal {_q(vault_path())}))")
     return "\n".join(lines) + "\n"
 
 

@@ -22,8 +22,9 @@ class TestReadIsolationProfileShape:
         prof = sandbox.build_seatbelt_profile(
             str(ws / "wt"), str(ws / "out"), workspace_root=str(ws),
             home=str(tmp_path), protected=[])
-        # Should have only write rules, no read rules
-        assert "(deny file-read*" not in prof
+        # Should have only write rules, no read rules — bar the one file no
+        # worker may ever read, the vault (core.keychain)
+        assert "(deny file-read* (subpath" not in prof
         assert "(allow file-read*" not in prof
         assert "(allow default)" in prof
 

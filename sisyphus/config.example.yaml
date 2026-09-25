@@ -61,8 +61,8 @@ forge_poll:                      # follow published PRs/MRs by polling
   interval_seconds: 300
 
 # Forge and tracker credentials. A per-repo `token:` below beats these.
-# Every ${VAR} here is filled from Integrations → Keys & tokens (the keychain),
-# then from the environment.
+# Every credential ${VAR} is filled from Integrations → Keys & tokens (the
+# Sisyphus vault) and from nowhere else. Never type a token here.
 github:
   base_url: ${GITHUB_BASE_URL}                    # github.com or self-hosted
   token: ${GITHUB_TOKEN}                          # personal access token
