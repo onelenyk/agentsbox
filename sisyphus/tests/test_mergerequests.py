@@ -1,4 +1,7 @@
 """Tests for core/mergerequests.py — the local Merge Request entity."""
+import pathlib
+import re
+
 import pytest
 
 from core.mergerequests import (
@@ -83,3 +86,40 @@ class TestEntity:
         assert updated["title"] == "refreshed"
         assert updated["id"] == mr["id"]
         assert updated["updated_at"] > mr["updated_at"]
+
+
+def test_mark_merged_reached_only_through_record_merge_success():
+    """Every path that marks an MR merged must flow through record_merge_success,
+    the single place that owns 'a merge happened' — and that clears the
+    self-update cache for the daemon's own checkout. A call to mark_merged
+    anywhere else (the merge-resolve route once did) silently skips that clear,
+    leaving the banner/restart endpoint stale for the cache TTL.
+
+    Structural, grep-based guard over core/ and web/: a future call site must
+    be routed through record_merge_success, not added next to it.
+    """
+    roots = [pathlib.Path(__file__).resolve().parents[1] / "core",
+             pathlib.Path(__file__).resolve().parents[1] / "web"]
+    offenders = []
+    for root in roots:
+        for py in sorted(root.glob("*.py")):
+            text = py.read_text()
+            for i, line in enumerate(text.splitlines(), 1):
+                if "mark_merged(" not in line or "def mark_merged" in line:
+                    continue
+                enclosing = _enclosing_def(text, i)
+                if enclosing != "record_merge_success":
+                    offenders.append(f"{py.name}:{i} calls mark_merged from {enclosing}")
+    assert offenders == [], (
+        "mark_merged must only be reached through record_merge_success (which "
+        f"clears the self-update cache), found: {offenders}")
+
+
+def _enclosing_def(text: str, lineno: int) -> str:
+    """The innermost `def` whose body contains *lineno*, by indentation."""
+    lines = text.splitlines()
+    for start in range(lineno - 1, -1, -1):
+        m = re.match(r"^(\s*)def\s+(\w+)", lines[start])
+        if m:
+            return m.group(2)
+    return "?"

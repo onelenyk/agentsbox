@@ -140,6 +140,33 @@ class TestResolveRoute:
     def test_missing_mr_is_404_not_500(self, db_path):
         assert TestClient(app).post("/api/mr/nope/merge-resolve").status_code == 404
 
+    def test_self_merge_clears_the_self_update_cache(self, db_path, tmp_path, monkeypatch):
+        """A self-merge through AI resolution must drop the cached behind-status
+        exactly like the plain merge route does — record_merge_success owns
+        'a merge happened' for every path. Without this, the banner and the
+        Restart endpoint keep reporting 'up to date' for up to the 60s TTL."""
+        from core import self_update
+        mr, src = _mr(tmp_path)
+        _resolver(monkeypatch)
+        cleared = []
+        monkeypatch.setattr(self_update, "is_daemon_checkout", lambda path: True)
+        monkeypatch.setattr(self_update, "clear_cache", lambda: cleared.append(True))
+        r = TestClient(app).post(f"/api/mr/{mr['id']}/merge-resolve")
+        assert r.status_code == 200
+        assert mergerequests.get_mr(mr["id"])["status"] == "merged"
+        assert cleared == [True]
+
+    def test_merge_into_another_repo_does_not_clear_self_update_cache(self, db_path, tmp_path, monkeypatch):
+        from core import self_update
+        mr, src = _mr(tmp_path)
+        _resolver(monkeypatch)
+        cleared = []
+        monkeypatch.setattr(self_update, "is_daemon_checkout", lambda path: False)
+        monkeypatch.setattr(self_update, "clear_cache", lambda: cleared.append(True))
+        TestClient(app).post(f"/api/mr/{mr['id']}/merge-resolve")
+        assert mergerequests.get_mr(mr["id"])["status"] == "merged"
+        assert cleared == []
+
 
 class TestButtonVisibility:
     def test_offered_only_when_conflicting(self, db_path, tmp_path):
