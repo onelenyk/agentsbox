@@ -168,7 +168,13 @@ _HOST_SESSION_PREFIXES = ("SUPERSET_",)
 
 
 def _without_host_session(env: dict) -> dict:
-    return {k: v for k, v in env.items() if not k.startswith(_HOST_SESSION_PREFIXES)}
+    # Nor the daemon's own credentials: a .env loaded into the daemon would
+    # otherwise hand the Jira and forge tokens to every agent. A runner that
+    # needs a key gets exactly that one back from runner_profiles.build_env.
+    from .credentials import worker_strip
+    drop = set(worker_strip())
+    return {k: v for k, v in env.items()
+            if not k.startswith(_HOST_SESSION_PREFIXES) and k not in drop}
 
 
 async def launch_agent(

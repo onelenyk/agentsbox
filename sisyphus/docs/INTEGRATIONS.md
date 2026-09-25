@@ -35,14 +35,26 @@ Fields in a journal row:
 
 ## Configuring Jira
 
-Three environment variables from `.env` or `config.yaml`:
+Open **Integrations → Keys & tokens** and fill in the Jira site URL, account
+email and API token. They are kept in the macOS login keychain (service
+`sisyphus-secret`), take effect at once, and are never put into a worker's
+environment — agents reach Jira only through the `jira_*` tools.
+
+`config.yaml` still names them as placeholders; the keychain is what fills
+them, with the daemon's environment (shell, launchd, an old `.env`) as the
+fallback:
 
 ```yaml
 jira:
-  base_url: https://your-domain.atlassian.net
-  email: your-email@company.com
-  token: your-api-token
+  base_url: ${JIRA_BASE_URL}
+  email: ${JIRA_EMAIL}
+  token: ${JIRA_API_TOKEN}
 ```
+
+A value still in `.env` shows as "from .env"; **Move to the keychain** moves
+every such value and comments its line out of the file. The same page covers
+GitLab, GitHub, OpenRouter, the daemon's API token and webhook secrets, and any
+`token: ${NAME}` a repo in `config.yaml` refers to.
 
 The token is not your password. Generate one in Jira → Personal settings → API tokens.
 

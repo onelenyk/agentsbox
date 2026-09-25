@@ -11,6 +11,9 @@ def pytest_configure(config):
     tmp = os.environ.get("PYTEST_TMPDIR", os.path.join(HERE, ".pytest_tmp"))
     os.makedirs(tmp, exist_ok=True)
     os.environ["SISYPHUS_DB"] = os.path.join(tmp, "test.db")
+    # Never the real login keychain from a test: core.credentials reads it on
+    # every config load.
+    os.environ["SISYPHUS_KEYCHAIN"] = "off"
     os.environ["WORKSPACE_ROOT"] = os.path.join(tmp, "workspace")
     os.makedirs(os.environ["WORKSPACE_ROOT"], exist_ok=True)
 

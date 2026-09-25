@@ -24,8 +24,14 @@ def load_config():
         _config = {}
         return _config
     raw = config_path.read_text()
+    # Credentials come from the keychain first (entered in the UI — see
+    # core.credentials), then the environment; anything else only from the
+    # environment. An unknown name stays the literal placeholder.
+    from .credentials import managed_names, resolve_placeholder
+    managed = managed_names(raw)
     def _replace(m):
-        return os.environ.get(m.group(1), m.group(0))
+        v = resolve_placeholder(m.group(1), managed)
+        return v if v is not None else m.group(0)
     resolved = re.sub(r'\$\{(\w+)\}', _replace, raw)
     _config = yaml.safe_load(resolved) or {}
     return _config

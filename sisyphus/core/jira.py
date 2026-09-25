@@ -74,7 +74,7 @@ def _request(method: str, path: str, body: Optional[dict] = None, params: Option
     s = _settings()
     if not (s["base_url"] and s["email"] and s["token"]):
         raise JiraError("Jira is not configured: set jira.base_url, jira.email and jira.token "
-                        "(JIRA_BASE_URL / JIRA_EMAIL / JIRA_API_TOKEN in .env)")
+                        "(Integrations → Keys & tokens)")
     url = s["base_url"] + path
     if params:
         url += ("&" if "?" in url else "?") + urllib.parse.urlencode(params)

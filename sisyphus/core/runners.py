@@ -9,7 +9,6 @@ per supported type.
 import asyncio
 import json
 import logging
-import os
 import subprocess
 import urllib.error
 import urllib.request
@@ -25,6 +24,7 @@ from .db import get_conn
 # that could never run. One list means adding a profile is what makes a type
 # selectable.
 from .runner_profiles import SUPPORTED_TYPES as RUNNER_TYPES
+from .credentials import get as _credential
 
 logger = logging.getLogger(__name__)
 
@@ -337,7 +337,7 @@ async def health_check(runner_id: str) -> dict:
         st = await asyncio.to_thread(login_status, rtype, resolved)
         if not st["ok"]:
             issues.append(f"{st['summary']} — {st['detail']}")
-    elif api_env and not os.environ.get(api_env):
+    elif api_env and not _credential(api_env):
         # An unset variable is only fatal for a CLI with nowhere else to look.
         # Both supported CLIs log in for themselves, and the daemon's own
         # environment is nearly empty under launchd — so the variable being
