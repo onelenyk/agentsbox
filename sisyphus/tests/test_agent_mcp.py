@@ -953,7 +953,12 @@ def test_open_mr_on_a_moved_head_rechecks_the_new_commit(db_path, tmp_path):
                     and f"Review-of-MR: {mr['id']}" in t["goal"]]
     assert len(review_tasks) == 1
     thread = store.get_thread(review_tasks[0]["id"])
-    assert any("Automated check PASSED" in m["text"] for m in thread)
+    verdict = next((m["text"] for m in thread if "Automated check PASSED" in m["text"]), "")
+    assert verdict
+    # The re-run's note must name the commit it actually saw — the new head,
+    # not the first check's. Without that a reviewer could stretch an old
+    # verdict over the moved branch (SIS-115 family).
+    assert f"against head {head_b[:12]}" in verdict
 
 
 def test_second_decision_in_one_pass_is_rejected(db_path):
