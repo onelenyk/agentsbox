@@ -62,14 +62,104 @@ _MCP_SERVER_NAME = "sisyphus_agent"
 DECIDER_ATTEMPTS = 2
 
 
+def _merged_mr_source(task_id: str):
+    """Where a merge of *task_id*'s branch landed, per the merge_requests
+    ledger: (source_path, target_branch) of the newest status='merged' row that
+    names a source repo, or None.
+
+    This is the daemon's own record that the branch was merged — set by
+    mergerequests.mark_merged when the merge landed locally, or by forge_poll
+    for a forge merge. It is the authoritative statement of where the real
+    target lives, which is exactly what cleanup's ahead-ness must be measured
+    against instead of the bare clone's frozen copy of the target.
+    """
+    from .db import get_conn
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT source_path, target_branch FROM merge_requests "
+            "WHERE task_id = ? AND status = 'merged' AND source_path != '' "
+            "ORDER BY merged_at DESC LIMIT 1",
+            (task_id,)).fetchone()
+    finally:
+        conn.close()
+    return (row[0], row[1]) if row else None
+
+
+def _refresh_target_ref(bare: str, task_id: str, base: str):
+    """The ref to compare the task branch against, refreshed from the real
+    target so a merge that happened after the bare clone was made is seen.
+
+    The target ref inside the per-task bare clone is frozen at clone time and
+    never refreshed, so work merged into the source repo since would still read
+    as unmerged — the leftover clones this fixes are exactly that (merges
+    recorded in merge_requests as status='merged', yet cleanup kept refusing).
+
+    Returns a ref name that exists in *bare* at the current tip of the target
+    (a throwaway fetch ref); *base* (the bare clone's own, possibly stale,
+    copy) when there is no local source to refresh from at all; or None when a
+    source is named but unreachable — the caller must then keep the clone
+    (fail safe) and the warning here says so.
+    """
+    import subprocess
+    source, target = "", base
+    merged = _merged_mr_source(task_id)
+    if merged:
+        source, target = merged[0], merged[1] or base
+    if not source:
+        repo_name = (store.get_task(task_id) or {}).get("repo") or ""
+        if repo_name:
+            source = (get_repo(repo_name) or {}).get("source", "") or ""
+    if not source:
+        return base      # no source anywhere — compare against the bare's own refs
+    if "://" in source or source.startswith("git@"):
+        # A remote URL needs a network round-trip a cleanup pass has no
+        # business doing (and a reachable-but-wrong answer is no better than
+        # the bare clone's own stale copy) — keep the pre-existing behaviour.
+        return base
+    if not os.path.isdir(source):
+        logger.warning(
+            "cleanup_task: %s: source repo %s is gone — cannot refresh target "
+            "%s; keeping the clone; refusing to delete unmerged work on error",
+            bare, source, target,
+        )
+        return None
+    ref = f"refs/sisyphus-cleanup/{target}"
+    try:
+        r = subprocess.run(
+            ["git", "-C", bare, "fetch", "--no-tags", source, f"+{target}:{ref}"],
+            capture_output=True, text=True, timeout=60,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "cleanup_task: %s: could not refresh target %s from %s (%s) — "
+            "keeping the clone; refusing to delete unmerged work on error",
+            bare, target, source, e,
+        )
+        return None
+    if r.returncode != 0:
+        logger.warning(
+            "cleanup_task: %s: could not refresh target %s from %s: %s — "
+            "keeping the clone; refusing to delete unmerged work on error",
+            bare, target, source, (r.stderr or "").strip()[:160],
+        )
+        return None
+    return ref
+
+
 def _task_branch_ahead_of_target(bare: str, task_id: str) -> bool:
     """True if the task's branch in *bare* carries commits that are not on its
-    target branch. Conservative on any doubt (unknown target branch, missing
-    ref, unparsable count) — the caller keeps the clone rather than risk
-    deleting unmerged work that exists nowhere else.
+    target branch — the clone must not be reclaimed. Conservative on any doubt
+    (unknown target branch, missing ref, unparsable count): the caller keeps
+    the clone rather than risk deleting unmerged work that exists nowhere else.
 
     Target resolution mirrors worker's own: a plan step targets its plan's
     integration branch (task.base_branch), otherwise the repo's default branch.
+
+    The comparison is against the REAL target, not the bare clone's frozen copy
+    of it (see _refresh_target_ref); a merge recorded as status='merged' thus
+    reads as merged here and the clone is reclaimed. Every keep-decision is
+    logged here, with its reason.
     """
     import subprocess
     from .git_ops import task_branch
@@ -88,21 +178,46 @@ def _task_branch_ahead_of_target(bare: str, task_id: str) -> bool:
     )
     if exists.returncode != 0:
         return False
+    target_ref = _refresh_target_ref(bare, task_id, base)
+    if target_ref is None:
+        return True     # refresh failed — fail safe; _refresh_target_ref logged why
     try:
         r = subprocess.run(
-            ["git", "-C", bare, "rev-list", "--count", f"{base}..{branch}"],
+            ["git", "-C", bare, "rev-list", "--count", f"{target_ref}..{branch}"],
             capture_output=True, text=True, timeout=30,
         )
     except Exception as e:  # noqa: BLE001
-        logger.debug("cleanup_task: could not compare %s..%s in %s: %s",
-                     base, branch, bare, e)
+        logger.warning(
+            "cleanup_task: keeping %s for task %s — could not compare %s..%s: "
+            "%s; refusing to delete unmerged work",
+            bare, task_id, target_ref, branch, e,
+        )
         return True
     if r.returncode != 0:
+        logger.warning(
+            "cleanup_task: keeping %s for task %s — git could not compare "
+            "%s..%s; refusing to delete unmerged work",
+            bare, task_id, target_ref, branch,
+        )
         return True
     try:
-        return int(r.stdout.strip()) > 0
+        n = int(r.stdout.strip())
     except ValueError:
+        logger.warning(
+            "cleanup_task: keeping %s for task %s — unparsable ahead-count for "
+            "%s..%s; refusing to delete unmerged work",
+            bare, task_id, target_ref, branch,
+        )
         return True
+    if n > 0:
+        logger.warning(
+            "cleanup_task: keeping %s for task %s — branch %s has %d commit(s) "
+            "not on the target branch and no merge request is open; refusing "
+            "to delete unmerged work",
+            bare, task_id, branch, n,
+        )
+        return True
+    return False
 
 
 def cleanup_task(task_id: str, deep: bool = False) -> None:
@@ -136,19 +251,12 @@ def cleanup_task(task_id: str, deep: bool = False) -> None:
         # Safety net: a task that committed with no open MR lives only on this
         # clone's branch — deleting the clone deletes the work (SIS-114). Keep
         # it while the branch is ahead of its target; only drop a clone whose
-        # branch has nothing unmerged.
-        from .git_ops import task_branch
-        unmerged = [b for b in glob.glob(f"{ws}/repos/{task_id}_*")
-                    if _task_branch_ahead_of_target(b, task_id)]
-        if unmerged:
-            for bare in unmerged:
-                logger.warning(
-                    "cleanup_task: keeping %s for task %s — branch %s has "
-                    "commits not on the target branch and no merge request is "
-                    "open; refusing to delete unmerged work",
-                    bare, task_id, task_branch(task_id),
-                )
-        else:
+        # branch has nothing unmerged. The keep/warn decision lives in
+        # _task_branch_ahead_of_target, which compares against the REAL target
+        # (refreshed from the source repo) so work merged since the clone was
+        # made is reclaimed instead of refused forever.
+        if not any(_task_branch_ahead_of_target(b, task_id)
+                   for b in glob.glob(f"{ws}/repos/{task_id}_*")):
             patterns.append(f"{ws}/repos/{task_id}_*")   # per-task bare clone
     if deep:
         patterns.append(f"{ws}/tasks/{task_id}")   # attachments + saved patches
