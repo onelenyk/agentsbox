@@ -10,6 +10,15 @@
         <div class="kpi"><div class="l">Running code</div><div class="v mono runtime__kpi-value">{{ process.git_commit }}</div><div class="d">pid {{ process.pid }}</div></div>
         <div class="kpi kpi--violet"><div class="l">Workers in flight</div><div class="v">{{ process.workers_in_flight }}</div><div class="d">restart kills these</div></div>
     </div>
+    {% if self_update.behind_message %}
+    <div class="notification notification--warn runtime__notification">
+        <span class="notification__text">{{ self_update.behind_message }}</span>
+        <button type="button" class="btn btn--primary btn--sm"
+                hx-post="/api/daemon/restart" hx-target="closest .notification" hx-swap="outerHTML">
+            Restart
+        </button>
+    </div>
+    {% endif %}
 </div>
 <div class="panel runtime__panel-margin">
     <div class="result__label">Background loops</div>

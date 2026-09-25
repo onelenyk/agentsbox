@@ -13,6 +13,9 @@ api:
                                  # reach the UI over an SSH tunnel, since a
                                  # browser cannot send a bearer header
 
+self_update:
+  auto_restart_when_idle: false  # when true, auto-restart daemon when idle and behind
+
 notify:
   webhook_url: ${SISYPHUS_NOTIFY_URL}  # empty = off. One JSON POST per notable
                                        # event (task failed/parked, preflight not

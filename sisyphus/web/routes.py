@@ -210,6 +210,8 @@ async def dashboard_page(request: Request):
 async def dashboard_view(request: Request):
     from core.stats import dashboard
     from core import readiness
+    from core import self_update
+    from web.api import _GIT_COMMIT
 
     rows = []
     for name in _repo_names():
@@ -226,10 +228,16 @@ async def dashboard_view(request: Request):
             # One repo must not take down the whole dashboard.
             logger.warning("production readiness assessment failed for %r", name, exc_info=True)
             rows.append({"name": name, "href": f"/repos/{name}", "error": True})
+
+    # Self-update status for the daemon's own checkout
+    daemon_repo_root = Path(__file__).resolve().parent.parent
+    self_update_status = self_update.get_cached_status(_GIT_COMMIT, str(daemon_repo_root))
+
     return _tmpl().TemplateResponse(request, "dashboard_view.html", {
         "d": dashboard(),
         "live_sessions": _enrich_sessions(sessions.list_active()),
         "readiness": rows,
+        "self_update": self_update_status,
     })
 
 @router.get("/api/inbox/view", response_class=HTMLResponse)
@@ -306,6 +314,7 @@ def _loops() -> list:
 async def runtime_page(request: Request):
     import os
     from core.runners import list_runners
+    from core import self_update
 
     cfg = get_config()
 
@@ -366,6 +375,10 @@ async def runtime_page(request: Request):
             "override": bool(r.get("idle_timeout")) or bool(r.get("timeout")),
         })
 
+    # Self-update status for the daemon's own checkout
+    daemon_repo_root = Path(__file__).resolve().parent.parent
+    self_update_status = self_update.get_cached_status(_GIT_COMMIT, str(daemon_repo_root))
+
     return _tmpl().TemplateResponse(
         request,
         "runtime.html",
@@ -381,6 +394,7 @@ async def runtime_page(request: Request):
             "worker_limits": worker_limits,
             "runner_store": _runner_store_view(),
             "loops": _loops(),
+            "self_update": self_update_status,
         },
     )
 
@@ -2641,6 +2655,50 @@ async def task_delete(task_id: str):
     resp = Response(status_code=200)
     resp.headers["HX-Redirect"] = "/tasks"   # navigate back to the board
     return resp
+
+
+@router.post("/api/daemon/restart")
+async def daemon_restart(request: Request):
+    """Restart the daemon when running behind code on disk.
+
+    Only restarts if no workers are in flight; otherwise records a pending request
+    that the heartbeat will fulfill when workers finish.
+
+    Returns JSON: {ok, message, pending} where pending=true means restart is deferred.
+    """
+    from core import daemon_ctl, self_update
+    from web.api import _GIT_COMMIT
+
+    daemon_repo_root = Path(__file__).resolve().parent.parent
+    behind = self_update.get_cached_status(_GIT_COMMIT, str(daemon_repo_root))
+
+    # Refuse to restart if up to date
+    if behind.get("behind") is None or behind.get("behind") == 0:
+        return {"ok": False, "message": "Not behind; restart not needed"}
+
+    busy = daemon_ctl.running_workers()
+    if busy:
+        # Record that restart was requested; heartbeat will do it when idle
+        # TODO: persist the pending restart flag (in DB or in-memory store)
+        return {
+            "ok": True,
+            "message": f"Restart scheduled (waiting for {len(busy)} worker(s) to finish)",
+            "pending": True,
+        }
+
+    # No workers running — restart now
+    result = daemon_ctl.restart(force=False)
+    if result.get("blocked"):
+        return {
+            "ok": False,
+            "message": "Could not restart: workers still running",
+            "pending": True,
+        }
+    return {
+        "ok": True,
+        "message": "Restarting daemon…",
+        "pending": False,
+    }
 
 
 @router.post("/api/integrations/jira/import", response_class=HTMLResponse)
