@@ -266,6 +266,170 @@ class TestReviewerRequestedChanges:
         assert "reviewer requested changes" in decision.why
 
     @pytest.mark.asyncio
+    async def test_reviewer_result_then_worker_finished_queues_engineer_under_running_mr_review(self, db_path):
+        """Reviewer result (CHANGES REQUESTED) + worker_finished → engineer queued
+        in the same pass, even while the branch's own independent review is running.
+
+        Regression for task-788f0e41: the `_mr_review running` guard used to swallow
+        the embedded reviewer's verdict + worker_finished, so the task sat dead for
+        ~30 minutes (task-fb481456 ran 20:46:41→21:11:42) until the independent
+        review finished. The verdict is already on the thread when worker_finished
+        arrives, so the pass must reach the rules and act on it immediately.
+        """
+        task = store.create_task("fix something", repo="sisyphus")
+        task_id = task["id"]
+
+        # Create an MR so the independent review (_mr_review) has something to track.
+        mergerequests.create_mr(
+            task_id=task_id,
+            repo="sisyphus",
+            source_branch="sisyphus/test",
+            target_branch="main",
+            source_path="/tmp/repo",
+            bare_path="/tmp/bare"
+        )
+
+        # The embedded reviewer already posted its verdict on the thread.
+        store.post_message(task_id, "reviewer", kind="result", text="CHANGES REQUESTED: needs tests")
+
+        # The branch's own independent review is still running — the exact
+        # task-788f0e41 condition that previously swallowed the verdict.
+        with patch("core.orchestrator._mr_review", return_value={"verdict": "", "running": True}):
+            decision, _ = await handle_event(task_id, "worker_finished", decide_fn=_make_failing_decider())
+
+        assert decision.action == "spawn_worker"
+        assert decision.role == "engineer"
+        assert "rule:" in decision.why
+        assert "reviewer requested changes" in decision.why
+        # The engineer must be queued in the same pass.
+        queued = [m for m in store.get_thread(task_id)
+                  if m["kind"] == "worker_queued" and "engineer" in (m["text"] or "")]
+        assert queued, "engineer should be queued in the same pass"
+
+    @pytest.mark.asyncio
+    async def test_verdict_note_external_queues_engineer_under_running_mr_review(self, db_path):
+        """Verdict note + external event → engineer queued even if the independent
+        review task is still marked running (the note races its done transition).
+
+        In task-788f0e41 the verdict note arrived at 21:11:42 while the independent
+        review task was still on its feet; the `_mr_review running` guard would have
+        swallowed the external event too. A verdict already on the thread must always
+        be acted on.
+        """
+        task = store.create_task("fix something", repo="sisyphus")
+        task_id = task["id"]
+
+        mr = mergerequests.create_mr(
+            task_id=task_id,
+            repo="sisyphus",
+            source_branch="sisyphus/test",
+            target_branch="main",
+            source_path="/tmp/repo",
+            bare_path="/tmp/bare"
+        )
+
+        store.post_message(task_id, "system", kind="note",
+                          text=f"review verdict for {mr['id']}: CHANGES REQUESTED — needs tests")
+
+        with patch("core.orchestrator._mr_review", return_value={"verdict": "", "running": True}):
+            decision, _ = await handle_event(task_id, "external", decide_fn=_make_failing_decider())
+
+        assert decision.action == "spawn_worker"
+        assert decision.role == "engineer"
+        assert "reviewer requested changes" in decision.why
+
+    @pytest.mark.asyncio
+    async def test_still_waits_when_no_verdict_on_thread(self, db_path):
+        """Without a verdict on the thread, the pass still waits for the branch's
+        own independent review (the original guard behaviour — no wasted passes,
+        no second reviewer beside it)."""
+        task = store.create_task("fix something", repo="sisyphus")
+        task_id = task["id"]
+
+        # Engineer delivered an MR; no reviewer verdict on the thread yet.
+        store.post_message(task_id, "engineer", kind="result", text="done")
+        mergerequests.create_mr(
+            task_id=task_id,
+            repo="sisyphus",
+            source_branch="sisyphus/test",
+            target_branch="main",
+            source_path="/tmp/repo",
+            bare_path="/tmp/bare"
+        )
+
+        with patch("core.orchestrator._mr_review", return_value={"verdict": "", "running": True}):
+            decision, _ = await handle_event(task_id, "worker_finished", decide_fn=_make_failing_decider())
+
+        assert decision.action == "noop"
+        assert "review is still running" in decision.why
+
+    @pytest.mark.asyncio
+    async def test_later_verdict_note_is_harmless(self, db_path):
+        """A verdict note arriving after the engineer already addressed the
+        reviewer's result must not spawn a second engineer.
+
+        In task-788f0e41 the independent review's note landed ~11 minutes after the
+        reviewer's own result. If the engineer was queued on the result (as it now
+        is), the note is a duplicate of the same review round — the rule must find
+        the reviewer's result first and see that the engineer already ran.
+        """
+        task = store.create_task("fix something", repo="sisyphus")
+        task_id = task["id"]
+
+        mr = mergerequests.create_mr(
+            task_id=task_id,
+            repo="sisyphus",
+            source_branch="sisyphus/test",
+            target_branch="main",
+            source_path="/tmp/repo",
+            bare_path="/tmp/bare"
+        )
+
+        # Reviewer requested changes; the engineer addressed them.
+        store.post_message(task_id, "reviewer", kind="result", text="CHANGES REQUESTED: needs tests")
+        store.post_message(task_id, "system", kind="worker_queued", text="engineer queued")
+        store.post_message(task_id, "system", kind="worker_started", text="engineer started")
+        store.post_message(task_id, "system", kind="worker_finished", text="engineer finished")
+
+        # The independent review's verdict note arrives later (its own done
+        # transition emits the external event).
+        store.post_message(task_id, "system", kind="note",
+                          text=f"review verdict for {mr['id']}: CHANGES REQUESTED — needs tests")
+
+        # With the independent review still running, the pass must NOT spawn a
+        # second engineer; it waits with the guarded noop (no model call).
+        with patch("core.orchestrator._mr_review", return_value={"verdict": "", "running": True}):
+            decision, _ = await handle_event(task_id, "external", decide_fn=_make_failing_decider())
+
+        assert decision.action == "noop"
+        assert "review is still running" in decision.why
+        queued = [m for m in store.get_thread(task_id)
+                  if m["kind"] == "worker_queued" and "engineer" in (m["text"] or "")]
+        assert len(queued) == 1, "a second engineer must not be queued"
+
+    @pytest.mark.asyncio
+    async def test_continue_after_engineer_addressed_does_not_loop_to_model(self, db_path):
+        """Once the engineer has addressed the reviewer's changes, a `continue`
+        must fall back to the guarded noop (one deduped note), not call the model
+        — so a watchdog pass can never loop through the decider."""
+        task = store.create_task("fix something", repo="sisyphus")
+        task_id = task["id"]
+
+        # Reviewer requested changes; the engineer already ran.
+        store.post_message(task_id, "reviewer", kind="result", text="CHANGES REQUESTED: needs tests")
+        store.post_message(task_id, "system", kind="worker_started", text="engineer started")
+        store.post_message(task_id, "system", kind="worker_finished", text="engineer finished")
+
+        # A continue while the branch's own review is still running: the guarded
+        # noop fires (the engineer has addressed the verdict), and the model is
+        # never asked.
+        with patch("core.orchestrator._mr_review", return_value={"verdict": "", "running": True}):
+            decision, _ = await handle_event(task_id, "continue", decide_fn=_make_failing_decider())
+
+        assert decision.action == "noop"
+        assert "review is still running" in decision.why
+
+    @pytest.mark.asyncio
     async def test_engineer_already_ran_asks_model(self, db_path):
         """Reviewer requested changes but engineer already ran → ask the model."""
         task = store.create_task("fix something", repo="sisyphus")
