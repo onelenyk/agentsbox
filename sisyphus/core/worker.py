@@ -383,6 +383,54 @@ def _published_mr_in_current_run(task_id: str) -> bool:
     return any(m["kind"] == "mr" for m in thread[last_start:])
 
 
+def _delivered_verdict(text: str) -> str:
+    """The leading verdict word of a reviewer's result, when it has one.
+    approve/request_changes write the verdict first, so the first word is
+    enough; anything else means the run did not record a verdict."""
+    first = (text or "").strip().split(None, 1)[0].rstrip(":.,").upper()
+    return first if first in ("APPROVED", "CHANGES REQUESTED") else ""
+
+
+def _note_reads_as_review_verdict(text: str) -> bool:
+    """A reviewer's own note that closes out the review: it opens with the
+    verdict word or with an explicit completion statement. A mid-review note
+    ("Reading the diff…") is not a verdict and must not count as delivered."""
+    t = (text or "").strip().upper()
+    return any(t.startswith(p) for p in
+               ("REVIEW COMPLETE", "APPROVED", "NOT APPROVED", "CHANGES REQUESTED"))
+
+
+def _run_delivered(task_id: str, role: str) -> Optional[str]:
+    """What the run that is ending now posted to the thread before it stopped.
+
+    Only the segment after the LAST worker_started counts, so a deliverable
+    from an earlier run on the same task cannot whitewash a genuinely empty
+    re-run. Returns the "delivered X" clause for the worker_finished line, or
+    None when this run posted nothing that is its role's deliverable: a result
+    (engineer result, explorer report), a plan (explorer subtask proposal), or
+    — for a reviewer — its verdict, whether recorded as a result or as a
+    closing note (task-8963e1f6: the reviewer posted its review, the MR
+    merged, and the run still read "ended without reporting a result")."""
+    if not task_id:
+        return None
+    thread = store.get_thread(task_id)
+    last_start = max((i for i, m in enumerate(thread)
+                      if m["kind"] == "worker_started"), default=-1)
+    is_reviewer = "review" in (role or "").lower()
+    for m in thread[last_start + 1:]:
+        if m.get("author") != role:
+            continue
+        kind, text = m["kind"], m.get("text") or ""
+        if kind in ("result", "plan", "answer"):
+            if kind == "result" and is_reviewer:
+                verdict = _delivered_verdict(text)
+                return f"its verdict ({verdict})" if verdict else "its verdict"
+            return {"result": "its result", "plan": "its plan", "answer": "its answer"}[kind]
+        if kind == "note" and is_reviewer and _note_reads_as_review_verdict(text):
+            return "its verdict"
+    return None
+
+
 def worker_end_message(role: str, result, task_id: str = "") -> str:
     """What goes on the thread when a worker stops without reporting a result.
 
@@ -405,6 +453,17 @@ def worker_end_message(role: str, result, task_id: str = "") -> str:
                 f"failure and nothing is known to be wrong with the work — the "
                 f"instruction was interrupted part-way. Do not fail the task for "
                 f"this; continue from the human's next instruction.")
+    delivered = _run_delivered(task_id, role)
+    if delivered:
+        # The run did the work — its deliverable is on the thread — but never
+        # called its finishing tool. That is delivered, not wasted: recording it
+        # as "ended without reporting a result" inflated the wasted-runs metric
+        # (task-8963e1f6, a reviewer whose review reached the thread) and told
+        # the orchestrator the work was lost when it was not.
+        return (f"{role} delivered {delivered} but ended without calling its "
+                f"finishing tool (status={getattr(result, 'status', '?')}): the "
+                f"work reached the thread during this run, so it is delivered, "
+                f"not lost.")
     msg = (f"{role} ended without reporting a result "
            f"(status={getattr(result, 'status', '?')}): {_diagnose(result)}")
     if task_id and _published_mr_in_current_run(task_id):

@@ -178,9 +178,18 @@ def open_gaps(path: str = KNOWN_GAPS) -> dict:
 
 
 def _wasted_counts(conn, cut: str) -> tuple:
-    """(all worker_finished, those that ended without a result) since *cut*."""
+    """(all worker_finished, those that ended without a result) since *cut*.
+
+    A run that posted its deliverable and then stopped without its finishing
+    tool is delivered, not wasted: core.worker's worker_end_message says so in
+    its own words ("delivered its … but ended without calling its finishing
+    tool") and it matches none of the wasted phrases below. The NOT clause
+    keeps the two sides honest — it is the structured signal worker.py writes,
+    so a wasted phrase can never grow into a delivered sentence and get
+    double-counted."""
     wasted_texts = ["ended without reporting a result", "vanished", "failed to start",
                     "agent_no_result"]
+    delivered_texts = ["but ended without calling its finishing tool"]
     all_finished = conn.execute("""
         SELECT COUNT(*) as cnt FROM messages
          WHERE created_at >= ? AND kind = 'worker_finished'
@@ -191,7 +200,9 @@ def _wasted_counts(conn, cut: str) -> tuple:
         SELECT COUNT(*) as cnt FROM messages
          WHERE created_at >= ? AND kind = 'worker_finished'
            AND ({' OR '.join(['text LIKE ?' for _ in wasted_texts])})
-    """, (cut, *[f"%{t}%" for t in wasted_texts])).fetchone()["cnt"]
+           AND NOT ({' OR '.join(['text LIKE ?' for _ in delivered_texts])})
+    """, (cut, *[f"%{t}%" for t in wasted_texts],
+          *[f"%{t}%" for t in delivered_texts])).fetchone()["cnt"]
     return all_finished, wasted
 
 
