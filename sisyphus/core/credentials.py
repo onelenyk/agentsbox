@@ -326,22 +326,62 @@ def _masked(value: str) -> str:
     return "••••" + value[-4:] if len(value) > 8 else "••••"
 
 
+# One card per category on the page. `needs` are the names that make the
+# service usable (the status); an `optional` category is extra, not a gap.
+GROUPS: List[dict] = [
+    {"group": "Jira", "icon": "tracker", "kind": "Tracker",
+     "about": "Import bugs as tasks, and let agents read, comment on and move cards.",
+     "needs": ("JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"), "check": "jira"},
+    {"group": "GitLab", "icon": "forge", "kind": "Forge",
+     "about": "Publish merge requests and follow their pipelines. The URL defaults to gitlab.com.",
+     "needs": ("GITLAB_TOKEN",)},
+    {"group": "GitHub", "icon": "forge", "kind": "Forge",
+     "about": "Publish pull requests and follow their checks. The URL defaults to api.github.com.",
+     "needs": ("GITHUB_TOKEN",)},
+    {"group": "Repos", "icon": "repos", "kind": "Per repo", "optional": True,
+     "about": "A repo's own forge token, when it belongs to another account than the shared one."},
+    {"group": "Models", "icon": "model", "kind": "Model provider", "optional": True,
+     "about": "Only for runners that authenticate with a pasted OpenRouter key; sign-in runners need nothing."},
+    {"group": "Daemon", "icon": "shield", "kind": "Access & alerts", "optional": True,
+     "about": "Remote access to this daemon, forge webhooks, and where failure alerts go."},
+]
+
+
 def view() -> List[dict]:
-    """Rows for the page, grouped in KNOWN's order; repo tokens after."""
+    """One card per category: its fields and a status the page can colour."""
     repos = {repo_token_name(r): r for r in _repo_names(_raw_config())}
-    rows = []
+    rows: Dict[str, List[dict]] = {}
     for name in managed_names():
         meta = _KNOWN_BY_NAME.get(name)
         if not meta:
             repo = repos.get(name)
             meta = {"name": name, "group": "Repos", "secret": True,
-                    "label": f"{repo} — forge token" if repo else name,
-                    "hint": "this repo's own token; without one it uses the shared GitLab/GitHub token"
+                    "label": repo or name,
+                    "hint": "without one, this repo uses the shared GitLab/GitHub token"
                     if repo else "named by a token: line in config.yaml"}
         value = stored(name) or ""
-        rows.append({**meta, "set": bool(value),
-                     "shown": (value if not meta["secret"] else _masked(value)) if value else ""})
-    groups: Dict[str, List[dict]] = {}
-    for r in rows:
-        groups.setdefault(r["group"], []).append(r)
-    return [{"group": g, "rows": rs} for g, rs in groups.items()]
+        rows.setdefault(meta["group"], []).append(
+            {**meta, "set": bool(value),
+             "shown": (value if not meta["secret"] else _masked(value)) if value else ""})
+    cards = []
+    for g in GROUPS:
+        fields = rows.get(g["group"], [])
+        if not fields:
+            continue
+        needs = [f for f in fields if f["name"] in g.get("needs", ())]
+        have = sum(1 for f in fields if f["set"])
+        if g.get("optional"):
+            status, tone = (f"{have} set", "ok") if have else ("Not used", "idle")
+        else:
+            ready = sum(1 for f in needs if f["set"])
+            if ready == len(needs):
+                status, tone = "Connected", "ok"
+            elif ready or have:
+                status, tone = f"Incomplete · {ready}/{len(needs)}", "warn"
+            else:
+                status, tone = "Not set up", "idle"
+        for f in fields:
+            f["required"] = f["name"] in g.get("needs", ())
+        cards.append({**g, "fields": fields, "status": status, "tone": tone,
+                      "open": tone == "warn" or g["group"] == "Jira"})
+    return cards
