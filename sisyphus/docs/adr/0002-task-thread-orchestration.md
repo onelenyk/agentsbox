@@ -112,10 +112,11 @@ mostly irrelevant to a normal target repo.
   worker/config. Two independent guards catch this: a verbatim-repeat breaker
   (`_consecutive_repeat`, comparing full `"[action] why"` text so legitimate
   engineer/reviewer alternation isn't falsely flagged) and a semantic
-  worker-failure guard (`_consecutive_worker_failures`, watching for the
-  crash-fallback message text rather than trusting the LLM's own rationale) —
-  both trip after 3 tries and hand off to `ask_human` well short of the
-  25-pass budget ceiling.
+  no-result escalation ladder (counting consecutive worker_finished endings
+  that delivered nothing, persisted per task per role): at 2 in a row the next
+  attempt moves to the NEXT runner option of the role's model class, and at 3
+  the task parks with one message to the human naming the failures and each
+  run's last output — well short of the 25-pass budget ceiling.
 
 ## What's actually done vs. not
 

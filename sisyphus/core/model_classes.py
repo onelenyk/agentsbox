@@ -121,8 +121,14 @@ def _label(runner: dict, model: str) -> str:
     return f"{runner['name']}/{model or runner.get('model') or 'default model'}"
 
 
-def choose(agent_or_name) -> Choice:
-    """The runner and model *agent* should run on right now."""
+def choose(agent_or_name, skip: int = 0) -> Choice:
+    """The runner and model *agent* should run on right now.
+
+    *skip* >= 1 skips the first *skip* usable class options — the orchestrator's
+    escalation ladder calls choose(role, skip=1) after a role's runs keep ending
+    without a result, so the next attempt lands on a DIFFERENT runner than the
+    one that failed. A pin or the default runner has no options to skip, so it
+    is returned unchanged (an explicit choice wins)."""
     from . import agents, limits
     from .runners import get_default_runner, get_runner
 
@@ -141,7 +147,7 @@ def choose(agent_or_name) -> Choice:
         model = agent.get("model") or ""
         return Choice(r, model, limits.provider_of(r, model) if r else "", "default")
 
-    skipped, until = [], None
+    skipped, until, used = [], None, 0
     for opt in options:
         r = get_runner(opt["runner_id"])
         if not r:
@@ -158,6 +164,11 @@ def choose(agent_or_name) -> Choice:
                    else f"is at its {provider} limit")
             skipped.append((_label(r, model), why))
             until = blocked if until is None or blocked < until else until
+            continue
+        if used < skip:
+            used += 1
+            skipped.append((_label(r, model),
+                            "skipped — switching runners after repeated failures"))
             continue
         return Choice(r, model, provider, "class", skipped)
     return Choice(None, source="class", skipped=skipped, until=until)
