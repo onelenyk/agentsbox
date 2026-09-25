@@ -1,14 +1,65 @@
 import sqlite3
 import os
+import shutil
+import tempfile
 
 DB_PATH = os.environ.get("SISYPHUS_DB", os.path.join(os.environ.get("WORKSPACE_ROOT", "/workspace"), "sisyphus.db"))
 
+def _connect_readonly(path: str) -> sqlite3.Connection:
+    return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+
+def _probe(conn: sqlite3.Connection) -> None:
+    """Force the WAL -shm to be created now, so its failure surfaces here.
+
+    A mode=ro open of a WAL database defers the -shm creation until the first
+    read. In a directory the process cannot write to, connect() itself succeeds
+    and the *first query* raises OperationalError — the failure the sandbox
+    reports from goal_report.py's data functions. Running a trivial read right
+    away moves that failure to this call, where the fallback can catch it.
+    """
+    conn.execute("SELECT count(*) FROM sqlite_master")
+
 def get_readonly_conn() -> sqlite3.Connection:
-    """Return a read-only SQLite connection (URI mode)."""
-    uri = f"file:{DB_PATH}?mode=ro"
-    conn = sqlite3.connect(uri, uri=True)
+    """Return a read-only SQLite connection (URI mode).
+
+    The daemon's database runs in WAL mode, and even a mode=ro open must
+    create the -shm file beside it, so it fails in any directory the process
+    may not write to — every worker sandbox, which is where reviewers run the
+    report. Fall back to a snapshot: the DB file plus its -wal (-shm if
+    present) are copied into a fresh temp dir and the copy is opened mode=ro,
+    so the WAL contents stay visible. The live DB is never opened, writable or
+    otherwise — only read as bytes. The snapshot is as of the moment of the
+    copy, so it may be slightly stale.
+    """
+    try:
+        conn = _connect_readonly(DB_PATH)
+        _probe(conn)
+    except sqlite3.OperationalError:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        conn = _connect_readonly(_snapshot_copy())
     conn.row_factory = sqlite3.Row
     return conn
+
+def _snapshot_copy() -> str:
+    """Copy DB_PATH (+ -wal, + -shm) into a temp dir and return the copy's path.
+
+    A plain file copy, taken while the daemon may be writing — the snapshot is
+    read-only, so it cannot hurt the live database. Temp dirs stay writable
+    where the DB's own directory is not (the sandbox denies writes only to the
+    protected repo and the daemon state paths).
+    """
+    if not os.path.exists(DB_PATH):
+        raise sqlite3.OperationalError(f"unable to open database file: {DB_PATH}")
+    tmp = tempfile.mkdtemp(prefix="sisyphus-readonly-")
+    dst = os.path.join(tmp, os.path.basename(DB_PATH))
+    shutil.copyfile(DB_PATH, dst)
+    for suffix in ("-wal", "-shm"):
+        if os.path.exists(DB_PATH + suffix):
+            shutil.copyfile(DB_PATH + suffix, dst + suffix)
+    return dst
 
 def _write_protected() -> bool:
     """Whether THIS process may write the database it is pointed at.

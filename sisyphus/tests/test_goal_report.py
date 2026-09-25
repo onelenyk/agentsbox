@@ -4,8 +4,12 @@ The git metric is exercised against a real repository with a real Sisyphus-style
 merge, because the whole point of the metric is that the trunk's own history is
 the evidence: a version that counted the wrong thing would still print a number.
 """
+import sqlite3
 import subprocess
 
+import pytest
+
+from core import db as core_db
 from core import mergerequests as mrs
 from core import store
 from core.db import get_conn
@@ -141,6 +145,65 @@ def test_open_gaps_survives_a_missing_ledger(tmp_path):
 
 def test_a_rate_of_nothing_is_zero():
     assert _rate(0, 0) == 0.0 and _rate(1, 3) == 33.3
+
+
+def test_get_readonly_conn_survives_a_readonly_db_directory(db_path, monkeypatch):
+    """A mode=ro open still has to create the WAL -shm next to the database, and
+    SQLite defers that until the first query, so the failure surfaces as an
+    OperationalError on execute, not on connect. get_readonly_conn must catch it
+    and fall back to a read-only snapshot copy, and the report's data functions
+    must still return results. The DB directory is made unwritable for real;
+    when that does not stick (running as root, where chmod does not restrict),
+    the failure is simulated on the live connection instead, so the test
+    exercises the fallback on any machine."""
+    import os
+    import stat
+
+    seed = store.create_task("shipped", repo="sisyphus")
+    store.set_status(seed["id"], "done")
+    store.post_message(seed["id"], "engineer", kind="mr", text="opened mr-1")
+
+    db_dir = os.path.dirname(core_db.DB_PATH)
+    live_ro_uri = f"file:{core_db.DB_PATH}?mode=ro"
+    real_connect = sqlite3.connect
+
+    def deny_live_readonly(database, *args, **kwargs):
+        if database == live_ro_uri:
+            kwargs.pop("factory", None)
+
+            class _DenyReads(sqlite3.Connection):
+                def execute(self, *_a, **_kw):
+                    raise sqlite3.OperationalError("attempt to write a readonly database")
+
+            return real_connect(database, *args, **kwargs, factory=_DenyReads)
+        return real_connect(database, *args, **kwargs)
+
+    os.chmod(db_dir, stat.S_IRUSR | stat.S_IXUSR | stat.S_IRGRP
+             | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+    try:
+        try:
+            probe = real_connect(live_ro_uri, uri=True)
+            probe.execute("SELECT count(*) FROM sqlite_master")
+            probe.close()
+        except sqlite3.OperationalError:
+            pass  # the real failure reproduces here — the chmod bit
+        # The simulated failure (below) covers root/CI where chmod does not
+        # restrict, and keeps the fallback path exercised deterministically.
+        monkeypatch.setattr(sqlite3, "connect", deny_live_readonly)
+
+        conn = core_db.get_readonly_conn()
+        try:
+            assert autonomy(conn, days=30)["delivering"] == 1
+            assert reliability(conn, days=30)["terminal"] == 1
+            rd = readiness(conn, days=30)
+            assert rd["all_finished"] == 0 and rd["wasted_finished"] == 0
+            # The fallback is still a read-only connection — writes must not land.
+            with pytest.raises(sqlite3.OperationalError):
+                conn.execute("DELETE FROM tasks")
+        finally:
+            conn.close()
+    finally:
+        os.chmod(db_dir, stat.S_IRWXU)
 
 
 def test_readiness_wasted_runs_counts_workers_without_results(db_path):
