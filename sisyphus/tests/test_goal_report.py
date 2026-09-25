@@ -475,12 +475,14 @@ def test_readiness_lost_work_counts_done_with_unmerged_mr(db_path):
     assert r["lost_work"] == 1
 
 
-def test_readiness_lost_work_counts_unanswered_changes_requested(db_path):
-    """A done task whose reviewer's CHANGES REQUESTED on the head is unanswered
-    (no newer commit after it) is lost work, even when the MR itself merged."""
+def test_readiness_merged_over_objection_counts_unanswered_changes_requested(db_path):
+    """A done task whose merged MR carries a reviewer's CHANGES REQUESTED with
+    no commit after it is merged over an objection — the work IS on main, so it
+    is NOT lost work. A request answered by a later commit is neither."""
     mrs.init_mr_table()
 
-    # Done despite a CHANGES REQUESTED with no commit after it — lost.
+    # Merged despite an unanswered CHANGES REQUESTED — merged over objection,
+    # not lost work.
     ignored = store.create_task("ignored a request", repo="sisyphus")
     store.set_status(ignored["id"], "done")
     store.post_message(ignored["id"], "orchestrator", kind="commit", text="commit abc123")
@@ -490,7 +492,7 @@ def test_readiness_lost_work_counts_unanswered_changes_requested(db_path):
     store.post_message(ignored["id"], "reviewer", kind="result",
                        text="CHANGES REQUESTED: needs tests")
 
-    # Answered: a commit after the request → not lost.
+    # Answered: a commit after the request → neither metric.
     answered = store.create_task("answered a request", repo="sisyphus")
     store.set_status(answered["id"], "done")
     store.post_message(answered["id"], "orchestrator", kind="commit", text="commit def456")
@@ -502,7 +504,61 @@ def test_readiness_lost_work_counts_unanswered_changes_requested(db_path):
                        (mr2["id"],)).connection.commit()
 
     r = readiness(get_conn(), days=30)
+    assert r["lost_work"] == 0
+    assert r["merged_over_objection"] == 1
+    assert r["merged_over_objection_tasks"] == ["SIS-1"]
+
+
+def test_readiness_merged_over_objection_needs_a_merged_mr(db_path):
+    """An unmerged MR with an unanswered CHANGES REQUESTED is lost work, not
+    merged over an objection — the branch never reached main."""
+    mrs.init_mr_table()
+
+    unmerged = store.create_task("request still open", repo="sisyphus")
+    store.set_status(unmerged["id"], "done")
+    store.post_message(unmerged["id"], "orchestrator", kind="commit", text="commit abc123")
+    mr = mrs.create_mr(unmerged["id"], "sisyphus", "sisyphus/task-x", "main")
+    mrs.set_review_status(mr["id"], "changes_requested")
+    store.post_message(unmerged["id"], "reviewer", kind="result",
+                       text="CHANGES REQUESTED: needs tests")
+
+    r = readiness(get_conn(), days=30)
     assert r["lost_work"] == 1
+    assert r["merged_over_objection"] == 0
+    assert r["merged_over_objection_tasks"] == []
+
+
+def test_readiness_merged_over_objection_renders_count_and_keys(db_path):
+    """The human-facing line shows the corrected meaning: merged MRs with an
+    unanswered CHANGES REQUESTED are reported as merged over an objection,
+    alongside the task keys, and not as lost work."""
+    mrs.init_mr_table()
+
+    ignored = store.create_task("ignored a request", repo="sisyphus")
+    store.set_status(ignored["id"], "done")
+    store.post_message(ignored["id"], "orchestrator", kind="commit", text="commit abc123")
+    mr = mrs.create_mr(ignored["id"], "sisyphus", "sisyphus/task-x", "main")
+    get_conn().execute("UPDATE merge_requests SET status='merged' WHERE id=?",
+                       (mr["id"],)).connection.commit()
+    store.post_message(ignored["id"], "reviewer", kind="result",
+                       text="CHANGES REQUESTED: needs tests")
+
+    rd = readiness(get_conn(), days=30)
+    rendered = render({"days": 30, "target": 50,
+                       "self_build": {"rate": 0.0, "delivered": 0, "total": 0,
+                                      "merges": 0},
+                       "autonomy": {"rate": 0.0, "clean": 0, "delivering": 0,
+                                    "questions": 0},
+                       "evidence": {"rate": 0.0, "backed": 0, "merged": 0,
+                                    "approved": 0, "legacy": 0},
+                       "reliability": {"rate": 0.0, "failed": 0, "terminal": 0,
+                                       "silent": 0},
+                       "gaps": {"open": 0, "closed": 0, "titles": []},
+                       "readiness": rd})
+    assert "lost work          0 done tasks with commits, work not on main" in rendered
+    assert ("merged over obj.   1 done tasks whose MR merged over an "
+            "unanswered CHANGES REQUESTED") in rendered
+    assert "SIS-1" in rendered
 
 
 def test_readiness_merge_latency_calculates_median_hours(db_path):
