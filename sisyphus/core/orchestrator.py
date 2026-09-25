@@ -1212,8 +1212,15 @@ def pass_blocked_by(task: dict, spontaneous: bool = False,
     if (not spontaneous and task["status"] in ("waiting", "paused")
             and event_type is not None and event_type not in RESUMES_A_PARKED_TASK):
         return f"parked as {task['status']} — {event_type!r} does not resume it"
-    if _worker_in_flight(task["id"]):
-        return "worker already in flight"
+    # Not just the thread markers: a live session (the worker is genuinely
+    # running) or a queued slot (_AWAITING_SLOT) blocks the pass too. The
+    # markers alone lie — a worker_queued followed by an OLDER worker_finished
+    # reads as "not in flight" while a worker is genuinely queued or live, so
+    # the registries are checked first (SIS-83, and the reason the spawn choke
+    # point _worker_already_live_or_queued exists).
+    live_or_queued = _worker_already_live_or_queued(task["id"])
+    if live_or_queued:
+        return live_or_queued
     if _children_pending(task["id"]):
         return "waiting on child tasks"
     return None
@@ -1228,6 +1235,12 @@ def find_stalled(stall_after: int = STALL_AFTER_SECONDS) -> list:
     now = _dt.datetime.now(_dt.timezone.utc)
     stalled = []
     for task in store.list_tasks(status="active"):
+        # Only an active task can owe a pass. A done/failed/paused row must
+        # never be reported as "created it without emitting" (task-53a4cfda,
+        # task-8362ea15: done tasks flagged hours after finishing) — and
+        # checking here, before the timestamp parse, is cheaper than not.
+        if task["status"] in ("done", "failed", "paused"):
+            continue
         try:
             seen = _dt.datetime.fromisoformat(task["updated_at"])
         except (ValueError, KeyError, TypeError):
@@ -1262,6 +1275,10 @@ def find_abandoned(stall_after: int = STALL_AFTER_SECONDS) -> list:
     now = _dt.datetime.now(_dt.timezone.utc)
     abandoned = []
     for task in store.list_tasks(status="active"):
+        # Terminal and paused tasks are never "a dead worker": a done task must
+        # not be flagged hours after it finished (task-53a4cfda, task-8362ea15).
+        if task["status"] in ("done", "failed", "paused"):
+            continue
         if not _worker_in_flight(task["id"]):
             continue
         if sessions.list_for_task(task["id"]):
@@ -1280,6 +1297,22 @@ def find_abandoned(stall_after: int = STALL_AFTER_SECONDS) -> list:
     return abandoned
 
 
+def _stall_evidence(task_id: str) -> str:
+    """One line naming the last thing a stalled task received and its worker
+    state. "Some path created it without emitting" used to be a dead end —
+    nothing said WHICH path. Last-message (kind/seq/author/time) plus worker
+    state point at the creator instead of guessing at it."""
+    thread = store.get_thread(task_id)
+    if thread:
+        last = thread[-1]
+        last_event = (f"last message: {last['kind']} #{last['seq']} by "
+                      f"{last['author']} at {last['created_at']}")
+    else:
+        last_event = "last message: none — the thread is empty"
+    worker = _worker_already_live_or_queued(task_id) or "no live or queued worker"
+    return f"{last_event}; worker state: {worker}"
+
+
 def rescue_stalled(stall_after: int = STALL_AFTER_SECONDS) -> int:
     """Queue a `continue` for every stalled task, and close the marker on any
     task whose worker died without reporting. Logs at WARNING: either case
@@ -1289,8 +1322,9 @@ def rescue_stalled(stall_after: int = STALL_AFTER_SECONDS) -> int:
     for task_id in ids:
         logger.warning(
             "watchdog: %s has been active with no worker and no activity for "
-            "%ds — queueing `continue`. Some path created it without emitting.",
-            task_id, stall_after,
+            "%ds — queueing `continue`. Some path created it without emitting. "
+            "Evidence: %s.",
+            task_id, stall_after, _stall_evidence(task_id),
         )
         emit(task_id, "continue")
 
