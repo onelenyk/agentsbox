@@ -80,6 +80,26 @@ def build(root: str, real_home: str = "") -> str:
     return str(home)
 
 
+def _sweep_entry(entry: Path) -> bool:
+    """Remove one stray, returning True when it is gone. A directory whose
+    contents change while it is removed fails with ENOTEMPTY; retry once, and
+    the second pass removes whatever appeared in between. Never raises."""
+    import shutil
+    if entry.is_symlink() or entry.is_file():
+        try:
+            entry.unlink()
+        except OSError:
+            return False
+        return True
+    for _attempt in range(2):
+        try:
+            shutil.rmtree(entry)
+            return True
+        except OSError:
+            continue
+    return False
+
+
 def _sweep_strays(home: Path) -> None:
     """Remove everything in the worker HOME that the allowlist did not put
     there. The home persists between runs, and a run can write into it — a
@@ -90,9 +110,9 @@ def _sweep_strays(home: Path) -> None:
     true at spawn time rather than only on the first spawn. The cost is
     opencode re-bootstrapping its package cache (~12s of a run that lasts
     minutes); the alternative is one repo's plugin quietly becoming every
-    repo's plugin. Never raises — a stray we could not remove is logged and
-    the probe in runner_profiles remains the belt to these braces."""
-    import shutil
+    repo's plugin. Never raises — a stray we could not remove is one WARNING
+    line, no traceback, and the probe in runner_profiles remains the belt to
+    these braces."""
     allowed = {Path(rel).parts[0] for rel, _ in LINKED}
     removed = []
     try:
@@ -102,14 +122,10 @@ def _sweep_strays(home: Path) -> None:
     for entry in entries:
         if entry.name in allowed:
             continue
-        try:
-            if entry.is_symlink() or entry.is_file():
-                entry.unlink()
-            else:
-                shutil.rmtree(entry)
+        if _sweep_entry(entry):
             removed.append(entry.name)
-        except OSError:
-            logger.exception("runner home: could not sweep %s", entry.name)
+        else:
+            logger.warning("runner home: could not sweep %s", entry.name)
     if removed:
         logger.warning("runner home: swept %s — a previous run left them, and a "
                        "persisted extra is how one repo's config becomes every "
