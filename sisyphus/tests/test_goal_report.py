@@ -10,7 +10,7 @@ from core import mergerequests as mrs
 from core import store
 from core.db import get_conn
 from tools.goal_report import (autonomy, evidence, open_gaps, readiness, reliability,
-                               self_build, _rate)
+                               render, self_build, _rate)
 
 
 def _git(repo, *args):
@@ -174,6 +174,56 @@ def test_readiness_wasted_runs_zero_when_no_finished(db_path):
     assert r["all_finished"] == 0
     assert r["wasted_finished"] == 0
     assert r["wasted_rate"] == 0.0
+
+
+def test_readiness_reports_7_day_wasted_rate_next_to_30_day(db_path):
+    """The 30-day wasted figure keeps carrying history the recent fixes already
+    ended; the 7-day figure next to it is the one that shows a live improvement.
+    Both are counted, and the report renders them side by side."""
+    from datetime import datetime, timedelta, timezone
+    conn = get_conn()
+
+    def _backdate(task_id, days_ago):
+        at = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
+        conn.execute("UPDATE messages SET created_at=? WHERE task_id=?", (at, task_id))
+        conn.commit()
+
+    # 20 days ago: a wasted run — counts in 30d, not in 7d
+    old = store.create_task("old wasted run", repo="sisyphus")
+    store.post_message(old["id"], "orchestrator", kind="worker_finished",
+                      text="agent_no_result")
+    _backdate(old["id"], 20)
+
+    # 3 days ago: a good run and a wasted run — both count in 30d and 7d
+    recent = store.create_task("recent good run", repo="sisyphus")
+    store.post_message(recent["id"], "orchestrator", kind="worker_finished",
+                       text="worker returned a diff")
+    recent_wasted = store.create_task("recent wasted run", repo="sisyphus")
+    store.post_message(recent_wasted["id"], "orchestrator", kind="worker_finished",
+                       text="worker vanished mid-run")
+    _backdate(recent["id"], 3)
+    _backdate(recent_wasted["id"], 3)
+
+    r = readiness(get_conn(), days=30)
+    assert r["all_finished"] == 3 and r["wasted_finished"] == 2
+    assert r["wasted_rate"] == 66.7                       # 2 of 3 over 30 days
+    assert r["all_finished_7d"] == 2 and r["wasted_finished_7d"] == 1
+    assert r["wasted_rate_7d"] == 50.0                    # 1 of 2 over 7 days
+
+    rendered = render({"days": 30, "target": 50,
+                       "self_build": {"rate": 0.0, "delivered": 0, "total": 0,
+                                      "merges": 0},
+                       "autonomy": {"rate": 0.0, "clean": 0, "delivering": 0,
+                                    "questions": 0},
+                       "evidence": {"rate": 0.0, "backed": 0, "merged": 0,
+                                    "approved": 0, "legacy": 0},
+                       "reliability": {"rate": 0.0, "failed": 0, "terminal": 0,
+                                       "silent": 0},
+                       "gaps": {"open": 0, "closed": 0, "titles": []},
+                       "readiness": r})
+    assert "66.7%" in rendered and "2 of 3 worker runs ended without a result" in rendered
+    assert "50.0%" in rendered and "1 of 2 worker runs ended without a result" in rendered
+    assert "wasted runs 7d" in rendered
 
 
 def test_readiness_provider_faults_counts_cooldowns(db_path):
