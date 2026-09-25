@@ -104,15 +104,18 @@ def _ms(started: float) -> int:
     return int((time.monotonic() - started) * 1000)
 
 
-def summarise(res: dict) -> str:
+def summarise(res: dict, head: str = "") -> str:
     """One line for a thread, phrased so a reviewer cannot read a missing check
-    as a passing one."""
+    as a passing one. `head` names the commit the check ran against, so a
+    reviewer can tell "covers this head" from "recorded for an older one"
+    without re-running anything."""
     if not res.get("ran"):
         return f"No automated check ran — {res.get('reason', 'not configured')}."
     secs = res.get("duration_ms", 0) / 1000
     verdict = "PASSED" if res.get("ok") else "FAILED"
+    against = f" against head {head[:12]}" if head else ""
     return (f"Automated check {verdict} (exit {res.get('exit_code')}, {secs:.0f}s): "
-            f"`{res.get('command','')}`")
+            f"`{res.get('command','')}`{against}")
 
 
 def run_and_record(mr: dict, timeout: int = DEFAULT_TIMEOUT) -> dict:
@@ -143,7 +146,7 @@ def run_and_record(mr: dict, timeout: int = DEFAULT_TIMEOUT) -> dict:
     task_id = mr.get("task_id", "")
     if task_id:
         tail = (res.get("output") or "").strip().splitlines()[-12:]
-        body = summarise(res)
+        body = summarise(res, head=head)
         if tail:
             body += "\n\n" + "\n".join(tail)
         try:

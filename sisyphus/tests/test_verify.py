@@ -70,6 +70,17 @@ class TestVerdicts:
         assert "2 failed" in res["output"]
         assert "FAILED" in verify.summarise(res)
 
+    def test_the_summary_names_the_head_it_ran_against(self, repo, monkeypatch):
+        """A reviewer can only rely on a verdict for the commit it actually
+        saw. The one-line note must say which head that was, or the reviewer
+        cannot tell "covers this" from "recorded for an older one"."""
+        monkeypatch.setattr(verify, "check_command", lambda name: "true")
+        line = verify.summarise(verify.run_check(_mr(repo)), head="0123456789abcdef" * 2)
+        assert "Automated check PASSED" in line
+        assert "against head 0123456789ab" in line
+        # Without a head, the summary simply does not claim one.
+        assert "against head" not in verify.summarise(verify.run_check(_mr(repo)))
+
     def test_timeout_is_a_failure_not_a_pass(self, repo, monkeypatch):
         monkeypatch.setattr(verify, "check_command", lambda name: "sleep 30")
         res = verify.run_check(_mr(repo), timeout=1)

@@ -156,3 +156,16 @@ class TestRoles:
             if name in roles.list_roles():
                 assert "commit" not in roles.role_tools(name), name
                 assert "open_mr" not in roles.role_tools(name), name
+
+    def test_reviewer_personas_defer_to_the_recorded_check(self):
+        """Both reviewer personas must tell the reviewer to lean on the daemon's
+        recorded verdict rather than re-run the whole suite in a sandbox, and to
+        treat a missing verdict as "waiting", not CHANGES REQUESTED."""
+        for name in ("reviewer", "mr-reviewer"):
+            persona = roles.get_role(name)["persona"]
+            flat = persona.replace("\n", " ")
+            assert "Automated check" in flat, name
+            assert "do NOT re-run the full suite" in flat, name
+            assert "run only the tests relevant to the diff" in flat, name
+            assert "waiting for the recorded check" in flat, name
+            assert "not a reason for CHANGES REQUESTED" in flat, name

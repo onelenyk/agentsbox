@@ -31,6 +31,17 @@ class TestEnsureReviewTask:
         # and it must still say what to do when the two disagree
         assert "the record wins" in goal.replace("\n", " ")
 
+    def test_the_goal_tells_the_reviewer_to_defer_to_the_recorded_check(self, db_path):
+        """The reviewer must rely on the daemon's recorded verdict instead of
+        re-running the whole suite in a sandbox, and must not request changes
+        merely because no verdict is recorded yet."""
+        goal = reviews.ensure_review_task(_mr())["goal"]
+        flat = goal.replace("\n", " ")
+        assert "do NOT re-run the full suite" in flat
+        assert "run only the tests relevant to the diff" in flat
+        assert "waiting for the recorded check" in flat
+        assert "not a reason for CHANGES REQUESTED" in flat
+
     def test_dedup_second_call_returns_none(self, db_path):
         mr = _mr()
         t1 = reviews.ensure_review_task(mr)
