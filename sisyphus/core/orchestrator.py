@@ -971,6 +971,28 @@ def _release_slot_wait(task_id: str) -> None:
         _AWAITING_SLOT.pop(task_id, None)
 
 
+def _worker_already_live_or_queued(task_id: str) -> str:
+    """A description of a worker already live or queued for *task_id*, or ""
+    if the task has none.
+
+    The spawn choke point runs this so a reply or resume can never start a
+    second worker for the same task (task-cf2a500f, task-09b4492e: two
+    engineers mutated one worktree). The thread markers alone are not enough —
+    a worker_queued marker followed by an *older* worker_finished makes
+    _worker_in_flight read False while a worker is genuinely queued or live —
+    so the queued and live registries are checked first.
+    """
+    if task_id in _AWAITING_SLOT:
+        return "a worker is already queued for a slot"
+    from . import sessions
+    live = [s for s in sessions.list_for_task(task_id) if s.get("kind") == "worker"]
+    if live:
+        return f"worker {live[0].get('role') or 'worker'} is already live"
+    if _worker_in_flight(task_id):
+        return "a worker is already in flight"
+    return ""
+
+
 def _queue_worker(task_id: str, role: str) -> bool:
     """Mark a worker as queued — synchronously, before anything awaits — or
     pause the task if the worker has no runner to go to. Returns whether to go
@@ -980,8 +1002,20 @@ def _queue_worker(task_id: str, role: str) -> bool:
     marker landed only after the event loop got round to it, and two human
     replies a few seconds apart each drove a pass that saw "no worker in
     flight" and started one: two engineers on one worktree (task-cf2a500f).
+
+    Idempotent per task: every spawn — queue and start alike — passes through
+    here, so a spawn request for a task that already has a live or queued
+    worker is dropped, with a note on the thread saying why.
     """
     from . import agents, model_classes
+    # Never run (or queue) two workers on one task. A reply or resume arriving
+    # while a worker is live or queued must not create a second worker — or a
+    # second queue entry behind _AWAITING_SLOT.
+    existing = _worker_already_live_or_queued(task_id)
+    if existing:
+        store.post_message(task_id, "orchestrator", kind="note",
+                           text=f"[spawn_worker] dropped: {existing}; not starting a second worker")
+        return False
     # A run with no runner is not a run: it must not spend one of a pinned
     # task's attempts or look like a worker in flight.
     choice = model_classes.choose(role)
