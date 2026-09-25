@@ -481,6 +481,22 @@ browser cannot send a bearer token on a navigation, so remote UI access is an SS
 tunnel by design. Guarded by
 `tests/test_auth.py::TestTheGuardCoversTheWholeSurface`.
 
+### Any website the user has open could POST to the daemon
+**Status:** CLOSED 2026-09-25 — the whole HTTP surface refuses cross-site writes.
+Loopback callers are trusted and a browser attaches no bearer token, so nothing
+checked where a request came from: any site the user had open could POST a form
+to localhost:7677 and create a task, merge an MR or delete a repo. Only the
+credential routes checked (`_from_this_page`). A CSRF guard
+(`web.auth.csrf_guard`, registered in `web/app.py` next to `api_token_guard`)
+now returns 403 for POST/PUT/PATCH/DELETE when `Sec-Fetch-Site` is present and
+not same-origin/none, or an `Origin` whose host:port differs from the request's
+`Host` — the same test `_from_this_page` applied, promoted to a middleware and
+the routes' duplicate check removed. Requests carrying neither header (curl,
+the MCP server, workers, TestClient) pass unchanged; reads are never blocked;
+the forge webhook path `/api/v1/webhooks/` stays open because forges post there
+cross-origin and authenticate by their own secret. Guarded by
+`tests/test_auth.py::TestCrossSiteWritesAreRefused`.
+
 ### An automation that could never fire looked exactly like one waiting
 **Status:** CLOSED 2026-08-30 — `autopilot.schedule_problem` names it, on the
 card and at the moment it is saved.

@@ -95,3 +95,57 @@ async def api_token_guard(request, call_next):
                         status_code=401)
                 return JSONResponse({"detail": "invalid or missing API token"}, status_code=401)
     return await call_next(request)
+
+
+# Webhooks stay exempt from the cross-site check too: forges post there
+# cross-origin and authenticate by their own secret (see core/webhooks.py).
+_CSRF_EXEMPT_PREFIXES = ("/api/v1/webhooks/",)
+
+# Reads are never blocked; only a request that can mutate state can be a
+# CSRF write.
+_CSRF_WRITE_METHODS = ("POST", "PUT", "PATCH", "DELETE")
+
+# Sec-Fetch-Site values a same-site request is allowed to carry. "none" is the
+# browser's label for a top-level navigation typed or followed directly (no
+# Referer-driven site); "same-origin" is a fetch from our own page.
+_SAME_SITE = ("same-origin", "none")
+
+
+def _is_cross_site(request) -> bool:
+    """Whether the browser says a request did not come from our own page.
+
+    Modern browsers send ``Sec-Fetch-Site`` on every request: when it is present
+    and not ``same-origin``/``none`` the request is cross-site. Older ones (and
+    cross-origin XHR/fetch without fetch-metadata) send ``Origin`` instead —
+    compare its host:port to the request's ``Host``, which is the check
+    ``_from_this_page`` used for the credential routes. Requests carrying
+    neither header (curl, the MCP server, workers, TestClient) pass — the
+    browser is the only client that sends these, so their absence means the
+    caller is not a page that could have been CSRF'd. Origin is compared as a
+    plain host:port string (no scheme-implied default-port normalization),
+    matching the removed ``_from_this_page``.
+    """
+    site = request.headers.get("sec-fetch-site")
+    if site and site not in _SAME_SITE:
+        return True
+    origin = request.headers.get("origin")
+    if origin and origin.split("://", 1)[-1] != request.headers.get("host", ""):
+        return True
+    return False
+
+
+async def csrf_guard(request, call_next):
+    """ASGI middleware: refuse cross-site writes to the whole HTTP surface.
+
+    Any website the user has open could otherwise POST a form at
+    localhost:7677 and create a task, merge an MR or delete a repo — loopback
+    callers are trusted and a browser attaches no token, so nothing else asked
+    where a request came from. Only the credential routes used to
+    (``_from_this_page`` in web/routes.py). Reads are never blocked and the
+    webhook path is exempt because forges call it cross-origin by design.
+    """
+    if (request.method in _CSRF_WRITE_METHODS
+            and not request.url.path.startswith(_CSRF_EXEMPT_PREFIXES)
+            and _is_cross_site(request)):
+        return JSONResponse({"detail": "cross-site request refused"}, status_code=403)
+    return await call_next(request)
