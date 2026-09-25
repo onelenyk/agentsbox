@@ -239,6 +239,35 @@ def test_readiness_wasted_runs_zero_when_no_finished(db_path):
     assert r["wasted_rate"] == 0.0
 
 
+def test_readiness_a_delivered_run_is_not_wasted(db_path):
+    """A run that posted its deliverable and stopped without its finishing tool
+    is delivered (core.worker says so in its own words), not a wasted run — the
+    task-8963e1f6 reviewer inflated the metric exactly this way."""
+    from core import worker as core_worker
+
+    # Delivered: the reviewer's verdict reached the thread during the run.
+    delivered = store.create_task("reviewer delivered", repo="sisyphus")
+    store.post_message(delivered["id"], "system", kind="worker_started", text="spawning reviewer")
+    store.post_message(delivered["id"], "reviewer", kind="result", text="APPROVED: looks right")
+    delivered_msg = core_worker.worker_end_message(
+        "reviewer", type("R", (), {"status": "completed"}), task_id=delivered["id"])
+    store.post_message(delivered["id"], "system", kind="worker_finished", text=delivered_msg)
+    assert "ended without reporting a result" not in delivered_msg
+
+    # Wasted: a run that really delivered nothing keeps the old wording.
+    wasted = store.create_task("reviewer empty", repo="sisyphus")
+    store.post_message(wasted["id"], "system", kind="worker_started", text="spawning reviewer")
+    wasted_msg = core_worker.worker_end_message(
+        "reviewer", type("R", (), {"status": "completed"}), task_id=wasted["id"])
+    store.post_message(wasted["id"], "system", kind="worker_finished", text=wasted_msg)
+    assert "ended without reporting a result" in wasted_msg
+
+    r = readiness(get_conn(), days=30)
+    assert r["all_finished"] == 2
+    assert r["wasted_finished"] == 1
+    assert r["wasted_rate"] == 50.0
+
+
 def test_readiness_reports_7_day_wasted_rate_next_to_30_day(db_path):
     """The 30-day wasted figure keeps carrying history the recent fixes already
     ended; the 7-day figure next to it is the one that shows a live improvement.

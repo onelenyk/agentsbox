@@ -79,6 +79,32 @@ class TestStepsAreRunsNotMessages:
         assert all(r["how"] == "ok" for r in runs)
         assert [r["mins"] for r in runs] == [4, 6]
 
+    def test_a_delivered_run_closes_as_delivered_not_running(self):
+        """A run that posted its deliverable but never called the finishing tool
+        should close with how='delivered', not stay 'running'."""
+        msgs = [_m(1, "worker_started", "system", "spawning reviewer: review it"),
+                _m(5, "worker_finished", "system",
+                   "reviewer delivered its verdict (APPROVED) but ended without calling its finishing tool (status=completed): the work reached the thread")]
+        (run,) = tl.steps(msgs)
+        assert run["type"] == "run" and run["role"] == "reviewer"
+        assert run["how"] == "delivered"
+        assert run["ended"] is not None
+
+    def test_ended_without_reporting_still_closes_with_status(self):
+        """The old message pattern 'ended without reporting a result' should still
+        close the run with its status (e.g., 'completed', 'timeout')."""
+        msgs = [_m(1, "worker_started", "system", "spawning engineer: build it"),
+                _m(3, "worker_finished", "system",
+                   "engineer ended without reporting a result (status=completed): no output")]
+        steps = tl.steps(msgs)
+        assert len(steps) == 1
+        step = steps[0]
+        # A run with no commits and a status is a dead-run
+        assert step["type"] == "dead-runs"
+        assert step["role"] == "engineer"
+        assert step["hows"] == {"completed": 1}
+        assert step["ended"] is not None
+
     def test_checks_verdicts_decisions_and_the_merge_are_steps(self):
         msgs = [_m(1, "note", "system", "Automated check FAILED (exit 1, 475s): `pytest -q`\n"
                                         "FAILED tests/test_x.py::test_y - assert\n1 failed, 1301 passed"),

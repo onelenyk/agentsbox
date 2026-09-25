@@ -814,6 +814,110 @@ class TestDeliveredWorkGuard:
         assert "Do NOT spawn another engineer" not in msg
 
 
+class TestDeliveredButNoFinishCall:
+    """A run that posted its deliverable to the thread and then stopped without
+    calling its finishing tool is delivered, not a wasted run. The case that
+    started this: task-8963e1f6's reviewer posted its review (the MR merged)
+    yet the run still read "ended without reporting a result" and inflated the
+    wasted-runs metric. Scoped to the current run, so an earlier run's
+    deliverable cannot whitewash a genuinely empty re-run."""
+
+    class _R:
+        status = "completed"
+        error = ""
+        raw_stdout = "output"
+        raw_stderr = ""
+        usage = {"steps": 36}
+
+    def _task(self, in_run=None, before=None):
+        from core import store
+        task = store.create_task("delivered run", repo="sisyphus")
+        if before:
+            store.post_message(task["id"], "system", kind="worker_started", text="run 1")
+            if before == "verdict":
+                store.post_message(task["id"], "reviewer", kind="result", text="APPROVED: earlier")
+            elif before == "result":
+                store.post_message(task["id"], "engineer", kind="result", text="earlier result")
+        store.post_message(task["id"], "system", kind="worker_started", text="run 2")
+        if in_run == "verdict-result":
+            store.post_message(task["id"], "reviewer", kind="result", text="APPROVED: looks right")
+        elif in_run == "verdict-note":
+            store.post_message(task["id"], "reviewer", kind="note",
+                               text="Review complete. The diff is correct.")
+        elif in_run == "result":
+            store.post_message(task["id"], "engineer", kind="result", text="done: added fix")
+        elif in_run == "plan":
+            store.post_message(task["id"], "explorer", kind="plan", text="Proposed subtasks:\n- [a] x")
+        return task
+
+    def test_reviewer_result_without_finish_call_says_verdict_delivered(self, db_path):
+        from core.worker import worker_end_message
+        task = self._task(in_run="verdict-result")
+        msg = worker_end_message("reviewer", self._R(), task_id=task["id"])
+        assert "reviewer delivered its verdict (APPROVED)" in msg
+        assert "ended without calling its finishing tool" in msg
+        assert "ended without reporting a result" not in msg
+
+    def test_reviewer_closing_note_without_finish_call_says_verdict_delivered(self, db_path):
+        """The live shape behind task-8963e1f6: the reviewer posted its review
+        as a note and stopped without calling approve/finish."""
+        from core.worker import worker_end_message
+        task = self._task(in_run="verdict-note")
+        msg = worker_end_message("reviewer", self._R(), task_id=task["id"])
+        assert "reviewer delivered its verdict" in msg
+        assert "ended without calling its finishing tool" in msg
+        assert "ended without reporting a result" not in msg
+
+    def test_worker_result_message_without_finish_call_says_result_delivered(self, db_path):
+        from core.worker import worker_end_message
+        task = self._task(in_run="result")
+        msg = worker_end_message("engineer", self._R(), task_id=task["id"])
+        assert "engineer delivered its result" in msg
+        assert "ended without reporting a result" not in msg
+
+    def test_plan_message_counts_as_delivered(self, db_path):
+        from core.worker import worker_end_message
+        task = self._task(in_run="plan")
+        msg = worker_end_message("explorer", self._R(), task_id=task["id"])
+        assert "explorer delivered its plan" in msg
+        assert "ended without reporting a result" not in msg
+
+    def test_nothing_delivered_keeps_the_wasted_message(self, db_path):
+        from core.worker import worker_end_message
+        task = self._task(in_run=None)
+        msg = worker_end_message("reviewer", self._R(), task_id=task["id"])
+        assert "ended without reporting a result" in msg
+        assert "delivered its" not in msg
+
+    def test_a_mid_review_progress_note_is_not_a_verdict(self, db_path):
+        from core.worker import worker_end_message
+        task = store.create_task("progress", repo="sisyphus")
+        store.post_message(task["id"], "system", kind="worker_started", text="run")
+        store.post_message(task["id"], "reviewer", kind="note", text="Reading the diff now")
+        msg = worker_end_message("reviewer", self._R(), task_id=task["id"])
+        assert "ended without reporting a result" in msg
+
+    def test_a_deliverable_from_an_earlier_run_does_not_count(self, db_path):
+        """Scope: a fresh run that delivered nothing must stay flagged even if
+        the previous run on the task delivered — otherwise an empty re-run is
+        whitewashed by history."""
+        from core.worker import worker_end_message
+        task = self._task(in_run=None, before="verdict")
+        msg = worker_end_message("reviewer", self._R(), task_id=task["id"])
+        assert "ended without reporting a result" in msg
+        assert "delivered its" not in msg
+
+    def test_an_engineer_verdict_word_note_is_not_counted_as_review(self, db_path):
+        """The note-as-verdict rule is scoped to reviewers: an engineer quoting
+        "APPROVED" in a comment is not a delivered review."""
+        from core.worker import worker_end_message
+        task = store.create_task("quote", repo="sisyphus")
+        store.post_message(task["id"], "system", kind="worker_started", text="run")
+        store.post_message(task["id"], "engineer", kind="note", text="APPROVED the approach")
+        msg = worker_end_message("engineer", self._R(), task_id=task["id"])
+        assert "ended without reporting a result" in msg
+
+
 class TestRepoOwnedConfigIsOverriddenLoudly:
     @pytest.mark.asyncio
     async def test_the_thread_says_what_the_checkout_declared(self, db_path, tmp_path, monkeypatch):
