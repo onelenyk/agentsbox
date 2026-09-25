@@ -14,9 +14,11 @@ from core.orchestrator import Decision, handle_event, reconcile_on_boot
 @pytest.fixture(autouse=True)
 def _reset():
     orchestrator.reset_queue()
+    orchestrator._AWAITING_SLOT.clear()
     sessions.clear()
     yield
     orchestrator.reset_queue()
+    orchestrator._AWAITING_SLOT.clear()
     sessions.clear()
 
 
@@ -460,6 +462,87 @@ class TestStallWatchdog:
         with patch("core.orchestrator.emit") as mock_emit:
             assert orchestrator.rescue_stalled(stall_after=600) == 0
         mock_emit.assert_not_called()
+
+    def test_rescue_skips_a_done_task_that_would_previously_be_flagged(self, db_path):
+        """Regression for the false positives that started this work: a task
+        finished hours ago (task-53a4cfda, done 22:23, flagged 01:01; and
+        task-8362ea15, done 14:31, flagged 17:31). A terminal task is owed
+        nothing — the watchdog must not queue a `continue` behind it, whatever
+        its thread markers say."""
+        task = store.create_task("finished long ago")
+        # A worker_started with no worker_finished would make find_abandoned
+        # think the worker died — but the task is DONE, so both scans must skip
+        # it before they ever read the markers.
+        store.post_message(task["id"], "system", kind="worker_started", text="go")
+        store.set_status(task["id"], "done")
+        self._age(task["id"], 3600)
+
+        with patch("core.orchestrator.emit") as mock_emit:
+            assert orchestrator.rescue_stalled(stall_after=600) == 0
+        mock_emit.assert_not_called()
+
+    def test_rescue_skips_a_paused_task(self, db_path):
+        """Paused means paused: the watchdog must not rescue a task a human (or
+        a limit window) has deliberately parked."""
+        task = store.create_task("paused on purpose")
+        orchestrator.pause(task["id"], "stopped", "human pressed Stop")
+        self._age(task["id"], 7200)
+
+        with patch("core.orchestrator.emit") as mock_emit:
+            assert orchestrator.rescue_stalled(stall_after=600) == 0
+        mock_emit.assert_not_called()
+
+    def test_rescue_skips_a_task_with_a_queued_worker(self, db_path):
+        """A worker waiting for a slot (_AWAITING_SLOT) has NOT died and has
+        NOT been dispatched — flagging it would queue a `continue` that spawns
+        a second worker once the slot frees (SIS-83). The thread marker can be
+        absent entirely (the queue entry registers before any marker is
+        trusted), so the scan must read the queue, not just the thread."""
+        task = store.create_task("waiting for a slot")
+        orchestrator._AWAITING_SLOT[task["id"]] = 1
+        self._age(task["id"], 3600)
+
+        with patch("core.orchestrator.emit") as mock_emit:
+            assert orchestrator.rescue_stalled(stall_after=600) == 0
+        mock_emit.assert_not_called()
+
+    def test_rescue_skips_a_task_with_a_live_worker_session(self, db_path):
+        """A live session means a worker is genuinely running — the marker may
+        not have landed yet (it is posted just after the session is minted), so
+        the scan must read the sessions registry, not only the thread markers,
+        or it would rescue a busy task and start a second worker behind it."""
+        sessions.clear()
+        task = store.create_task("worker about to post its marker")
+        sessions.mint(task["id"], "engineer")
+        self._age(task["id"], 7200)
+
+        with patch("core.orchestrator.emit") as mock_emit:
+            assert orchestrator.rescue_stalled(stall_after=600) == 0
+        mock_emit.assert_not_called()
+
+    def test_watchdog_note_names_last_event_and_worker_state(self, db_path, caplog):
+        """The "created it without emitting" warning must name the task's last
+        event (kind, seq, timestamp) and worker state, so the next occurrence
+        is diagnosable instead of a dead-end line."""
+        task = store.create_task("auto-review that nobody dispatched")
+        store.post_message(task["id"], "system", kind="worker_queued", text="queued")
+        store.post_message(task["id"], "system", kind="worker_finished",
+                           text="failed to start: boom")  # marker cleared — no worker
+        self._age(task["id"], 3600)
+
+        with caplog.at_level("WARNING", logger="core.orchestrator"):
+            with patch("core.orchestrator.emit") as mock_emit:
+                orchestrator.rescue_stalled(stall_after=600)
+
+        lines = [r.message for r in caplog.records if "created it without emitting" in r.message]
+        assert len(lines) == 1
+        msg = lines[0]
+        assert "worker_finished" in msg        # the last event's kind
+        assert "#2" in msg                     # its seq
+        assert "last message" in msg
+        assert "worker state" in msg
+        assert "no live or queued worker" in msg
+        mock_emit.assert_called_once_with(task["id"], "continue")
 
 
 class TestDecisionValidation:
