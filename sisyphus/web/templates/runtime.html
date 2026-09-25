@@ -10,6 +10,7 @@
         <div class="kpi"><div class="l">Running code</div><div class="v mono runtime__kpi-value">{{ process.git_commit }}</div><div class="d">pid {{ process.pid }}</div></div>
         <div class="kpi kpi--violet"><div class="l">Workers in flight</div><div class="v">{{ process.workers_in_flight }}</div><div class="d">restart kills these</div></div>
     </div>
+    {{ ui.self_update_banner(self_update) }}
 </div>
 <div class="panel runtime__panel-margin">
     <div class="result__label">Background loops</div>

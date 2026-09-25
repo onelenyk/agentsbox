@@ -187,6 +187,17 @@ async def startup():
     from core import limits
     lifecycle.start_loop(limits.poll_forever(), "limits")
 
+    # Self-update: when code was merged into the daemon's own checkout, perform
+    # a requested (or auto, when configured) restart once no worker is running.
+    # The daemon's own commit (web.api._GIT_COMMIT) and the checkout it runs
+    # from are read once and fed to the loop.
+    from core import self_update
+    from web.api import _GIT_COMMIT
+    lifecycle.start_loop(
+        self_update.restart_forever(_GIT_COMMIT, str(self_update.daemon_repo_root())),
+        "self-update",
+    )
+
     # Started by the desktop app: end with it, even when it cannot say so.
     parent = os.environ.get("SISYPHUS_PARENT_PID")
     if parent and parent.isdigit():
@@ -210,6 +221,8 @@ async def dashboard_page(request: Request):
 async def dashboard_view(request: Request):
     from core.stats import dashboard
     from core import readiness
+    from core import self_update
+    from web.api import _GIT_COMMIT
 
     rows = []
     for name in _repo_names():
@@ -226,10 +239,15 @@ async def dashboard_view(request: Request):
             # One repo must not take down the whole dashboard.
             logger.warning("production readiness assessment failed for %r", name, exc_info=True)
             rows.append({"name": name, "href": f"/repos/{name}", "error": True})
+
+    # Self-update status for the daemon's own checkout
+    self_update_status = self_update.get_cached_status(_GIT_COMMIT, str(self_update.daemon_repo_root()))
+
     return _tmpl().TemplateResponse(request, "dashboard_view.html", {
         "d": dashboard(),
         "live_sessions": _enrich_sessions(sessions.list_active()),
         "readiness": rows,
+        "self_update": self_update_status,
     })
 
 @router.get("/api/inbox/view", response_class=HTMLResponse)
@@ -306,6 +324,7 @@ def _loops() -> list:
 async def runtime_page(request: Request):
     import os
     from core.runners import list_runners
+    from core import self_update
 
     cfg = get_config()
 
@@ -366,6 +385,9 @@ async def runtime_page(request: Request):
             "override": bool(r.get("idle_timeout")) or bool(r.get("timeout")),
         })
 
+    # Self-update status for the daemon's own checkout
+    self_update_status = self_update.get_cached_status(_GIT_COMMIT, str(self_update.daemon_repo_root()))
+
     return _tmpl().TemplateResponse(
         request,
         "runtime.html",
@@ -381,6 +403,7 @@ async def runtime_page(request: Request):
             "worker_limits": worker_limits,
             "runner_store": _runner_store_view(),
             "loops": _loops(),
+            "self_update": self_update_status,
         },
     )
 
@@ -2641,6 +2664,59 @@ async def task_delete(task_id: str):
     resp = Response(status_code=200)
     resp.headers["HX-Redirect"] = "/tasks"   # navigate back to the board
     return resp
+
+
+@router.post("/api/daemon/restart", response_class=HTMLResponse)
+async def daemon_restart(request: Request):
+    """Restart the daemon when running behind code on disk.
+
+    Only restarts when no worker is in flight; otherwise records a pending request
+    that the self-update loop fulfils once the last worker finishes.
+
+    The actual restart never runs from inside this handler: the daemon cannot
+    stop and start itself (blocking the event loop, then SIGTERM'ing its own
+    pids) the way the CLI's external ``sisyphus.py daemon restart`` process can.
+    Instead, when idle, this spawns a detached subprocess running that exact
+    path and answers immediately — the subprocess waits a moment before stopping
+    the daemon, so the response is on its way out first.
+
+    Returns an HTML fragment — the htmx button swaps the banner out for it.
+    """
+    from core import self_update
+    from web.api import _GIT_COMMIT
+
+    behind = self_update.get_cached_status(
+        _GIT_COMMIT, str(self_update.daemon_repo_root()))
+
+    # Refuse to restart if up to date or unknown — nothing to pick up.
+    if behind.get("behind") is None or behind.get("behind") == 0:
+        return _tmpl().TemplateResponse(request, "self_update_notification.html", {
+            "message": "Daemon is up to date — no restart needed.",
+            "restartable": False,
+        })
+
+    from core import sessions
+    busy = sessions.running()
+    if busy:
+        # A worker is mid-run. Record that restart was requested; the self-update
+        # loop performs it the moment the last one finishes.
+        self_update.request_restart()
+        return _tmpl().TemplateResponse(request, "self_update_notification.html", {
+            "message": "Restart scheduled — will restart when the last worker finishes.",
+            "restartable": False,
+        })
+
+    # No workers running — hand the restart to a detached external process.
+    result = self_update.perform_restart()
+    if not result.get("spawned"):
+        return _tmpl().TemplateResponse(request, "self_update_notification.html", {
+            "message": "Restart could not be started — see the daemon log.",
+            "restartable": True,
+        })
+    return _tmpl().TemplateResponse(request, "self_update_notification.html", {
+        "message": "Restarting daemon…",
+        "restartable": False,
+    })
 
 
 @router.post("/api/integrations/jira/import", response_class=HTMLResponse)

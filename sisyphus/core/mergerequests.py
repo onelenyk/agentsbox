@@ -532,7 +532,7 @@ def record_merge_success(mr: dict, res: dict, prefix: str = "Merged",
     ``mark_merged`` first, then a thread note on the origin task naming the
     evidence (``verdict_line``). *prefix* is the verb in the note ("Merged",
     "Auto-merged"); *cite* overrides the evidence line for a force-override."""
-    from . import store
+    from . import store, self_update
     mark_merged(mr["id"], res["sha"])
     if cite is None:
         cite = verdict_line(mr)
@@ -540,6 +540,15 @@ def record_merge_success(mr: dict, res: dict, prefix: str = "Merged",
         mr["task_id"], "system", kind="note",
         text=(f"{prefix} {mr['source_branch']} into {res['target']} "
               f"({res['sha'][:8]}) in {mr['source_path']} — {cite}"))
+
+    # Check if this merge is for the daemon's own checkout — if so, drop the
+    # cached behind-status so the next render (or self-update loop pass) sees
+    # the new HEAD immediately. The path comparison resolves both sides to
+    # their git toplevel, so a repo registered at the worktree root (one level
+    # above the source dir) matches just as well as one registered at the
+    # source dir.
+    if self_update.is_daemon_checkout(mr.get("source_path", "")):
+        self_update.clear_cache()
 
 
 def _auto_merge_waiting_keys(mr_id: str) -> set:
