@@ -6,7 +6,6 @@ worktrees, reviews the result, and opens a merge request.
 
 [![CI](https://github.com/onelenyk/agentsbox/actions/workflows/ci.yml/badge.svg)](https://github.com/onelenyk/agentsbox/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.14-blue)
-![Tests](https://img.shields.io/badge/tests-1297-brightgreen)
 ![Runs on](https://img.shields.io/badge/runs-on%20your%20machine-lightgrey)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
 
@@ -58,7 +57,7 @@ optional — opencode uses its own logged-in providers, Claude Code its OAuth lo
 ```bash
 cd sisyphus
 pip install -r requirements.txt
-cp .env.example .env            # optional: forge / API tokens
+cp .env.example .env            # optional: non-credential env vars
 cp config.example.yaml config.yaml   # optional: budgets, worker cap, repos
 python sisyphus.py daemon start
 open http://localhost:7677      # Mission Control
@@ -84,13 +83,13 @@ sisyphus/
   core/        domain + engine — orchestrator, worker, merge requests, sandbox
   web/         FastAPI app: htmx UI, JSON API, agent decision tools
   docs/        architecture, the north star, and an honest ledger of gaps
-  tests/       1297 tests in four tiers + a Playwright browser e2e
+  tests/       unit tests in four tiers + a Playwright browser e2e
   sisyphus.py  CLI entrypoint      mcp_server.py  MCP stdio server
 ```
 
 ```bash
-cd sisyphus && pytest -q          # unit suite
-pytest tests/e2e -q               # browser e2e (needs requirements-dev.txt)
+cd sisyphus && python3 -m pytest -q  # unit suite
+pytest tests/e2e -q                  # browser e2e (needs requirements-dev.txt)
 ```
 
 ## Where it is going

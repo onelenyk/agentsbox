@@ -88,15 +88,16 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the domain model in depth
 [opencode](https://opencode.ai) or [Claude Code](https://claude.com/claude-code)
 (**Runners → Detect** finds installed ones). An API key is optional: opencode can
 use its own logged-in providers (the model prefix picks the provider, e.g.
-`deepseek/…`), and Claude Code uses its OAuth login. Set `OPENROUTER_API_KEY`
-only if you route models through OpenRouter.
+`deepseek/…`), and Claude Code uses its OAuth login. If you route models through
+OpenRouter, enter its API key in the UI under **Integrations → Keys & tokens**
+(see [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md)).
 
 ```bash
 # 1. install deps
 pip install -r requirements.txt
 
 # 2. configure (both files are gitignored; both optional — no file = defaults)
-cp .env.example .env                    # API / forge tokens
+cp .env.example .env                    # optional: non-credential env vars
 cp config.example.yaml config.yaml      # budgets, worker cap, repos, check: commands
 
 # 3. run the daemon
@@ -119,7 +120,7 @@ python sisyphus.py daemon status     # live? supervised? version
 python sisyphus.py daemon logs -f
 ```
 
-Secrets come from `.env` (launchd has no shell env). See [`deploy/README.md`](deploy/README.md).
+Credentials are entered in the UI under **Integrations → Keys & tokens** and kept in Sisyphus's vault. See [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
 
 ---
 
@@ -166,8 +167,10 @@ sisyphus dev      install-hooks        # pre-push hook that runs the test suite
 
 ## Configuration
 
-- **`.env`** — secrets & env (`OPENROUTER_API_KEY`, `SISYPHUS_API_TOKEN`, forge
-  tokens). Shell env wins over `.env`; `${VAR}` is expanded in `config.yaml`.
+- **Credentials** — entered in the UI under **Integrations → Keys & tokens**, stored
+  in Sisyphus's vault, never in `.env` or `config.yaml`. See [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
+- **`.env`** — optional environment variables (only for non-credential config). Shell env wins
+  over `.env`; `${VAR}` is expanded in `config.yaml`.
 - **`config.yaml`** — copied from `config.example.yaml`; gitignored because the
   daemon writes the `repos:` list into it. Knobs:
   - `max_concurrent_workers` (default 2) — global worker cap
@@ -226,7 +229,7 @@ docs/          architecture + feature notes
 ## Testing
 
 ```bash
-pytest -q                 # 1297 tests
+python3 -m pytest -q      # full test suite
 pytest tests/e2e -q       # Playwright browser e2e — needs:
                           #   pip install -r requirements-dev.txt
                           #   python -m playwright install chromium
