@@ -29,7 +29,6 @@ TIERS = {
         "test_runlogs", "test_runner_detect", "test_runner_profiles",
         "test_runner_home", "test_runner_smoke", "test_runners",
         "test_sandbox_read_isolation",
-        "test_self_update", "test_self_update_restart",
         "test_sessions",
         "test_small_modules", "test_store", "test_usage", "test_worker_env",
     ],
@@ -42,6 +41,9 @@ TIERS = {
         "test_setup_hook", "test_stats", "test_task_lifecycle", "test_verify",
         "test_jira_client", "test_jira_trail", "test_limits", "test_pause", "test_web_routes", "test_webhook_auth", "test_webhooks", "test_worker",
         "test_worktree", "test_worktree_utils",
+        # Shell out to git in real temp repos — "If it shells out, it is not a
+        # unit test" (docs/testing.md), so these belong in the component tier.
+        "test_self_update", "test_self_update_restart",
     ],
     "process": [
         "test_agent_mcp_stdio", "test_daemon_ctl", "test_launcher", "test_lifecycle", "test_orphans",

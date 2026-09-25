@@ -1,0 +1,13 @@
+{# Fragment returned by POST /api/daemon/restart — the htmx Restart button
+   swaps the banner out for this, so the operator sees the outcome (scheduled,
+   restarting, up-to-date) instead of raw JSON. Mirrors the banner markup on
+   dashboard_view.html and runtime.html. #}
+<div class="notification notification--warn runtime__notification" role="status">
+    <span class="notification__text">{{ message }}</span>
+    {% if restartable %}
+    <button type="button" class="btn btn--primary btn--sm notification__act"
+            hx-post="/api/daemon/restart" hx-target="closest .notification" hx-swap="outerHTML">
+        Restart
+    </button>
+    {% endif %}
+</div>

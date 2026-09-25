@@ -6,7 +6,7 @@
    waiting" lines said one thing thrice — an empty section now renders nothing,
    because the state line already counted it as zero. #}
 {% set ov = d.ov %}{% set t = ov.tasks %}{% set u = ov.usage %}
-{% from "_ui.html" import agent_mark, fact %}
+{% from "_ui.html" import agent_mark, fact, self_update_banner %}
 
 <div class="state">
     <div class="state__item{{ ' is-live' if t.by_status.get('active', 0) }}">
@@ -27,15 +27,7 @@
     </a>
 </div>
 
-{% if self_update.behind_message %}
-<div class="notification notification--warn" role="status">
-    <span class="notification__text">{{ self_update.behind_message }}</span>
-    <button type="button" class="btn btn--primary btn--sm"
-            hx-post="/api/daemon/restart" hx-target="closest .notification" hx-swap="outerHTML">
-        Restart
-    </button>
-</div>
-{% endif %}
+{{ self_update_banner(self_update) }}
 
 {% if readiness %}
 <section class="sect">

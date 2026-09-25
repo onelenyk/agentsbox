@@ -1778,6 +1778,20 @@ body.has-overlay { overflow: hidden; }
   font-size: var(--fs-4xl);
 }
 
+/* ── Self-update notification: the daemon runs code that is behind the repo.
+   A one-line warn banner with an action, sharing the semantic tint tokens the
+   status pills and flashes use — no raw values of its own. ─────────────── */
+.notification {
+  display: flex; align-items: center; gap: var(--sp-5);
+  padding: var(--sp-5) var(--sp-7);
+  border: 1px solid var(--warn-bd); border-radius: var(--r);
+  background: var(--warn-bg); color: var(--text);
+  font-size: var(--fs-body); line-height: var(--lh-normal);
+}
+.notification--warn { border-color: var(--warn-bd); background: var(--warn-bg); }
+.notification__text { flex: 1; }
+.notification__act { flex-shrink: 0; }
+
 .runtime__notification {
   margin-top: var(--sp-5);
 }
