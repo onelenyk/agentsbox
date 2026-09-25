@@ -328,12 +328,24 @@ def _prepare_repo(task_id: str, repo_name: Optional[str]):
 
 
 
-def _pick_runner(agent: dict):
+def _pick_runner(agent: dict, prefer_next_runner: bool = False):
     """(runner name, model override, provider) for a run of *agent*, or raise
-    NoRunner when every option in its class is at its limit."""
+    NoRunner when every option in its class is at its limit.
+
+    *prefer_next_runner* is the no-result escalation ladder asking for the NEXT
+    runner option of the agent's class — the one that kept failing is skipped
+    (see core.orchestrator's NO_RESULT_SWITCH_AFTER). When the class has only
+    one usable option, it falls back to that one; a pin stays pinned."""
     from . import model_classes
-    choice = model_classes.choose(agent)
+    choice = model_classes.choose(agent, skip=1 if prefer_next_runner else 0)
     if choice.runner is None and choice.source == "class":
+        if prefer_next_runner:
+            # Skipping the first option left nothing usable, but the first one
+            # itself may still be — no alternative exists, use it (the
+            # orchestrator already said so on the thread).
+            choice = model_classes.choose(agent)
+            if choice.runner is not None:
+                return choice.runner_name, (choice.model or None), choice.provider
         raise model_classes.NoRunner(model_classes.class_of(agent), choice)
     return choice.runner_name, (choice.model or None), choice.provider
 
@@ -645,6 +657,7 @@ async def spawn_worker(
     repo_name: Optional[str] = None,
     timeout: Optional[int] = None,
     idle_timeout: Optional[int] = None,
+    prefer_next_runner: bool = False,
 ) -> None:
     """Launch one worker for *task_id*. Fire-and-forget: the outcome lands on
     the thread via the agent's own tool calls, not in a return value.
@@ -652,7 +665,11 @@ async def spawn_worker(
     *timeout*/*idle_timeout* are optional EXPLICIT overrides. When absent (the
     normal path), the run's limits resolve per runner: the runner row's own
     idle_timeout/timeout when set, else the type defaults, else this module's
-    WORKER_* constants (core.runner_profiles.effective_timeouts)."""
+    WORKER_* constants (core.runner_profiles.effective_timeouts).
+
+    *prefer_next_runner* hands down the orchestrator's no-result escalation:
+    the role's runs keep ending without a result, so the NEXT runner option of
+    the agent's model class should run this attempt."""
     role_def = agents.get_agent(role)   # `role` is now an agent name
     if not role_def:
         raise ValueError(f"unknown agent {role!r}")
@@ -669,7 +686,7 @@ async def spawn_worker(
 
     # The agent's model class picks the runner and model: the first option
     # whose subscription still has room (core.model_classes).
-    runner_name, model_override, provider = _pick_runner(role_def)
+    runner_name, model_override, provider = _pick_runner(role_def, prefer_next_runner)
 
     requested_repo = repo_name or task.get("repo")
     worktree_path, setup_result = await asyncio.to_thread(

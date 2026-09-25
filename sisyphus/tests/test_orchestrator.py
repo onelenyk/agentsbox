@@ -1266,3 +1266,224 @@ class TestWorkNobodyNeedsIsStopped:
         line = worker.worker_end_message("reviewer", type("R", (), {"status": "cancelled"})(), task["id"])
         assert "the task is done" in line and worker.STOPPED_MARKER not in line
         cancellation.clear()
+
+
+class TestNoResultEscalation:
+    """T12: escalate instead of re-rolling a worker that keeps failing the same
+    way. A role whose runs keep ending without a result stops being re-rolled
+    onto the same runner: after NO_RESULT_SWITCH_AFTER (2) in a row the next
+    attempt runs on the NEXT runner option of the role's model class, and after
+    NO_RESULT_PAUSE_AFTER (3) the task parks with ONE message naming the
+    failures and each run's last output. A delivered run resets the counter."""
+
+    @pytest.fixture
+    def runners(self, db_path):
+        from core import model_classes
+        from core.runners import add_runner
+        claude = add_runner("claude", "/bin/true", runner_type="claude-cli")
+        oc = add_runner("oc", "/bin/true", runner_type="opencode",
+                        model="opencode-go/deepseek-v4-flash")
+        model_classes.set_options("worker", [
+            {"runner_id": oc["id"], "model": "opencode-go/deepseek-v4-flash"},
+            {"runner_id": claude["id"], "model": "claude-haiku-4-5"},
+        ])
+        return {"claude": claude, "oc": oc}
+
+    @pytest.mark.asyncio
+    async def test_two_in_a_row_switches_to_the_next_runner(self, runners):
+        """After 2 consecutive no-result endings on a role, the next spawn asks
+        for the NEXT option of its model class and says so on the thread."""
+        from core import model_classes
+        task = store.create_task("fix it")
+        store.bump_no_result(task["id"], "engineer")
+        store.bump_no_result(task["id"], "engineer")
+
+        calls = []
+        real = model_classes.choose
+
+        def spy(agent_or_name, skip=0):
+            calls.append((agent_or_name, skip))
+            return real(agent_or_name, skip=skip)
+
+        async def fake_spawn(tid, role, instruction, repo_name=None, **kw):
+            store.post_message(tid, role, kind="result", text="done")
+
+        with patch("core.model_classes.choose", side_effect=spy):
+            with patch("core.orchestrator.spawn_worker", side_effect=fake_spawn):
+                bg = orchestrator._start_worker(task["id"], "engineer", "go", None)
+                await bg
+
+        assert any(skip >= 1 for _, skip in calls), calls
+        notes = [m["text"] for m in store.get_thread(task["id"]) if m["author"] == "orchestrator"]
+        assert any("switching to the next runner" in t for t in notes)
+
+    def test_the_next_option_is_what_actually_runs(self, runners):
+        """The runner the worker will actually launch on is the second option
+        of the class, not the first (failing) one."""
+        from core import agents, worker
+        engineer = agents.get_agent("engineer")
+        rn, _, _ = worker._pick_runner(engineer, prefer_next_runner=True)
+        assert rn == "claude"                      # the NEXT option
+        rn, _, _ = worker._pick_runner(engineer, prefer_next_runner=False)
+        assert rn == "oc"                          # the usual first option
+
+    @pytest.mark.asyncio
+    async def test_one_usable_option_notes_no_alternative_and_keeps_going(self, runners):
+        """A class with only one usable option cannot switch: the thread says
+        so, and the spawn still proceeds on that same runner (the NEXT failure
+        then crosses the pause threshold)."""
+        from core import model_classes
+        model_classes.set_options("worker", [{"runner_id": runners["oc"]["id"], "model": ""}])
+        task = store.create_task("fix it")
+        store.bump_no_result(task["id"], "engineer")
+        store.bump_no_result(task["id"], "engineer")
+
+        async def fake_spawn(tid, role, instruction, repo_name=None, **kw):
+            store.post_message(tid, role, kind="result", text="done")
+
+        with patch("core.orchestrator.spawn_worker", side_effect=fake_spawn):
+            bg = orchestrator._start_worker(task["id"], "engineer", "go", None)
+            assert bg is not None
+            await bg
+
+        notes = [m["text"] for m in store.get_thread(task["id"]) if m["author"] == "orchestrator"]
+        assert any("no second runner" in t for t in notes)
+
+    @pytest.mark.asyncio
+    async def test_a_pin_cannot_move(self, db_path):
+        """A task pinned to an agent stays pinned — an explicit choice wins —
+        but the ladder still says there is no alternative to switch to."""
+        from core import agents
+        from core.runners import add_runner
+        pinned = add_runner("pinned-runner", "/bin/true", runner_type="claude-cli")
+        agents.update_agent("engineer", runner_id=pinned["id"], model="claude-haiku-4-5")
+        task = store.create_task("fix it")
+        store.bump_no_result(task["id"], "engineer")
+        store.bump_no_result(task["id"], "engineer")
+
+        async def fake_spawn(tid, role, instruction, repo_name=None, **kw):
+            store.post_message(tid, role, kind="result", text="done")
+
+        with patch("core.orchestrator.spawn_worker", side_effect=fake_spawn):
+            bg = orchestrator._start_worker(task["id"], "engineer", "go", None)
+            assert bg is not None
+            await bg
+
+        notes = [m["text"] for m in store.get_thread(task["id"]) if m["author"] == "orchestrator"]
+        assert any("no alternative runner" in t for t in notes)
+
+    @pytest.mark.asyncio
+    async def test_three_in_a_row_pauses_with_one_message_naming_failures(self, db_path):
+        """At 3 consecutive no-result endings the task parks as waiting with ONE
+        question to the human naming the count, kinds, seq numbers and each
+        failed run's last output — instead of re-rolling again."""
+        task = store.create_task("fix it")
+        store.set_status(task["id"], "active")
+        counter = {"n": 0}
+
+        async def _retry(task_, thread_text):
+            counter["n"] += 1
+            return Decision(action="spawn_worker", role="engineer", instruction="x",
+                            why=f"retry attempt {counter['n']}")
+
+        async def fake_spawn(tid, role, instruction, repo_name=None, **kw):
+            store.post_message(
+                tid, "system", kind="worker_finished",
+                text=(f"{role} ended without reporting a result (status=timeout): the "
+                      f"runner produced no output at all — Last output: (none)"),
+            )
+
+        decision = None
+        with patch("core.orchestrator.spawn_worker", side_effect=fake_spawn):
+            for _ in range(5):
+                decision, bg = await handle_event(task["id"], "worker_finished", decide_fn=_retry)
+                if bg is not None:
+                    await bg
+                if store.get_task(task["id"])["status"] == "waiting":
+                    break
+
+        assert store.get_task(task["id"])["status"] == "waiting"
+        assert decision.action == "ask_human"
+        questions = [m for m in store.get_thread(task["id"]) if m["kind"] == "question"]
+        assert len(questions) == 1                     # ONE message to the human
+        q = questions[-1]["text"]
+        assert "3 times in a row" in q                 # the count
+        assert "engineer" in q                         # the role
+        assert "status=timeout" in q                   # the kind
+        assert "Last output" in q                      # the failed run's last output
+        # each failed run is named by its seq number
+        for m in store.get_thread(task["id"]):
+            if m["kind"] == "worker_finished" and "ended without" in m["text"]:
+                assert f"#{m['seq']}" in q
+        # and it stopped re-rolling well short of the pass budget
+        assert counter["n"] < orchestrator.MAX_PASSES
+
+    @pytest.mark.asyncio
+    async def test_a_human_answer_resumes_and_resets_the_ladder(self, db_path):
+        """Paused at 3, a human reply must resume the task and reset the
+        counter — otherwise the very next pass would re-park it forever."""
+        task = store.create_task("fix it")
+        store.set_status(task["id"], "waiting", cause="paused at 3 no-result endings")
+        store.post_message(task["id"], "human", kind="answer", text="fixed it — go")
+
+        assert store.get_no_result_streak(task["id"]) == (None, 0)
+
+        async def fake_spawn(tid, role, instruction, repo_name=None, **kw):
+            store.post_message(tid, role, kind="result", text="done")
+
+        decision, bg = await handle_event(
+            task["id"], "human_replied",
+            decide_fn=_scripted([Decision(action="spawn_worker", role="explorer",
+                                          instruction="go", why="resume")]))
+        assert decision.action == "spawn_worker"     # NOT re-paused
+        with patch("core.orchestrator.spawn_worker", side_effect=fake_spawn):
+            if bg is not None:
+                await bg
+        assert store.get_task(task["id"])["status"] == "active"
+
+    @pytest.mark.asyncio
+    async def test_a_delivered_run_resets_the_counter(self, db_path):
+        """After a streak, a delivered run resets it: the next failure starts
+        the ladder over from 1 instead of pausing on the spot."""
+        task = store.create_task("fix it")
+        store.set_status(task["id"], "active")
+        store.bump_no_result(task["id"], "engineer")
+        store.bump_no_result(task["id"], "engineer")
+        store.post_message(task["id"], "engineer", kind="result", text="APPROVED: all good")
+
+        decision, _ = await handle_event(task["id"], "worker_finished",
+                                         decide_fn=_scripted([Decision(action="noop", why="ok")]))
+        # "engineer finished" is a delivery, not a no-result ending — resets.
+        assert store.get_no_result_streak(task["id"]) == (None, 0)
+        assert decision.action == "noop"
+
+    @pytest.mark.asyncio
+    async def test_the_watchdog_vanished_path_feeds_the_same_counter(self, db_path):
+        """rescue_stalled posts "worker vanished without reporting" and emits
+        worker_finished; that pass must fold the ending into the SAME counter,
+        attributed to the role from the preceding worker_started."""
+        task = store.create_task("fix it")
+        store.post_message(task["id"], "system", kind="worker_started", text="spawning engineer: go")
+        store.post_message(task["id"], "system", kind="worker_finished",
+                           text="worker vanished without reporting (no live session) — resuming")
+
+        decision, _ = await handle_event(task["id"], "worker_finished",
+                                         decide_fn=_scripted([Decision(action="noop", why="ok")]))
+
+        assert store.get_no_result_streak(task["id"]) == ("engineer", 1)
+
+    @pytest.mark.asyncio
+    async def test_a_human_stop_is_not_a_no_result_ending(self, db_path):
+        """A run a human stopped is not a failure — it resets the ladder rather
+        than feeding it (the thread phrasing deliberately differs)."""
+        from core.worker import STOPPED_MARKER
+        task = store.create_task("fix it")
+        store.bump_no_result(task["id"], "engineer")
+        store.bump_no_result(task["id"], "engineer")
+        store.post_message(task["id"], "system", kind="worker_finished",
+                           text=f"engineer was {STOPPED_MARKER} before it reported")
+
+        decision, _ = await handle_event(task["id"], "worker_finished",
+                                         decide_fn=_scripted([Decision(action="noop", why="ok")]))
+
+        assert store.get_no_result_streak(task["id"]) == (None, 0)

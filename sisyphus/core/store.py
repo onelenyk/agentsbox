@@ -127,6 +127,17 @@ def _migrate(conn) -> None:
         # happened to share a name. Existing rows are matched ONCE, here, and
         # no title is parsed for this again.
         conn.execute("ALTER TABLE tasks ADD COLUMN origin TEXT")
+    if "no_result_role" not in cols:
+        # How many times in a row this task's runs on one role ended without
+        # delivering a result (worker vanished / timeout / ended without
+        # reporting). Persisted — not re-derived from the thread, which phrases
+        # "vanished" and "orphaned" endings without naming the role — so every
+        # re-roll path feeds the SAME counter (see core.orchestrator's
+        # escalation ladder: switch runner at 2, pause with a message at 3).
+        conn.execute("ALTER TABLE tasks ADD COLUMN no_result_role TEXT")
+    if "no_result_streak" not in cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN no_result_streak INTEGER "
+                     "NOT NULL DEFAULT 0")
         has_autopilots = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='autopilots'").fetchone()
         if has_autopilots:
@@ -285,6 +296,53 @@ def list_events(task_id: str) -> List[dict]:
     return [dict(r) for r in rows]
 
 
+# ── No-result escalation counter ────────────────────────────────────────
+# Persisted per task so every path that re-rolls after a run ended without a
+# result — worker.py's timeout fallback, the watchdog's vanished handler,
+# reconcile_on_boot's orphans, a startup failure — feeds the SAME counter. The
+# orchestrator reads it to escalate: switch runner after NO_RESULT_SWITCH_AFTER,
+# pause with a message after NO_RESULT_PAUSE_AFTER.
+
+
+def get_no_result_streak(task_id: str) -> tuple:
+    """(role, count): how many consecutive runs of one role have ended without
+    delivering a result. (None, 0) when there is no streak."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT no_result_role, no_result_streak FROM tasks WHERE id = ?",
+        (task_id,)).fetchone()
+    conn.close()
+    if not row:
+        return (None, 0)
+    return (row["no_result_role"], row["no_result_streak"] or 0)
+
+
+def bump_no_result(task_id: str, role: str) -> int:
+    """Record one more consecutive no-result ending for *role*. A different
+    role starts a fresh streak of 1; the same role continues it. Returns the
+    new count."""
+    cur_role, n = get_no_result_streak(task_id)
+    n = n + 1 if cur_role == role else 1
+    conn = get_conn()
+    conn.execute(
+        "UPDATE tasks SET no_result_role = ?, no_result_streak = ? WHERE id = ?",
+        (role, n, task_id))
+    conn.commit()
+    conn.close()
+    return n
+
+
+def reset_no_result(task_id: str) -> None:
+    """A run delivered a result (or a human answered) — the consecutive
+    no-result streak is over."""
+    conn = get_conn()
+    conn.execute(
+        "UPDATE tasks SET no_result_role = NULL, no_result_streak = 0 WHERE id = ?",
+        (task_id,))
+    conn.commit()
+    conn.close()
+
+
 def find_task_by_mr(url: str) -> Optional[dict]:
     """Find the task whose thread opened a merge request at *url* — how an
     incoming forge webhook (CI, review, merge) maps back to a task."""
@@ -349,6 +407,13 @@ def post_message(
             (task_id, task_id, author, kind, text, attachment, now),
         )
         conn.execute("UPDATE tasks SET updated_at = ? WHERE id = ?", (now, task_id))
+        if kind in ("result", "answer"):
+            # A delivered run (kind=result) or a human reply (kind=answer) ends
+            # the consecutive no-result streak — the orchestrator's escalation
+            # ladder starts counting afresh from the next ending.
+            conn.execute(
+                "UPDATE tasks SET no_result_role = NULL, no_result_streak = 0 "
+                "WHERE id = ?", (task_id,))
         conn.commit()
         row = conn.execute("SELECT * FROM messages WHERE id = ?", (cur.lastrowid,)).fetchone()
         return _dict(row)
