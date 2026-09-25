@@ -127,3 +127,52 @@ class TestLocalhostExemption:
         for header in ("x-forwarded-for", "x-real-ip", "forwarded"):
             assert not auth._is_local(
                 self._FakeReq("127.0.0.1", {header: "203.0.113.9"})), header
+
+
+class TestCrossSiteWritesAreRefused:
+    """A website the user has open must not be able to POST to the daemon.
+
+    The CSRF guard (web.auth.csrf_guard) refuses cross-site writes for the
+    whole HTTP surface; only the credential routes used to (_from_this_page).
+    TestClient's default host is "testserver", so "http://testserver" is the
+    same-origin value to assert against."""
+
+    def test_cross_site_origin_post_is_refused(self, db_path):
+        r = _client().post("/api/v1/tasks", json={"goal": "nope"},
+                           headers={"Origin": "https://evil.example"})
+        assert r.status_code == 403
+        assert r.json()["detail"] == "cross-site request refused"
+
+    def test_cross_site_sec_fetch_site_post_is_refused(self, db_path):
+        r = _client().post("/api/v1/tasks", json={"goal": "nope"},
+                           headers={"Sec-Fetch-Site": "cross-site"})
+        assert r.status_code == 403
+        assert r.json()["detail"] == "cross-site request refused"
+
+    def test_same_origin_post_is_allowed(self, db_path):
+        r = _client().post("/api/v1/tasks", json={"goal": "same-origin ok"},
+                           headers={"Origin": "http://testserver"})
+        assert r.status_code == 200
+        assert r.json()["status"] == "active"
+
+    def test_no_site_headers_post_is_allowed(self, db_path):
+        """curl, the MCP server, workers and TestClient send neither header —
+        they must pass unchanged."""
+        r = _client().post("/api/v1/tasks", json={"goal": "no headers ok"})
+        assert r.status_code == 200
+        assert r.json()["status"] == "active"
+
+    def test_cross_site_get_is_allowed(self, db_path):
+        """Reads are never blocked — a CSRF guard only refuses writes."""
+        r = _client().get("/api/v1/tasks", headers={"Origin": "https://evil.example"})
+        assert r.status_code == 200
+
+    def test_webhook_path_cross_site_is_not_blocked_by_this_guard(self, db_path):
+        """Forges post to the webhook path cross-origin and authenticate by
+        their own secret. Without one configured the route itself refuses a
+        non-loopback caller with its own 403 — assert the guard did not fire."""
+        r = _client().post("/api/v1/webhooks/github", json={"zen": "ping"},
+                           headers={"Origin": "https://evil.example", "Sec-Fetch-Site": "cross-site"})
+        detail = r.json().get("detail", "")
+        assert detail != "cross-site request refused"
+        assert "webhook secret not configured" in detail

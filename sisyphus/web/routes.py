@@ -1205,19 +1205,6 @@ async def integrations_jira_check(request: Request):
 
 # ── Keys & tokens ───────────────────────────────────────────────────────
 
-def _from_this_page(request: Request) -> bool:
-    """A credential write must come from the UI itself. Any other site the
-    user has open could otherwise post a form at localhost:7677 and point
-    JIRA_BASE_URL at a host of its own."""
-    site = request.headers.get("sec-fetch-site")
-    if site and site not in ("same-origin", "none"):
-        return False
-    origin = request.headers.get("origin")
-    if origin and origin.split("://", 1)[-1] != request.headers.get("host", ""):
-        return False
-    return True
-
-
 async def _credentials_view(request: Request, note: str = "", error: str = ""):
     from core import credentials
     groups = await asyncio.to_thread(credentials.view)
@@ -1235,8 +1222,6 @@ async def credentials_view(request: Request):
 @router.post("/api/credentials/move-leftovers", response_class=HTMLResponse)
 async def credentials_move_leftovers(request: Request):
     from core import credentials
-    if not _from_this_page(request):
-        return HTMLResponse("refused: not sent from the Sisyphus UI", status_code=403)
     res = await asyncio.to_thread(credentials.move_leftovers)
     note = (f"Moved {', '.join(res['moved'])} into the vault and out of the files"
             if res["moved"] else "")
@@ -1249,8 +1234,6 @@ async def credentials_move_leftovers(request: Request):
 @router.post("/api/credentials/{name}", response_class=HTMLResponse)
 async def credentials_set(request: Request, name: str, value: str = Form(""), action: str = Form("save")):
     from core import credentials
-    if not _from_this_page(request):
-        return HTMLResponse("refused: not sent from the Sisyphus UI", status_code=403)
     if not credentials.is_managed(name):
         return await _credentials_view(request, error=f"{name} is not a credential Sisyphus reads")
     try:
