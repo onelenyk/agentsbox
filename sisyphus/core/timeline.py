@@ -27,6 +27,7 @@ REVIEWERS = ("reviewer", "mr-reviewer")
 
 _STARTED = re.compile(r"^spawning (\S+?):\s*(.*)", re.S)
 _ENDED_EMPTY = re.compile(r"^(\S+) ended without reporting a result \(status=(\w+)\):?\s*(.*)", re.S)
+_DELIVERED = re.compile(r"^(\S+) delivered .* but ended without calling its finishing tool \(status=(\w+)\):?\s*(.*)", re.S)
 _FAILED_START = re.compile(r"^(\S+) failed to start:\s*(.*)", re.S)
 _FINISHED = re.compile(r"^(\S+) finished\b")
 _VANISHED = re.compile(r"^worker vanished without reporting")
@@ -199,6 +200,8 @@ def steps(messages: list) -> list:
         if kind == "worker_finished":
             if f := _FINISHED.match(text):
                 close(f.group(1), m, "ok")
+            elif d := _DELIVERED.match(text):
+                close(d.group(1), m, "delivered", d.group(3).strip())
             elif e := _ENDED_EMPTY.match(text):
                 close(e.group(1), m, e.group(2), e.group(3).strip())
             elif fs := _FAILED_START.match(text):
@@ -268,7 +271,7 @@ def _collapse_dead_runs(out: list) -> list:
     single step that counts them and says how each died."""
     collapsed: list = []
     for s in out:
-        dead = s["type"] == "run" and s["how"] not in ("ok", "running") and not s["commits"]
+        dead = s["type"] == "run" and s["how"] not in ("ok", "running", "delivered") and not s["commits"]
         prev = collapsed[-1] if collapsed else None
         if dead and prev and prev["type"] == "dead-runs" and prev["role"] == s["role"]:
             prev["runs"].append(s)
