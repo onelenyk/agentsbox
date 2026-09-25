@@ -6,8 +6,11 @@ XDG_CACHE_HOME, OPENCODE_CONFIG, OPENCODE_CONFIG_DIR, --pure, an empty project
 "plugin": [] and all three OPENCODE_DISABLE_* switches. Under a private HOME the
 same probe returns `plugin: []` and only our own MCP server.
 """
+import errno
+import logging
 import os
 import pathlib
+import shutil
 
 from core import runner_home
 
@@ -130,3 +133,52 @@ class TestSweepingStrays:
         (pathlib.Path(home) / ".cache").mkdir()
         runner_home.build(str(tmp_path / "ws"), real_home=str(real))
         assert sorted(os.listdir(home)) == before
+
+    def test_a_dir_that_fails_once_is_swept(self, tmp_path, caplog, monkeypatch):
+        """A directory whose contents change while it is removed raises
+        ENOTEMPTY; the retry removes whatever appeared in between, so the
+        stray is gone and no error is logged (it still counts as swept)."""
+        real = _fake_home(tmp_path)
+        home = runner_home.build(str(tmp_path / "ws"), real_home=str(real))
+        stray = pathlib.Path(home) / ".config" / "opencode" / "node_modules"
+        stray.mkdir(parents=True)
+        (stray / "x").write_text("x")
+
+        real_rmtree = shutil.rmtree
+        state = {"fails": 1}
+
+        def flaky_rmtree(path, *args, **kwargs):
+            if state["fails"]:
+                state["fails"] -= 1
+                raise OSError(errno.ENOTEMPTY, "Directory not empty", str(path))
+            return real_rmtree(path, *args, **kwargs)
+
+        monkeypatch.setattr(shutil, "rmtree", flaky_rmtree)
+        runner_home.build(str(tmp_path / "ws"), real_home=str(real))
+
+        assert not stray.exists()
+        assert not any(r.levelno >= logging.ERROR for r in caplog.records)
+        assert ".config" in caplog.text  # still counted in the swept summary
+
+    def test_a_dir_that_will_not_die_logs_one_warning_no_traceback(self, tmp_path, caplog, monkeypatch):
+        """If the retry also fails, one WARNING naming the directory and
+        nothing else — no ERROR, no traceback."""
+        real = _fake_home(tmp_path)
+        home = runner_home.build(str(tmp_path / "ws"), real_home=str(real))
+        stray = pathlib.Path(home) / ".config"
+        stray.mkdir(parents=True)
+        (stray / "opencode").mkdir()
+
+        def always_fail(path, *args, **kwargs):
+            raise OSError(errno.ENOTEMPTY, "Directory not empty", str(path))
+
+        monkeypatch.setattr(shutil, "rmtree", always_fail)
+        runner_home.build(str(tmp_path / "ws"), real_home=str(real))
+
+        assert stray.exists()
+        warnings = [r for r in caplog.records
+                    if r.levelno == logging.WARNING and "could not sweep" in r.getMessage()]
+        assert len(warnings) == 1
+        assert ".config" in warnings[0].getMessage()
+        assert warnings[0].exc_info is None
+        assert not any(r.levelno >= logging.ERROR for r in caplog.records)
