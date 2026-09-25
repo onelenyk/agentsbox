@@ -416,6 +416,62 @@ def test_readiness_lost_work_zero_when_all_have_mrs(db_path):
     assert r["lost_work"] == 0
 
 
+def test_readiness_lost_work_counts_done_with_unmerged_mr(db_path):
+    """A done task whose MR is still open is lost work — the work never reached
+    main (task-df5a3fcc: done while auto-merge was blocked and the MR stayed
+    open and unmergeable)."""
+    mrs.init_mr_table()
+
+    # Done while the MR is still open — lost.
+    unmerged = store.create_task("done before delivery", repo="sisyphus")
+    store.set_status(unmerged["id"], "done")
+    store.post_message(unmerged["id"], "orchestrator", kind="commit", text="commit abc123")
+    mr = mrs.create_mr(unmerged["id"], "sisyphus", "sisyphus/task-x", "main")
+    mrs.set_review_status(mr["id"], "approved")
+    mrs.set_check_result(mr["id"], "passed", output="1030 passed", command="pytest")
+
+    # Done with the MR merged — not lost.
+    merged = store.create_task("delivered", repo="sisyphus")
+    store.set_status(merged["id"], "done")
+    store.post_message(merged["id"], "orchestrator", kind="commit", text="commit def456")
+    mr2 = mrs.create_mr(merged["id"], "sisyphus", "sisyphus/task-y", "main")
+    get_conn().execute("UPDATE merge_requests SET status='merged' WHERE id=?",
+                       (mr2["id"],)).connection.commit()
+
+    r = readiness(get_conn(), days=30)
+    assert r["lost_work"] == 1
+
+
+def test_readiness_lost_work_counts_unanswered_changes_requested(db_path):
+    """A done task whose reviewer's CHANGES REQUESTED on the head is unanswered
+    (no newer commit after it) is lost work, even when the MR itself merged."""
+    mrs.init_mr_table()
+
+    # Done despite a CHANGES REQUESTED with no commit after it — lost.
+    ignored = store.create_task("ignored a request", repo="sisyphus")
+    store.set_status(ignored["id"], "done")
+    store.post_message(ignored["id"], "orchestrator", kind="commit", text="commit abc123")
+    mr = mrs.create_mr(ignored["id"], "sisyphus", "sisyphus/task-x", "main")
+    get_conn().execute("UPDATE merge_requests SET status='merged' WHERE id=?",
+                       (mr["id"],)).connection.commit()
+    store.post_message(ignored["id"], "reviewer", kind="result",
+                       text="CHANGES REQUESTED: needs tests")
+
+    # Answered: a commit after the request → not lost.
+    answered = store.create_task("answered a request", repo="sisyphus")
+    store.set_status(answered["id"], "done")
+    store.post_message(answered["id"], "orchestrator", kind="commit", text="commit def456")
+    store.post_message(answered["id"], "reviewer", kind="result",
+                       text="CHANGES REQUESTED: needs tests")
+    store.post_message(answered["id"], "orchestrator", kind="commit", text="commit ghi789")
+    mr2 = mrs.create_mr(answered["id"], "sisyphus", "sisyphus/task-y", "main")
+    get_conn().execute("UPDATE merge_requests SET status='merged' WHERE id=?",
+                       (mr2["id"],)).connection.commit()
+
+    r = readiness(get_conn(), days=30)
+    assert r["lost_work"] == 1
+
+
 def test_readiness_merge_latency_calculates_median_hours(db_path):
     mrs.init_mr_table()
     t = store.create_task("latency test", repo="sisyphus")

@@ -647,6 +647,48 @@ def _reviewer_changes_unaddressed(thread: list) -> bool:
     return True
 
 
+def _is_changes_requested(m: dict) -> bool:
+    """True for a CHANGES REQUESTED verdict on the thread — either a reviewer's
+    own result ("CHANGES REQUESTED: …") or the independent review's verdict note
+    ("review verdict for mr-…: CHANGES REQUESTED — …")."""
+    if m["kind"] == "result" and "review" in (m["author"] or "").lower():
+        if (m["text"] or "").lstrip().upper().startswith("CHANGES REQUESTED"):
+            return True
+    if m["kind"] == "note" and m["author"] == "system":
+        import re
+        if re.match(r"^review verdict for (mr-\S+?):\s*CHANGES REQUESTED",
+                    m["text"] or "", re.I):
+            return True
+    return False
+
+
+def _unanswered_changes_requested(thread: list) -> bool:
+    """True when a CHANGES REQUESTED verdict on the CURRENT head is unanswered.
+
+    The conflicting-verdict rule: an unanswered CHANGES REQUESTED blocks done,
+    whichever reviewer wrote it — the embedded task reviewer's result or the
+    independent review's verdict note — and APPROVED counts only when no
+    reviewer requested changes on that head (task-df5a3fcc: a task reviewer's
+    CHANGES REQUESTED was overwritten on the MR row by an mr-reviewer APPROVED,
+    and the pass marked done on a head the first reviewer had rejected).
+
+    "Answered" means a newer head. The thread tracks heads as commit messages,
+    so a commit after the request is proof the engineer addressed it; without
+    one, the request still stands against the head the reviewers saw.
+    """
+    idx = -1
+    for i in reversed(range(len(thread))):
+        if _is_changes_requested(thread[i]):
+            idx = i
+            break
+    if idx < 0:
+        return False
+    for m in thread[idx + 1:]:
+        if m["kind"] == "commit":
+            return False
+    return True
+
+
 def _mr_review(task_id: str) -> dict:
     """What the INDEPENDENT review of this task's branch says.
 
@@ -835,7 +877,22 @@ def _obvious_step(task: dict, thread: list) -> Optional[Decision]:
 
     # Case b: reviewer approved and the MR check passed.
     def _check_reviewer_approved() -> Optional[Decision]:
-        """Mark done when reviewer approved and MR check passed, no newer engineer commit."""
+        """Mark done when a reviewer approved and the MR is delivered, with no
+        newer engineer commit.
+
+        Two rules harden this against lost work:
+        (1) an unanswered CHANGES REQUESTED on the current head blocks done
+        no matter which reviewer wrote it — APPROVED counts only when no
+        reviewer requested changes on that head;
+        (2) in an auto-merge repo, done means the MR is actually MERGED — a
+        merge auto-merge reports it cannot deliver is the engineer's next, not
+        done.
+        """
+        # Rule 1: an unanswered CHANGES REQUESTED on the current head blocks
+        # done — the engineer addresses it next (case c), never done.
+        if _unanswered_changes_requested(thread):
+            return None
+
         # The last approval on the thread: a reviewer's own result, or the
         # system note that carries the branch's independent review verdict
         # ("review verdict for mr-…: APPROVED"), which _reviewer_approved
@@ -861,6 +918,22 @@ def _obvious_step(task: dict, thread: list) -> Optional[Decision]:
         mr = mergerequests.latest_for_task(task["id"])
         if not mr:
             return None
+
+        # Rule 2: with auto_merge on, done means the MR is actually MERGED, and
+        # anything auto-merge cannot deliver — a conflict, a failing check, a
+        # verdict stale against the current head — is the engineer's next, with
+        # that reason in its instruction, not done.
+        if mergerequests.auto_merge_on(mr):
+            if mr.get("status") != "merged":
+                block = mergerequests.auto_merge_block_reason(mr)
+                if block is not None:
+                    return Decision(
+                        action="spawn_worker", role="engineer",
+                        instruction=(f"The MR is approved and the check passed, but auto-merge "
+                                     f"cannot deliver it: {block} — rebase or resolve the "
+                                     f"conflicts, commit, and update the merge request with open_mr."),
+                        why="rule: auto-merge is blocked")
+                return None  # the sweep will land it — not done until it is merged
 
         if mergerequests.merge_block_reason(mr) is not None:
             return None  # check hasn't passed
