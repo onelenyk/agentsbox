@@ -597,6 +597,56 @@ def _reviewer_approved(task_id: str) -> bool:
     return _mr_review(task_id)["verdict"] == "approved"
 
 
+def _reviewer_changes_unaddressed(thread: list) -> bool:
+    """True when a reviewer asked for changes and no engineer has run since —
+    i.e. the obvious-step rule would queue the engineer. Used by both that rule
+    (case c) and the `_mr_review running` guard in handle_event.
+
+    A CHANGES REQUESTED verdict already on the thread is actionable NOW, so the
+    guard must let the pass through and queue the engineer in the same pass
+    instead of waiting for the branch's own independent review to finish
+    (task-788f0e41: the reviewer's result and worker_finished sat for 30 minutes
+    while the independent review ran, because every pass hit the guard). Once the
+    engineer has run since the verdict there is nothing left to do mechanically —
+    the guard may resume its noop so a continue cannot loop through the model.
+
+    The reviewer's own result is the primary signal; the independent review's
+    verdict note ("review verdict for mr-…") is consulted only when no result is
+    on the thread. A note that lands after the result already spawned the
+    engineer is therefore ignored — the result is found first and the note stays
+    harmless.
+    """
+    # Primary: a reviewer result on this thread ("CHANGES REQUESTED: …").
+    idx = -1
+    for i in reversed(range(len(thread))):
+        m = thread[i]
+        if m["kind"] == "result" and "review" in (m["author"] or "").lower():
+            t = (m["text"] or "").lstrip().upper()
+            if t.startswith("CHANGES REQUESTED"):
+                idx = i
+                break
+    # Fallback: the independent review task's verdict note, for tasks that only
+    # mr-reviewer reviewed (it posts a note, not a result, on this thread).
+    if idx < 0:
+        import re
+        _VERDICT_NOTE = re.compile(r"^review verdict for (mr-\S+?):\s*CHANGES REQUESTED", re.I)
+        for i in reversed(range(len(thread))):
+            m = thread[i]
+            if m["kind"] == "note" and m["author"] == "system":
+                if _VERDICT_NOTE.match(m["text"] or ""):
+                    idx = i
+                    break
+    if idx < 0:
+        return False
+
+    # Already addressed? An engineer that ran after the verdict counts.
+    for m in thread[idx + 1:]:
+        if m["kind"] in ("worker_started", "worker_queued", "worker_finished"):
+            if "engineer" in (m["text"] or "").lower():
+                return False
+    return True
+
+
 def _mr_review(task_id: str) -> dict:
     """What the INDEPENDENT review of this task's branch says.
 
@@ -825,25 +875,8 @@ def _obvious_step(task: dict, thread: list) -> Optional[Decision]:
     # Case c: reviewer requested changes, no engineer since.
     def _check_reviewer_requested_changes() -> Optional[Decision]:
         """Spawn engineer when reviewer requests changes and no engineer has run since."""
-        # Find the last result from a reviewer that starts with CHANGES REQUESTED.
-        reviewer_request_idx = -1
-        for i in reversed(range(len(thread))):
-            m = thread[i]
-            if m["kind"] == "result" and "review" in (m["author"] or "").lower():
-                t = (m["text"] or "").lstrip().upper()
-                if t.startswith("CHANGES REQUESTED"):
-                    reviewer_request_idx = i
-                    break
-
-        if reviewer_request_idx < 0:
+        if not _reviewer_changes_unaddressed(thread):
             return None
-
-        # Check that no engineer has run since (no worker activity for engineer).
-        for m in thread[reviewer_request_idx + 1:]:
-            if m["kind"] in ("worker_started", "worker_queued", "worker_finished"):
-                if "engineer" in (m["text"] or "").lower():
-                    return None  # engineer has already run
-
         return Decision(
             action="spawn_worker", role="engineer",
             instruction="Address the reviewer's requested changes on this branch (see the latest reviewer result in the thread), commit, and update the merge request with open_mr.",
@@ -879,7 +912,22 @@ async def handle_event(
     # allowed to proceed; that is how a human reply resumes it.
     blocked = pass_blocked_by(task, spontaneous=False, event_type=event_type)
     if blocked:
-        return Decision(action="noop", why=blocked), None
+        decision = Decision(action="noop", why=blocked)
+        # For a continue event that finds nothing to do, post an explanatory note,
+        # but dedupe it so we don't spam identical messages every watchdog cycle.
+        if event_type == "continue":
+            thread = store.get_thread(task_id) if task else []
+            decision_text = f"[{decision.action}] {decision.why}"
+            should_post = True
+            if thread:
+                last_msg = thread[-1]
+                if (last_msg["author"] == "orchestrator" and
+                    last_msg["kind"] == "note" and
+                    last_msg["text"] == decision_text):
+                    should_post = False
+            if should_post:
+                store.post_message(task_id, "orchestrator", kind="note", text=decision_text)
+        return decision, None
 
     # Budget guard: stop spending on a task (or for the day) once a configured
     # cap is hit — park it as waiting so a human decides. A human reply bypasses
@@ -926,8 +974,28 @@ async def handle_event(
     # Someone else is already reviewing this task's branch: wait for that
     # verdict instead of paying for a pass that can only decide to wait — or,
     # worse, spawning a reviewer beside it. The verdict emits its own event.
-    if event_type != "human_replied" and _mr_review(task_id)["running"] and not _worker_in_flight(task_id):
-        return Decision(action="noop", why="the branch's own review is still running"), None
+    # Except when a CHANGES REQUESTED verdict is already on the thread and the
+    # engineer has not run since: that is actionable now, and waiting would
+    # swallow it until the independent review happens to finish (task-788f0e41:
+    # 30 minutes of dead time). Let those passes through to the rules.
+    if (event_type != "human_replied"
+            and _mr_review(task_id)["running"]
+            and not _worker_in_flight(task_id)
+            and not _reviewer_changes_unaddressed(store.get_thread(task_id))):
+        decision = Decision(action="noop", why="the branch's own review is still running")
+        if event_type == "continue":
+            thread = store.get_thread(task_id)
+            decision_text = f"[{decision.action}] {decision.why}"
+            should_post = True
+            if thread:
+                last_msg = thread[-1]
+                if (last_msg["author"] == "orchestrator" and
+                    last_msg["kind"] == "note" and
+                    last_msg["text"] == decision_text):
+                    should_post = False
+            if should_post:
+                store.post_message(task_id, "orchestrator", kind="note", text=decision_text)
+        return decision, None
 
     thread_text = store.render_thread(task_id, for_prompt=True)
 
