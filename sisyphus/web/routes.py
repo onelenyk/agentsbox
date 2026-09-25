@@ -2244,7 +2244,7 @@ async def mr_merge_resolve(request: Request, mr_id: str, force: str = Form("")):
     leaves the target branch untouched the moment one file comes back unresolved,
     and this route then leaves the MR open and renders the reason.
     """
-    from core import mergerequests, store
+    from core import mergerequests
     from fastapi.responses import Response
     mr = mergerequests.get_mr(mr_id)
     if not mr:
@@ -2283,7 +2283,6 @@ async def mr_merge_resolve(request: Request, mr_id: str, force: str = Form("")):
         return _tmpl().TemplateResponse(request, "mr_modal.html", ctx)
 
     resolved = res.get("resolved") or []
-    mergerequests.mark_merged(mr_id, res["sha"], resolved)
     cite = mergerequests.verdict_line(mr)
     if blocked:
         cite = f"OVERRIDDEN by the human — {blocked} ({cite})"
@@ -2292,7 +2291,7 @@ async def mr_merge_resolve(request: Request, mr_id: str, force: str = Form("")):
             if resolved else
             f"Merged {mr['source_branch']} into {res['target']} ({res['sha'][:8]}) in "
             f"{mr['source_path']} — no conflicts remained, nothing was AI-resolved; {cite}")
-    store.post_message(mr["task_id"], "system", kind="note", text=note)
+    mergerequests.record_merge_success(mr, res, resolved=resolved, note=note)
     ctx = _mr_view_ctx(request, mergerequests.get_mr(mr_id))
     ctx["flash"] = (
         f"AI-resolved {len(resolved)} conflicting file(s) — {', '.join(resolved)} — and merged "
