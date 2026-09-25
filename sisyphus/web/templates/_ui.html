@@ -326,3 +326,18 @@ hx-post="/api/tasks/{{ task_id }}/messages" hx-target="closest .askc" hx-swap="o
     </div>
 </div>
 {%- endmacro %}
+
+{# A self-update banner: the daemon runs code that is behind its checkout.
+   Renders nothing when there is nothing to say. The action is the htmx Restart
+   button that swaps the banner out for the endpoint's fragment. #}
+{% macro self_update_banner(self_update) -%}
+{%- if self_update and self_update.behind_message -%}
+<div class="notification notification--warn runtime__notification" role="status">
+    <span class="notification__text">{{ self_update.behind_message }}</span>
+    <button type="button" class="btn btn--primary btn--sm notification__act"
+            hx-post="/api/daemon/restart" hx-target="closest .notification" hx-swap="outerHTML">
+        Restart
+    </button>
+</div>
+{%- endif -%}
+{%- endmacro %}

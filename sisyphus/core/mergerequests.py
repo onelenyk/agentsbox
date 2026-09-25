@@ -533,7 +533,6 @@ def record_merge_success(mr: dict, res: dict, prefix: str = "Merged",
     evidence (``verdict_line``). *prefix* is the verb in the note ("Merged",
     "Auto-merged"); *cite* overrides the evidence line for a force-override."""
     from . import store, self_update
-    import pathlib
     mark_merged(mr["id"], res["sha"])
     if cite is None:
         cite = verdict_line(mr)
@@ -542,11 +541,13 @@ def record_merge_success(mr: dict, res: dict, prefix: str = "Merged",
         text=(f"{prefix} {mr['source_branch']} into {res['target']} "
               f"({res['sha'][:8]}) in {mr['source_path']} — {cite}"))
 
-    # Check if this merge is for the daemon's own repo — if so, refresh self-update cache
-    # to detect that the daemon is now behind.
-    daemon_repo_root = pathlib.Path(__file__).resolve().parent.parent
-    merged_repo = pathlib.Path(mr.get("source_path", "")).resolve()
-    if merged_repo == daemon_repo_root:
+    # Check if this merge is for the daemon's own checkout — if so, drop the
+    # cached behind-status so the next render (or self-update loop pass) sees
+    # the new HEAD immediately. The path comparison resolves both sides to
+    # their git toplevel, so a repo registered at the worktree root (one level
+    # above the source dir) matches just as well as one registered at the
+    # source dir.
+    if self_update.is_daemon_checkout(mr.get("source_path", "")):
         self_update.clear_cache()
 
 

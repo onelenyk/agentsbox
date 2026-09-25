@@ -14,7 +14,15 @@ api:
                                  # browser cannot send a bearer header
 
 self_update:
-  auto_restart_when_idle: false  # when true, auto-restart daemon when idle and behind
+  auto_restart_when_idle: false  # true = when the daemon's own code is behind the
+                                 # merged checkout and no worker is running,
+                                 # restart the daemon on its own (a restart is
+                                 # safe: tasks are paused as "closed" and resume
+                                 # on boot). False = only ever restart on the
+                                 # button. The button itself is always safe.
+  check_seconds: 5               # how often the daemon looks for a pending or
+                                 # auto restart once idle (cheap in-process
+                                 # worker check; only spawns when nothing runs)
 
 notify:
   webhook_url: ${SISYPHUS_NOTIFY_URL}  # empty = off. One JSON POST per notable
