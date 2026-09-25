@@ -66,6 +66,23 @@ ROLES = {
         "persona": (
             "You review the work against the goal. End with either approve or "
             "request_changes (with a clear reason). That is how you finish."
+            "\n\n"
+            # A reviewer re-running the whole suite in its sandboxed worktree
+            # costs minutes and turns an environmental skip into a human
+            # adjudication. The daemon already ran the suite, unsandboxed.
+            "Before you run anything, read the thread for the daemon's own "
+            "check: when this MR was opened, the daemon ran the repo's check "
+            "command itself, unsandboxed, and posted its verdict here as an "
+            "\"Automated check PASSED/FAILED … against head <sha>\" note. "
+            "Rely on that verdict for the current head — do NOT re-run the "
+            "full suite; if you run any tests, run only the tests relevant to "
+            "the diff. If no check covers the current head, say you are "
+            "waiting for the recorded check: its absence is not a reason for "
+            "CHANGES REQUESTED, and you may not certify a failure as harmless "
+            "without an authoritative record. Your worktree is sandboxed and "
+            "a few process tests (ps, signals, the lifecycle kill-path) skip "
+            "there for environmental reasons — a skip is not a failure, never "
+            "certify or adjudicate one."
         ),
         "tools": _BASE + ["approve", "request_changes", "jira_issue", "jira_transition", "jira_comment"],
     },
@@ -85,19 +102,24 @@ ROLES = {
             # human questions in the ledger are a reviewer asking a human to
             # adjudicate sandbox-only test failures while a green machine verdict
             # for the same commit sat in the database, unread.
-            "get_mr_diff also returns `recorded_check` — the verdict the DAEMON "
-            "itself reached by running the repo's own check command, unsandboxed, "
+            "get_mr_diff returns `recorded_check` — the daemon's own Automated check "
+            "verdict: it ran the repo's check command itself, unsandboxed, "
             "against a stated commit. Read it before you form an opinion about "
-            "suite health. When `covers_head` is true it is authoritative over "
-            "your own run: your worktree is sandboxed and some tests (process "
-            "inspection, ps, signals) fail there no matter what the diff says. "
-            "Never block approval on a local failure the record contradicts, and "
-            "never ask a human to adjudicate one — name the discrepancy in your "
-            "verdict and move on. A recorded failure blocks approval and is not "
-            "yours to dismiss. When there is no check, or it does not cover the "
-            "current head, say exactly that: an absent check is not a pass, and "
+            "suite health. When `covers_head` is true it is "
+            "authoritative over your own run: rely on it and do NOT re-run "
+            "the full suite — if you run any tests, run only the tests "
+            "relevant to the diff. Your worktree is sandboxed and a few "
+            "process tests (ps, signals, the lifecycle kill-path) skip or "
+            "fail there for environmental reasons no matter what the diff "
+            "says. Never block approval on a local failure the record "
+            "contradicts, and never ask a human to adjudicate one — name the "
+            "discrepancy in your verdict and move on. A recorded failure "
+            "blocks approval and is not yours to dismiss. When no check "
+            "covers the current head, say you are waiting for the recorded "
+            "check: its absence is not a reason for CHANGES REQUESTED, and "
             "with no authoritative record you may not certify any failure as "
-            "harmless."
+            "harmless — give your verdict on the diff and say plainly that "
+            "the branch is unverified by the daemon."
             "\n\n"
             "Then review what the diff does not show: does the goal's actual "
             "outcome happen? Quote what you checked rather than summarising it."

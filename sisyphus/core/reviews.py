@@ -36,18 +36,6 @@ def ensure_review_task(mr: dict) -> Optional[dict]:
     if find_review_task(mr) is not None:
         return None
 
-    # Run the repo's own check before the reviewer is asked anything, so the
-    # verdict it must account for is already on the record and was produced by
-    # the daemon rather than typed by an agent.
-    check_line = ""
-    try:
-        from core import verify
-        res = verify.run_and_record(mr)
-        check_line = verify.summarise(res)
-    except Exception:  # noqa: BLE001 — a broken check must not block review
-        logger.exception("check failed to run for %s", mr_id)
-        check_line = "The automated check could not be run — treat it as absent, not as a pass."
-
     # The baseline is computed here rather than described, so the reviewer has
     # the SHA instead of a rule it has to apply correctly.
     try:
@@ -59,6 +47,18 @@ def ensure_review_task(mr: dict) -> Optional[dict]:
         f"Baseline commit: {rng['base']}\n" if rng.get("base")
         else "Baseline commit: could not be resolved — say so rather than guessing one.\n"
     )
+
+    # Run the repo's own check before the reviewer is asked anything, so the
+    # verdict it must account for is already on the record and was produced by
+    # the daemon rather than typed by an agent.
+    check_line = ""
+    try:
+        from core import verify
+        res = verify.run_and_record(mr)
+        check_line = verify.summarise(res, head=rng.get("head", ""))
+    except Exception:  # noqa: BLE001 — a broken check must not block review
+        logger.exception("check failed to run for %s", mr_id)
+        check_line = "The automated check could not be run — treat it as absent, not as a pass."
 
     mr_title = mr.get("title", "") or "Untitled"
     max_title_len = 120
@@ -83,14 +83,17 @@ def ensure_review_task(mr: dict) -> Optional[dict]:
         f"\n"
         f"Automated check (run by the daemon, not by you): {check_line}\n"
         f"get_mr_diff returns that verdict in full — status, the exact command, "
-        f"the commit it ran against and the tail of its output. This is the "
-        f"authoritative result for this branch: do not substitute your own test "
-        f"run for it, and do not approve over a failing check. Your own worktree "
-        f"is sandboxed and fails some tests for environmental reasons, so where "
-        f"your run and the record disagree ABOUT THE SAME COMMIT, the record "
-        f"wins — report the discrepancy in your verdict instead of asking a "
-        f"human to adjudicate it. If no check ran, or it ran against an older "
-        f"commit, say so rather than implying the branch was verified.\n"
+        f"the commit it ran against and the tail of its output. When it covers "
+        f"the current head, rely on it and do NOT re-run the full suite — if "
+        f"you run any tests, run only the tests relevant to the diff. Do not "
+        f"approve over a failing check. Your own worktree is sandboxed and a "
+        f"few process tests skip or fail there for environmental reasons, so "
+        f"where your run and the record disagree ABOUT THE SAME COMMIT, the "
+        f"record wins — report the discrepancy in your verdict instead of "
+        f"asking a human to adjudicate it. If no check ran, or it ran against "
+        f"an older commit, say you are waiting for the recorded check — its "
+        f"absence is not a reason for CHANGES REQUESTED — and say plainly that "
+        f"the branch is unverified.\n"
     )
 
     return store.create_task(

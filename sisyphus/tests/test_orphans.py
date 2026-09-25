@@ -8,7 +8,6 @@ import json
 import os
 import pathlib
 import platform
-import signal
 import subprocess
 import sys
 import time
@@ -17,43 +16,11 @@ import pytest
 
 from core import orphans, sessions
 
-# A child that sits still until killed. Its extra argv elements are what the
-# fingerprint is computed over.
-_SLEEPER = "import time,sys; time.sleep(float(sys.argv[1]))"
-
-
-def _kill_path_observable() -> bool:
-    """Whether this environment can *observe* a killed child's death — probed,
-    not assumed.
-
-    A reviewer runs the suite inside the worker's Seatbelt sandbox, where `ps`
-    is blocked (the same limitation behind test_daemon_ctl's known skip).
-    Signals still deliver, but the corpse is invisible: `_zombie` cannot see
-    the state, so `_alive` keeps answering True and `_terminate` reports
-    "survived" for a process that is already dead. The two kill-path tests
-    then fail for environmental reasons and every review ends with a human
-    adjudicating failures that have nothing to do with the diff. Probe once
-    per run: kill a child, keep the zombie (no wait), ask _zombie about it."""
-    proc = subprocess.Popen([sys.executable, "-c", _SLEEPER, "30"])
-    try:
-        proc.send_signal(signal.SIGKILL)
-        deadline = time.time() + 3
-        while time.time() < deadline:      # do NOT wait() — the zombie IS the probe
-            if orphans._zombie(proc.pid):
-                return True
-            time.sleep(0.1)
-        return False
-    finally:
-        try:
-            proc.wait(timeout=3)
-        except Exception:
-            pass
-
-
-needs_kill = pytest.mark.skipif(
-    not _kill_path_observable(),
-    reason="sandboxed: ps is blocked (Seatbelt), a killed child's death cannot be observed here",
-)
+# `needs_kill` and the probe behind it live in tests/sandbox_probe.py: the
+# Seatbelt worker sandbox blocks `ps`, so a killed child's death is invisible
+# here and kill-path assertions fail for environmental reasons. The marker is
+# shared with tests/test_lifecycle.py — one probe, one reason string.
+from tests.sandbox_probe import _SLEEPER, needs_kill
 
 
 @pytest.fixture
