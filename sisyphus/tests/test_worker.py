@@ -769,6 +769,24 @@ class TestWorkerEndDiagnosis:
         msg = worker_end_message("engineer", self._result(status="cancelled"))
         assert "not a" in msg and "failure" in msg
 
+    def test_zero_step_run_during_daemon_shutdown_is_interrupted(self):
+        """A run that never reached the model while the daemon was stopping is
+        interrupted by shutdown — the finish text must say so, not read as a
+        wasted run ("ended without reporting a result")."""
+        from core import lifecycle
+        from core.worker import DAEMON_STOPPED_MARKER, worker_end_message
+        prior = lifecycle._STOPPING
+        lifecycle._STOPPING = True
+        try:
+            msg = worker_end_message("explorer", self._result(
+                status="completed", raw_stdout="starting up", usage={"steps": 0}))
+        finally:
+            lifecycle._STOPPING = prior
+        assert DAEMON_STOPPED_MARKER in msg
+        assert "daemon was shutting down" in msg
+        assert "not a failure" in msg
+        assert "ended without reporting a result" not in msg
+
 
 class TestDeliveredWorkGuard:
     """A run that opened its MR and then stalled must not read as lost work —
