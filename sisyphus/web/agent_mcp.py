@@ -207,7 +207,7 @@ def _review_hook(task_id: str) -> None:
                     existing = reviews.find_review_task(fresh)
                     if existing:
                         store.post_message(existing["id"], "system", kind="note",
-                                           text=verify.summarise(res))
+                                           text=verify.summarise(res, head=res.get("head", "")))
     except Exception:
         logger.warning("review hook failed for open_mr on task %s", task_id, exc_info=True)
 
