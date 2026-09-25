@@ -88,15 +88,16 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the domain model in depth
 [opencode](https://opencode.ai) or [Claude Code](https://claude.com/claude-code)
 (**Runners → Detect** finds installed ones). An API key is optional: opencode can
 use its own logged-in providers (the model prefix picks the provider, e.g.
-`deepseek/…`), and Claude Code uses its OAuth login. Set `OPENROUTER_API_KEY`
-only if you route models through OpenRouter.
+`deepseek/…`), and Claude Code uses its OAuth login. If you route models through
+OpenRouter, enter its API key in the UI under **Integrations → Keys & tokens**
+(see [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md)).
 
 ```bash
 # 1. install deps
 pip install -r requirements.txt
 
 # 2. configure (both files are gitignored; both optional — no file = defaults)
-cp .env.example .env                    # API / forge tokens
+cp .env.example .env                    # optional: non-credential env vars
 cp config.example.yaml config.yaml      # budgets, worker cap, repos, check: commands
 
 # 3. run the daemon

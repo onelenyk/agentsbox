@@ -57,7 +57,7 @@ optional — opencode uses its own logged-in providers, Claude Code its OAuth lo
 ```bash
 cd sisyphus
 pip install -r requirements.txt
-cp .env.example .env            # optional: forge / API tokens
+cp .env.example .env            # optional: non-credential env vars
 cp config.example.yaml config.yaml   # optional: budgets, worker cap, repos
 python sisyphus.py daemon start
 open http://localhost:7677      # Mission Control
