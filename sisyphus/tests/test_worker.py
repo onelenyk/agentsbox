@@ -547,6 +547,164 @@ class TestCleanupUnmergedClone:
         assert not bare.exists()
 
 
+class TestCleanupMergedClone:
+    """A task whose MR is recorded as merged must have its bare clone reclaimed,
+    even though the merge happened in the source repo AFTER the bare clone was
+    made — the bare clone's own copy of the target is frozen at clone time, so
+    without refreshing it the merged work looks unmerged and cleanup refuses
+    forever (the leftover task-*_agentsbox clones). The branch must STILL be
+    kept when it genuinely holds commits the target lacks, and when the source
+    is unreachable the clone is kept (fail safe)."""
+
+    def _make_repo(self, base: Path, task_id: str):
+        """(src, bare, branch): a source repo, a bare clone of it, and the
+        task branch carrying one commit ('the work') that main does not have."""
+        from core.git_ops import task_branch
+        src = base / "src"
+        src.mkdir()
+        subprocess.run(["git", "init", "-b", "main"], cwd=str(src),
+                       capture_output=True, text=True, check=True)
+        for cfg, val in (("user.email", "test@test"), ("user.name", "test")):
+            subprocess.run(["git", "config", cfg, val], cwd=str(src),
+                           capture_output=True, text=True, check=True)
+        (src / "file.txt").write_text("one")
+        subprocess.run(["git", "add", "file.txt"], cwd=str(src),
+                       capture_output=True, text=True, check=True)
+        subprocess.run(["git", "commit", "-m", "base"], cwd=str(src),
+                       capture_output=True, text=True, check=True)
+
+        bare = base / "repos" / f"{task_id}_repo"
+        bare.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "clone", "--bare", str(src), str(bare)],
+                       capture_output=True, text=True, check=True)
+        branch = task_branch(task_id)
+        subprocess.run(["git", "-C", str(bare), "branch", branch, "main"],
+                       capture_output=True, text=True, check=True)
+
+        wt = base / "wt"
+        subprocess.run(["git", "-C", str(bare), "worktree", "add", str(wt), branch],
+                       capture_output=True, text=True, check=True)
+        (wt / "file.txt").write_text("two")
+        subprocess.run(["git", "-C", str(wt), "add", "file.txt"],
+                       capture_output=True, text=True, check=True)
+        subprocess.run(["git", "-C", str(wt), "commit", "-m", "the work"],
+                       capture_output=True, text=True, check=True)
+        subprocess.run(["git", "-C", str(bare), "worktree", "remove", "--force", str(wt)],
+                       capture_output=True, text=True, check=True)
+        return src, bare, branch
+
+    def _merge_into_src(self, src: Path, bare: Path, branch: str) -> str:
+        """Merge *branch* into the source repo's main — the merge that, in
+        production, happens after the bare clone was made."""
+        subprocess.run(["git", "-C", str(src), "fetch", str(bare), f"{branch}:{branch}"],
+                       capture_output=True, text=True, check=True)
+        subprocess.run(["git", "-C", str(src), "merge", "--no-ff",
+                        "-m", f"Merge {branch}", branch],
+                       capture_output=True, text=True, check=True)
+        return subprocess.run(["git", "-C", str(src), "rev-parse", "HEAD"],
+                              capture_output=True, text=True, check=True).stdout.strip()
+
+    def _record_merged_mr(self, task_id: str, src: Path, bare: Path, branch: str) -> None:
+        """A merge_requests row for *task_id* with status='merged', written
+        directly so setup never triggers reclaim (mark_merged would)."""
+        from core import mergerequests
+        from core.db import get_conn
+        mr = mergerequests.create_mr(
+            task_id=task_id, repo="repo", source_branch=branch,
+            target_branch="main", bare_path=str(bare), source_path=str(src))
+        conn = get_conn()
+        conn.execute("UPDATE merge_requests SET status = 'merged', merged_at = ? "
+                     "WHERE id = ?", ("2024-01-01T00:00:00+00:00", mr["id"]))
+        conn.commit()
+        conn.close()
+
+    def _commit_on_branch(self, bare: Path, branch: str, content: str, msg: str) -> None:
+        wt = bare.parent / "wt2"
+        subprocess.run(["git", "-C", str(bare), "worktree", "add", str(wt), branch],
+                       capture_output=True, text=True, check=True)
+        (wt / "file.txt").write_text(content)
+        subprocess.run(["git", "-C", str(wt), "add", "file.txt"],
+                       capture_output=True, text=True, check=True)
+        subprocess.run(["git", "-C", str(wt), "commit", "-m", msg],
+                       capture_output=True, text=True, check=True)
+        subprocess.run(["git", "-C", str(bare), "worktree", "remove", "--force", str(wt)],
+                       capture_output=True, text=True, check=True)
+
+    def test_merged_after_clone_is_reclaimed_without_warning(self, db_path, tmp_path, monkeypatch, caplog):
+        """The bug this fixes: the bare clone's main is frozen at clone time, so
+        a merge that landed in the source repo afterwards looks unmerged and
+        cleanup refuses forever. Refreshing the target from the source repo must
+        make the merged clone reclaimable, with no 'refusing' warning."""
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+        task = store.create_task("merged after clone")
+        src, bare, branch = self._make_repo(tmp_path, task["id"])
+        self._merge_into_src(src, bare, branch)          # merge AFTER the clone was made
+        self._record_merged_mr(task["id"], src, bare, branch)
+
+        caplog.set_level("WARNING", logger="core.worker")
+        cleanup_task(task["id"])
+
+        assert not bare.exists(), "merged clone must be reclaimed"
+        assert not [r for r in caplog.records if "unmerged" in r.message], \
+            "merged task must not warn about unmerged work"
+
+    def test_branch_advanced_past_a_merged_mr_is_still_refused(self, db_path, tmp_path, monkeypatch, caplog):
+        """A merged MR does not make everything deletable: if the branch has a
+        commit the real target still lacks, the clone survives and warns."""
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+        task = store.create_task("advanced past merged mr")
+        src, bare, branch = self._make_repo(tmp_path, task["id"])
+        self._merge_into_src(src, bare, branch)
+        self._record_merged_mr(task["id"], src, bare, branch)
+        self._commit_on_branch(bare, branch, "three", "more work")   # not in the target
+
+        caplog.set_level("WARNING", logger="core.worker")
+        cleanup_task(task["id"])
+
+        assert bare.exists(), "clone with commits the target lacks must survive"
+        assert any("unmerged" in r.message for r in caplog.records)
+
+    def test_unreachable_source_is_refused_and_clone_kept(self, db_path, tmp_path, monkeypatch, caplog):
+        """Source repo gone during cleanup → fail safe: keep the clone and say
+        in the log that the target could not be refreshed."""
+        import shutil
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+        task = store.create_task("source gone")
+        src, bare, branch = self._make_repo(tmp_path, task["id"])
+        self._merge_into_src(src, bare, branch)
+        self._record_merged_mr(task["id"], src, bare, branch)
+        shutil.rmtree(str(src))                                  # the source disappears
+
+        caplog.set_level("WARNING", logger="core.worker")
+        cleanup_task(task["id"])
+
+        assert bare.exists(), "unreachable source must fail safe and keep the clone"
+        assert any("could not refresh" in r.message or "is gone" in r.message
+                   for r in caplog.records), "the log must say the refresh failed"
+
+    def test_no_source_falls_back_to_the_clones_own_refs(self, db_path, tmp_path, monkeypatch, caplog):
+        """A task with no repo and no MR has nothing to refresh from — the old
+        behaviour (compare against the bare clone's own refs) must be kept."""
+        from core.git_ops import task_branch
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+        task = store.create_task("no source")
+        _, bare, _ = self._make_repo(tmp_path, task["id"])
+        # Nothing merged, nothing recorded: the branch's one commit is still
+        # unmerged, so the clone must survive.
+        caplog.set_level("WARNING", logger="core.worker")
+        cleanup_task(task["id"])
+        assert bare.exists()
+        assert any("unmerged" in r.message for r in caplog.records)
+
+        # Now the target catches up inside the bare clone itself (what the old
+        # test_removes_clone_once_nothing_is_unmerged simulated) — the clone is
+        # reclaimed without any refresh.
+        subprocess.run(["git", "-C", str(bare), "branch", "-f", "main", task_branch(task["id"])],
+                       capture_output=True, text=True, check=True)
+        cleanup_task(task["id"])
+        assert not bare.exists()
+
+
 class TestSetAccessWriteAlias:
     def test_write_level_actually_chmods(self, tmp_path):
         # core.worker calls set_access(path, "write"); an unknown level is a
