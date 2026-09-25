@@ -119,7 +119,7 @@ python sisyphus.py daemon status     # live? supervised? version
 python sisyphus.py daemon logs -f
 ```
 
-Secrets come from `.env` (launchd has no shell env). See [`deploy/README.md`](deploy/README.md).
+Credentials are entered in the UI under **Integrations → Keys & tokens** and kept in Sisyphus's vault. See [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
 
 ---
 
@@ -166,8 +166,10 @@ sisyphus dev      install-hooks        # pre-push hook that runs the test suite
 
 ## Configuration
 
-- **`.env`** — secrets & env (`OPENROUTER_API_KEY`, `SISYPHUS_API_TOKEN`, forge
-  tokens). Shell env wins over `.env`; `${VAR}` is expanded in `config.yaml`.
+- **Credentials** — entered in the UI under **Integrations → Keys & tokens**, stored
+  in Sisyphus's vault, never in `.env` or `config.yaml`. See [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
+- **`.env`** — optional environment variables (only for non-credential config). Shell env wins
+  over `.env`; `${VAR}` is expanded in `config.yaml`.
 - **`config.yaml`** — copied from `config.example.yaml`; gitignored because the
   daemon writes the `repos:` list into it. Knobs:
   - `max_concurrent_workers` (default 2) — global worker cap
@@ -226,7 +228,7 @@ docs/          architecture + feature notes
 ## Testing
 
 ```bash
-pytest -q                 # 1297 tests
+python3 -m pytest -q      # full test suite
 pytest tests/e2e -q       # Playwright browser e2e — needs:
                           #   pip install -r requirements-dev.txt
                           #   python -m playwright install chromium
