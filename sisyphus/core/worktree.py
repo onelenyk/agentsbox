@@ -156,6 +156,13 @@ def set_access(worktree_path: str, level: str):
                 file_mode = stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH
                 if mode & stat.S_IWUSR:
                     file_mode |= stat.S_IWUSR
+                # set_access governs read/write access, not executability. Keep
+                # whatever exec bits the file already carries: flattening every
+                # file to 0644/0444 is what silently dropped the executable bit
+                # on tracked scripts (tools/goal_report.py, desktop/build.sh —
+                # 100755 in main, restored by hand four times) into agent
+                # commits via `git add -A`.
+                file_mode |= entry.stat().st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
                 entry.chmod(file_mode)
         except OSError:
             pass

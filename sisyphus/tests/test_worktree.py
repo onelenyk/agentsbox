@@ -195,3 +195,55 @@ class TestSetAccess:
 
     def test_missing_path_is_not_an_error(self, tmp_path):
         worktree.set_access(str(tmp_path / "nope"), "write")
+
+
+class TestExecBitSurvivesAccessLevels:
+    """A tracked 100755 script must come out of an engineer worktree still 100755.
+
+    Regression: set_access("write") flattened every file to 0644, so a tracked
+    executable script (tools/goal_report.py, desktop/build.sh — 100755 in main)
+    silently lost its exec bit on disk; the agent's `git add -A` then committed
+    the drop as 100755 -> 100644. Restored by hand four times (commits 6538cff,
+    17c59b7, a3e6c86, MR mr-4ae6bde1)."""
+
+    def _repo_with_exec_script(self, tmp_path, monkeypatch):
+        """A bare clone whose `main` holds a tracked 100755 script, plus
+        REPOS_DIR pointed at the temp dir (create_worktree writes there)."""
+        src = tmp_path / "src"
+        src.mkdir()
+        subprocess.run(["git", "init", "-b", "main", str(src)], capture_output=True)
+        _git(src, "config", "user.email", "t@t")
+        _git(src, "config", "user.name", "t")
+        (src / "run.sh").write_text("#!/bin/sh\necho hi\n")
+        (src / "run.sh").chmod(0o755)
+        _git(src, "add", "-A")
+        _git(src, "commit", "-m", "init")
+        bare_path = tmp_path / "bare.git"
+        subprocess.run(["git", "clone", "--bare", str(src), str(bare_path)],
+                       capture_output=True)
+        monkeypatch.setattr(worktree, "REPOS_DIR", tmp_path / "repos")
+        return bare_path
+
+    def test_write_level_keeps_the_exec_bit_in_the_worktree(self, tmp_path, monkeypatch):
+        bare_path = self._repo_with_exec_script(tmp_path, monkeypatch)
+        wt = worktree.create_worktree(str(bare_path), "task-1", "engineer", "main")
+        worktree.set_access(wt, "write")
+        ls = _git(wt, "ls-files", "-s", "run.sh").stdout.strip()
+        assert ls.startswith("100755"), f"exec bit lost by set_access: {ls}"
+
+    def test_engineer_commit_keeps_the_exec_bit_in_the_resulting_commit(self, tmp_path, monkeypatch):
+        """The full chain a worker runs: worktree + set_access("write") + the
+        agent commit path (git_ops.commit_all). The resulting commit must still
+        carry 100755 on the tracked script — this is the bug that hit
+        build.sh / goal_report.py four times."""
+        from pathlib import Path
+        from core import git_ops
+        bare_path = self._repo_with_exec_script(tmp_path, monkeypatch)
+        branch = git_ops.ensure_task_branch(str(bare_path), "task-1", "main")
+        wt = worktree.create_worktree(str(bare_path), "task-1", "engineer", branch)
+        worktree.set_access(wt, "write")
+        (Path(wt) / "feature.txt").write_text("x\n")   # something real to commit
+        sha = git_ops.commit_all(wt, "add feature")
+        assert sha
+        ls = _git(wt, "ls-files", "-s", "run.sh").stdout.strip()
+        assert ls.startswith("100755"), f"commit dropped the exec bit: {ls}"
