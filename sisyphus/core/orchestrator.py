@@ -673,14 +673,29 @@ def _obvious_step(task: dict, thread: list) -> Optional[Decision]:
 
     # Case c: reviewer requested changes, no engineer since.
     def _check_reviewer_requested_changes() -> Optional[Decision]:
-        """Spawn engineer when reviewer requests changes and no engineer has run since."""
-        # Find the last result from a reviewer that starts with CHANGES REQUESTED.
+        """Spawn engineer when reviewer requests changes and no engineer has run since.
+
+        Detects verdicts from two sources: a reviewer result message (from an embedded
+        reviewer), or a verdict note from an independent review task (from mr-reviewer).
+        """
+        import re
+        # Regex for "review verdict for mr-...: CHANGES REQUESTED" (from independent review task)
+        _VERDICT_NOTE = re.compile(r"^review verdict for (mr-\S+?):\s*CHANGES REQUESTED", re.I)
+
+        # Find the last message indicating reviewer requested changes.
         reviewer_request_idx = -1
         for i in reversed(range(len(thread))):
             m = thread[i]
+            # Case 1: result message from an embedded reviewer.
             if m["kind"] == "result" and "review" in (m["author"] or "").lower():
                 t = (m["text"] or "").lstrip().upper()
                 if t.startswith("CHANGES REQUESTED"):
+                    reviewer_request_idx = i
+                    break
+            # Case 2: verdict note from an independent review task.
+            if m["kind"] == "note" and m["author"] == "system":
+                t = m["text"] or ""
+                if _VERDICT_NOTE.match(t):
                     reviewer_request_idx = i
                     break
 
@@ -728,7 +743,22 @@ async def handle_event(
     # allowed to proceed; that is how a human reply resumes it.
     blocked = pass_blocked_by(task, spontaneous=False, event_type=event_type)
     if blocked:
-        return Decision(action="noop", why=blocked), None
+        decision = Decision(action="noop", why=blocked)
+        # For a continue event that finds nothing to do, post an explanatory note,
+        # but dedupe it so we don't spam identical messages every watchdog cycle.
+        if event_type == "continue":
+            thread = store.get_thread(task_id) if task else []
+            decision_text = f"[{decision.action}] {decision.why}"
+            should_post = True
+            if thread:
+                last_msg = thread[-1]
+                if (last_msg["author"] == "orchestrator" and
+                    last_msg["kind"] == "note" and
+                    last_msg["text"] == decision_text):
+                    should_post = False
+            if should_post:
+                store.post_message(task_id, "orchestrator", kind="note", text=decision_text)
+        return decision, None
 
     # Budget guard: stop spending on a task (or for the day) once a configured
     # cap is hit — park it as waiting so a human decides. A human reply bypasses
@@ -776,7 +806,20 @@ async def handle_event(
     # verdict instead of paying for a pass that can only decide to wait — or,
     # worse, spawning a reviewer beside it. The verdict emits its own event.
     if event_type != "human_replied" and _mr_review(task_id)["running"] and not _worker_in_flight(task_id):
-        return Decision(action="noop", why="the branch's own review is still running"), None
+        decision = Decision(action="noop", why="the branch's own review is still running")
+        if event_type == "continue":
+            thread = store.get_thread(task_id)
+            decision_text = f"[{decision.action}] {decision.why}"
+            should_post = True
+            if thread:
+                last_msg = thread[-1]
+                if (last_msg["author"] == "orchestrator" and
+                    last_msg["kind"] == "note" and
+                    last_msg["text"] == decision_text):
+                    should_post = False
+            if should_post:
+                store.post_message(task_id, "orchestrator", kind="note", text=decision_text)
+        return decision, None
 
     thread_text = store.render_thread(task_id, for_prompt=True)
 
