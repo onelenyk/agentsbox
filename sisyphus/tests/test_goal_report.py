@@ -393,33 +393,86 @@ def test_readiness_merge_latency_handles_two_merges(db_path):
     assert r["median_latency_hours"] == 3.0  # (2 + 4) / 2
 
 
-def test_readiness_stale_check_blocks_counts_notes(db_path):
-    t1 = store.create_task("stale check", repo="sisyphus")
-    store.post_message(t1["id"], "orchestrator", kind="note",
-                      text="[status] check-stale: waiting for new check run")
+def test_readiness_stale_check_blocks_counts_unresolved_notes(db_path):
+    """The metric counts only genuine stale-check block notes — the one text
+    mergerequests._note_auto_merge_waiting writes for a check-stale — and only
+    those whose block was never resolved automatically. A block resolved by a
+    re-check on the current head or by an auto-merge is history, not a live
+    problem; an 'auto-merge waiting' note about review or a dirty checkout was
+    never about the check at all."""
+    mrs.init_mr_table()
+    stale_reason = ("auto-merge waiting: the check passed against aaaa1111, but "
+                    "the branch is now at bbbb2222 — that verdict is history, re-run it")
 
-    t2 = store.create_task("auto-merge wait", repo="sisyphus")
-    store.post_message(t2["id"], "orchestrator", kind="note",
-                      text="auto-merge waiting for check to pass")
+    # Never resolved: the note was posted and nothing cleared the block.
+    stuck = store.create_task("stuck on a stale check", repo="sisyphus")
+    stuck_note = store.post_message(stuck["id"], "system", kind="note", text=stale_reason)
+    conn = get_conn()
+    conn.execute("UPDATE messages SET created_at=? WHERE id=?",
+                 ("2026-09-01T10:00:00+00:00", stuck_note["id"])).connection.commit()
 
-    t3 = store.create_task("auto-merge wait again", repo="sisyphus")
-    store.post_message(t3["id"], "orchestrator", kind="note",
-                      text="auto-merge waiting for approval")
+    # Resolved by an auto-merge: the daemon re-checked the head and landed the MR.
+    landed = store.create_task("auto-merged away", repo="sisyphus")
+    landed_note = store.post_message(landed["id"], "system", kind="note", text=stale_reason)
+    conn.execute("UPDATE messages SET created_at=? WHERE id=?",
+                 ("2026-09-02T10:00:00+00:00", landed_note["id"])).connection.commit()
+    store.post_message(landed["id"], "system", kind="note",
+                       text="Auto-merged sisyphus/task-landed into main (bbbb2222) — review approved")
 
-    t4 = store.create_task("other note", repo="sisyphus")
-    store.post_message(t4["id"], "orchestrator", kind="note",
-                      text="[status] merge check passed")
+    # Resolved by a re-check on the current head: check_ran_at after the note.
+    rechecked = store.create_task("re-checked head", repo="sisyphus")
+    rc_mr = mrs.create_mr(rechecked["id"], "sisyphus", "sisyphus/task-rechecked", "main")
+    rc_note = store.post_message(rechecked["id"], "system", kind="note", text=stale_reason)
+    conn.execute("UPDATE messages SET created_at=? WHERE id=?",
+                 ("2026-09-03T10:00:00+00:00", rc_note["id"])).connection.commit()
+    conn.execute("UPDATE merge_requests SET check_ran_at=? WHERE id=?",
+                 ("2026-09-03T11:00:00+00:00", rc_mr["id"])).connection.commit()
+
+    # Never about the check: a review block, and prose that mentions the words.
+    review_blocked = store.create_task("review wait", repo="sisyphus")
+    store.post_message(review_blocked["id"], "system", kind="note",
+                       text="auto-merge waiting: review is pending")
+    chatter = store.create_task("chatter", repo="sisyphus")
+    store.post_message(chatter["id"], "engineer", kind="note",
+                       text="so a new commit no longer leaves the check stale/merge blocked")
 
     r = readiness(get_conn(), days=30)
-    assert r["stale_blocks"] == 3
+    assert r["stale_blocks"] == 1
 
 
 def test_readiness_stale_check_blocks_zero_when_none(db_path):
     t = store.create_task("no blocks", repo="sisyphus")
     store.post_message(t["id"], "orchestrator", kind="note",
-                      text="[status] all clear")
+                       text="[status] all clear")
     r = readiness(get_conn(), days=30)
     assert r["stale_blocks"] == 0
+
+
+def test_readiness_stale_check_blocks_renders_the_unresolved_count(db_path):
+    """The human-facing line shows the corrected meaning: only blocks no
+    automatic path cleared are reported as live problems."""
+    mrs.init_mr_table()
+    stale_reason = ("auto-merge waiting: the check passed against aaaa1111, but "
+                    "the branch is now at bbbb2222 — that verdict is history, re-run it")
+    stuck = store.create_task("stuck on a stale check", repo="sisyphus")
+    note = store.post_message(stuck["id"], "system", kind="note", text=stale_reason)
+    conn = get_conn()
+    conn.execute("UPDATE messages SET created_at=? WHERE id=?",
+                 ("2026-09-01T10:00:00+00:00", note["id"])).connection.commit()
+
+    rd = readiness(conn, days=30)
+    rendered = render({"days": 30, "target": 50,
+                       "self_build": {"rate": 0.0, "delivered": 0, "total": 0,
+                                      "merges": 0},
+                       "autonomy": {"rate": 0.0, "clean": 0, "delivering": 0,
+                                    "questions": 0},
+                       "evidence": {"rate": 0.0, "backed": 0, "merged": 0,
+                                    "approved": 0, "legacy": 0},
+                       "reliability": {"rate": 0.0, "failed": 0, "terminal": 0,
+                                       "silent": 0},
+                       "gaps": {"open": 0, "closed": 0, "titles": []},
+                       "readiness": rd})
+    assert "stale-check blocks 1 notes waiting on check status, never auto-resolved" in rendered
 
 
 def test_readiness_human_turns_per_delivered_task(db_path):
