@@ -261,3 +261,20 @@ class TestProviderFaults:
         limits.record("openrouter", "cooldown", 100, _iso(-1), "rejected")   # cooled down
         assert model_classes.choose("engineer").runner_name == "oc"
         assert all(w["span"] != "cooldown" for p in limits.view() for w in p["windows"])
+
+    def test_daemon_shutdown_skips_cooldown_on_zero_step_failure(self, db_path):
+        from core import lifecycle, worker
+        try:
+            lifecycle._STOPPING = True
+            assert limits.provider_fault(self._result(raw_stdout="402")) is not None
+            assert limits.cooldown("test-provider", "402") is not None
+            initial_cooldown = limits.cooldown_until("test-provider")
+            assert initial_cooldown is not None
+
+            limits.record("test-provider", "cooldown", 0, None)
+            assert limits.cooldown_until("test-provider") is None
+            note = worker._set_aside_note("test-provider", self._result(raw_stdout="402"))
+            assert note == ""
+            assert limits.cooldown_until("test-provider") is None
+        finally:
+            lifecycle._STOPPING = False

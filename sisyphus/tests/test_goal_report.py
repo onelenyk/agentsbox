@@ -338,6 +338,39 @@ def test_readiness_provider_faults_empty_when_no_cooldowns(db_path):
     assert r["provider_faults"] == {}
 
 
+def test_readiness_excluded_runs_interrupted_by_shutdown_dont_count_as_wasted(db_path):
+    """Runs that ended due to daemon shutdown with zero steps should not count as wasted."""
+    from core import lifecycle, worker
+    from core.launcher import AgentResult
+    prior = lifecycle._STOPPING
+    lifecycle._STOPPING = True
+    try:
+        interrupted_text = worker.worker_end_message(
+            "explorer", AgentResult(status="completed", raw_stdout="starting up",
+                                    usage={"steps": 0}))
+    finally:
+        lifecycle._STOPPING = prior
+    assert "was stopped before it reported" in interrupted_text
+    assert "daemon was shutting down" in interrupted_text
+
+    good = store.create_task("worked", repo="sisyphus")
+    store.post_message(good["id"], "orchestrator", kind="worker_finished",
+                      text="worker returned a diff")
+
+    wasted = store.create_task("nothing came back", repo="sisyphus")
+    store.post_message(wasted["id"], "orchestrator", kind="worker_finished",
+                      text="agent_no_result")
+
+    interrupted = store.create_task("shutdown interrupt", repo="sisyphus")
+    store.post_message(interrupted["id"], "system", kind="worker_finished",
+                      text=interrupted_text)
+
+    r = readiness(get_conn(), days=30)
+    assert r["all_finished"] == 3
+    assert r["wasted_finished"] == 1
+    assert r["wasted_rate"] == 33.3
+
+
 def test_readiness_duplicate_workers_finds_concurrent_starts(db_path):
     task = store.create_task("concurrent worker issue", repo="sisyphus")
 
