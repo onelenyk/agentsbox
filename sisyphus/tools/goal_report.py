@@ -200,7 +200,8 @@ def _wasted_counts(conn, cut: str) -> tuple:
         SELECT COUNT(*) as cnt FROM messages
          WHERE created_at >= ? AND kind = 'worker_finished'
            AND ({' OR '.join(['text LIKE ?' for _ in wasted_texts])})
-           AND NOT ({' OR '.join(['text LIKE ?' for _ in delivered_texts])})
+AND NOT ({' OR '.join(['text LIKE ?' for _ in delivered_texts])})
+           AND text NOT LIKE '%was stopped before it reported%'
     """, (cut, *[f"%{t}%" for t in wasted_texts],
           *[f"%{t}%" for t in delivered_texts])).fetchone()["cnt"]
     return all_finished, wasted

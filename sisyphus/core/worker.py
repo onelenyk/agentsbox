@@ -573,6 +573,13 @@ def worker_end_message(role: str, result, task_id: str = "") -> str:
                 f"failure and nothing is known to be wrong with the work — the "
                 f"instruction was interrupted part-way. Do not fail the task for "
                 f"this; continue from the human's next instruction.")
+    from . import lifecycle, limits
+    if lifecycle.stopping():
+        fault = limits.provider_fault(result)
+        if fault:
+            return (f"{role} {DAEMON_STOPPED_MARKER}: the run never reached the model "
+                    f"({fault}). The daemon was shutting down, so this is not a "
+                    f"failure and nothing is known to be wrong with the work.")
     delivered = _run_delivered(task_id, role)
     if delivered:
         # The run did the work — its deliverable is on the thread — but never
@@ -873,9 +880,11 @@ async def spawn_worker(
 def _set_aside_note(provider: str, result) -> str:
     """Set the provider aside if the run never reached its model, and say so
     in the thread — the next run then goes to the next option in the class."""
-    from . import limits
+    from . import limits, lifecycle
     fault = limits.provider_fault(result)
     if not fault:
+        return ""
+    if lifecycle.stopping():
         return ""
     until = limits.cooldown(provider, fault)
     if not until:

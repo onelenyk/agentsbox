@@ -338,6 +338,28 @@ def test_readiness_provider_faults_empty_when_no_cooldowns(db_path):
     assert r["provider_faults"] == {}
 
 
+def test_readiness_excluded_runs_interrupted_by_shutdown_dont_count_as_wasted(db_path):
+    """Runs that ended due to daemon shutdown with zero steps should not count as wasted."""
+    good = store.create_task("worked", repo="sisyphus")
+    store.post_message(good["id"], "orchestrator", kind="worker_finished",
+                      text="worker returned a diff")
+
+    wasted = store.create_task("nothing came back", repo="sisyphus")
+    store.post_message(wasted["id"], "orchestrator", kind="worker_finished",
+                      text="agent_no_result")
+
+    interrupted = store.create_task("shutdown interrupt", repo="sisyphus")
+    store.post_message(interrupted["id"], "system", kind="worker_finished",
+                      text="explorer was stopped before it reported: no model step billed. "
+                           "The daemon was shutting down, so this is not a failure and "
+                           "nothing is known to be wrong with the work.")
+
+    r = readiness(get_conn(), days=30)
+    assert r["all_finished"] == 3
+    assert r["wasted_finished"] == 1
+    assert r["wasted_rate"] == 33.3
+
+
 def test_readiness_duplicate_workers_finds_concurrent_starts(db_path):
     task = store.create_task("concurrent worker issue", repo="sisyphus")
 
