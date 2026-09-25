@@ -640,6 +640,43 @@ def try_auto_merge(mr: dict) -> Optional[str]:
         return res.get("sha")
 
 
+def auto_merge_on(mr: dict) -> bool:
+    """True when the MR's repo opted into auto-merge (config.yaml repos[].auto_merge)."""
+    from .repos import get_repo
+    return bool((get_repo(mr.get("repo", "")) or {}).get("auto_merge"))
+
+
+def auto_merge_block_reason(mr: dict) -> Optional[str]:
+    """Why auto-merge has not delivered *mr* into the target, or None when there
+    is nothing for the engineer to fix — the MR is merged, the repo has no
+    auto_merge opt-in, or the merge simply has not happened yet (the sweep lands
+    it on its next pass, e.g. while the target checkout is dirty).
+
+    The orchestrator's 'done' must not outrun delivery: in an auto-merge repo an
+    approved, check-passed MR is not done until it is actually MERGED, and when
+    auto-merge reports it cannot (a conflict, a failing check, a verdict stale
+    against the current head) the next obvious step is the engineer with that
+    reason in its instruction, not done. This mirrors try_auto_merge's guards so
+    the gate reads exactly the facts the merge attempt reads.
+    """
+    if mr.get("status") == "merged":
+        return None
+    if not auto_merge_on(mr):
+        return None
+    if is_forge_mr(mr):
+        return None
+    blocked = merge_block_reason(mr)
+    if blocked:
+        return blocked
+    merge = check_mergeability(mr["bare_path"], mr["source_path"],
+                               mr["source_branch"], mr["target_branch"])
+    if not merge.get("ok"):
+        return merge.get("error") or "cannot check mergeability"
+    if not merge.get("mergeable"):
+        return "the branch does not merge cleanly — resolve the conflicts first"
+    return None
+
+
 def schedule_auto_merge(mr_id: str) -> None:
     """Attempt an auto-merge for *mr_id* off the event loop, best-effort: the
     verdict or check result is recorded either way.

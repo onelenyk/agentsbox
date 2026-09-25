@@ -603,6 +603,144 @@ class TestTheBranchsOwnReviewCounts:
         assert d is not None and d.action == "done"
 
 
+class TestConflictingVerdicts:
+    """Rule 1: an unanswered CHANGES REQUESTED on the current head blocks done,
+    whichever reviewer wrote it — APPROVED counts only when no reviewer requested
+    changes on that head."""
+
+    @pytest.mark.asyncio
+    async def test_changes_requested_then_mr_reviewer_approved_is_not_done(self, db_path):
+        """Task reviewer CHANGES REQUESTED, then mr-reviewer APPROVED the SAME
+        head → not done; the engineer addresses the request next.
+
+        Regression for task-df5a3fcc (SIS-155): the MR row's review_status was
+        overwritten to 'approved' by the second verdict, so the pass read an
+        approval and marked done while the first reviewer's CHANGES REQUESTED
+        stood unanswered on the same head (no new commit between the two)."""
+        task = store.create_task("fix something", repo="sisyphus")
+        task_id = task["id"]
+
+        mr = mergerequests.create_mr(
+            task_id=task_id, repo="sisyphus", source_branch="sisyphus/test",
+            target_branch="main", source_path="/tmp/repo", bare_path="/tmp/bare")
+        mergerequests.set_check_result(mr["id"], status="passed")
+
+        # The task's own reviewer asked for changes on the current head…
+        store.post_message(task_id, "reviewer", kind="result",
+                           text="CHANGES REQUESTED: needs tests")
+        # …then the independent review approved the same head, and its verdict
+        # clobbered the MR row's review_status to 'approved'.
+        store.post_message(task_id, "system", kind="note",
+                           text=f"review verdict for {mr['id']}: APPROVED — fine")
+        mergerequests.set_review_status(mr["id"], review_status="approved")
+
+        decision, _ = await handle_event(task_id, "external", decide_fn=_make_failing_decider())
+
+        assert decision.action == "spawn_worker"
+        assert decision.role == "engineer"
+        assert "rule:" in decision.why
+        assert "reviewer requested changes" in decision.why
+
+    @pytest.mark.asyncio
+    async def test_answered_changes_requested_allows_approval(self, db_path):
+        """A CHANGES REQUESTED answered by a newer commit does not block an
+        APPROVED that followed it → done."""
+        task = store.create_task("fix something", repo="sisyphus")
+        task_id = task["id"]
+
+        mr = mergerequests.create_mr(
+            task_id=task_id, repo="sisyphus", source_branch="sisyphus/test",
+            target_branch="main", source_path="/tmp/repo", bare_path="/tmp/bare")
+        mergerequests.set_check_result(mr["id"], status="passed")
+        mergerequests.set_review_status(mr["id"], review_status="approved")
+
+        # The reviewer asked for changes; the engineer pushed a newer head; a
+        # fresh approval followed on that head.
+        store.post_message(task_id, "reviewer", kind="result",
+                           text="CHANGES REQUESTED: needs tests")
+        store.post_message(task_id, "engineer", kind="commit", text="addressed (abc1234)")
+        store.post_message(task_id, "reviewer", kind="result", text="APPROVED: looks good")
+
+        decision, _ = await handle_event(task_id, "worker_finished", decide_fn=_make_failing_decider())
+
+        assert decision.action == "done"
+        assert "reviewer approved and the check passed" in decision.why
+
+
+class TestDoneRequiresDelivery:
+    """Rule 2: with auto_merge on, done means the MR is actually merged; a merge
+    auto-merge cannot deliver is the engineer's next, not done."""
+
+    @pytest.mark.asyncio
+    async def test_auto_merge_blocked_by_conflicts_sends_engineer(self, db_path, monkeypatch):
+        """Approved + check passed, but auto-merge is blocked by a conflict →
+        the engineer is next with the conflict reason in its instruction."""
+        task = store.create_task("fix something", repo="acme")
+        task_id = task["id"]
+
+        mr = mergerequests.create_mr(
+            task_id=task_id, repo="acme", source_branch="sisyphus/test",
+            target_branch="main", source_path="/tmp/repo", bare_path="/tmp/bare")
+        mergerequests.set_review_status(mr["id"], review_status="approved")
+        mergerequests.set_check_result(mr["id"], status="passed", command="pytest -q")
+        store.post_message(task_id, "reviewer", kind="result", text="APPROVED: looks good")
+
+        # The repo opted into auto-merge, and the branch does not merge cleanly.
+        monkeypatch.setattr("core.repos.get_repo",
+                            lambda name: {"name": name, "auto_merge": True})
+        monkeypatch.setattr("core.mergerequests.check_mergeability",
+                            lambda *a, **k: {"ok": True, "mergeable": False,
+                                             "conflicts": ["feature.py"]})
+
+        decision, _ = await handle_event(task_id, "worker_finished", decide_fn=_make_failing_decider())
+
+        assert decision.action == "spawn_worker"
+        assert decision.role == "engineer"
+        assert "auto-merge is blocked" in decision.why
+        assert "does not merge cleanly" in decision.instruction
+
+    @pytest.mark.asyncio
+    async def test_approved_and_merged_is_done(self, db_path, monkeypatch):
+        """Approved + check passed + the MR is actually merged → done."""
+        task = store.create_task("fix something", repo="acme")
+        task_id = task["id"]
+
+        mr = mergerequests.create_mr(
+            task_id=task_id, repo="acme", source_branch="sisyphus/test",
+            target_branch="main", source_path="/tmp/repo", bare_path="/tmp/bare")
+        mergerequests.set_review_status(mr["id"], review_status="approved")
+        mergerequests.set_check_result(mr["id"], status="passed", command="pytest -q")
+        mergerequests.set_status(mr["id"], "merged")
+        store.post_message(task_id, "reviewer", kind="result", text="APPROVED: looks good")
+
+        monkeypatch.setattr("core.repos.get_repo",
+                            lambda name: {"name": name, "auto_merge": True})
+
+        decision, _ = await handle_event(task_id, "worker_finished", decide_fn=_make_failing_decider())
+
+        assert decision.action == "done"
+        assert "reviewer approved and the check passed" in decision.why
+
+    @pytest.mark.asyncio
+    async def test_no_auto_merge_still_done_with_open_mr(self, db_path):
+        """Without auto_merge, an approved + check-passed MR that a human has
+        not merged yet is still done — exactly as before."""
+        task = store.create_task("fix something", repo="acme")
+        task_id = task["id"]
+
+        mr = mergerequests.create_mr(
+            task_id=task_id, repo="acme", source_branch="sisyphus/test",
+            target_branch="main", source_path="/tmp/repo", bare_path="/tmp/bare")
+        mergerequests.set_review_status(mr["id"], review_status="approved")
+        mergerequests.set_check_result(mr["id"], status="passed", command="pytest -q")
+        store.post_message(task_id, "reviewer", kind="result", text="APPROVED: looks good")
+
+        decision, _ = await handle_event(task_id, "worker_finished", decide_fn=_make_failing_decider())
+
+        assert decision.action == "done"
+        assert "reviewer approved and the check passed" in decision.why
+
+
 class TestNoopNoteDedupe:
     """A no-op or note decision should only post one explanatory message, not repeat it."""
 
