@@ -3,11 +3,27 @@
 Evaluates whether a repository is configured for safe, auditable production
 use: proper isolation, forge-backed delivery, check gates, and credential
 security. Each item is a block (fail-fast) or warn (non-fatal).
+
+Every repo has a ``target``: ``local`` (the default) or ``production``. The
+assessment always computes every item, but Home only lists the failing ones for
+a ``production`` repo; a ``local`` repo reads one calm line. The consequence
+sentences below are the plain wording shared by Home, the readiness page and
+the ``sisyphus.py repos readiness`` CLI — change it here and every surface
+speaks the same words.
 """
 
 from core.config import get_config
 from core.repos import get_repo
 from core.providers import detect_platform, _token
+
+LOCAL = "local"
+PRODUCTION = "production"
+
+
+def target_of(repo: dict) -> str:
+    """The repo's readiness target: ``local`` (default) or ``production``."""
+    target = (repo.get("target") or LOCAL).strip().lower()
+    return target if target in (LOCAL, PRODUCTION) else LOCAL
 
 
 def assess(repo_name: str) -> dict:
@@ -16,14 +32,17 @@ def assess(repo_name: str) -> dict:
     Returns:
         {
             "repo": repo_name,
+            "target": "local" | "production",
             "ready": bool (true when no block items fail),
             "items": [
                 {
                     "key": "check" | "delivery" | ... ,
                     "ok": bool,
                     "severity": "block" | "warn",
-                    "text": "one plain sentence",
-                    "fix": "one plain sentence" (if ok=false)
+                    "text": "one plain sentence of consequence",
+                    "fix": "where to change it, as a plain sentence" (if ok=false),
+                    "fix_href": "/integrations" or "/repos/<name>" when the
+                                fix lives in the UI, else ""
                 }
             ]
         }
@@ -32,16 +51,19 @@ def assess(repo_name: str) -> dict:
     if not repo:
         return {
             "repo": repo_name,
+            "target": LOCAL,
             "ready": False,
             "items": [{
                 "key": "repo",
                 "ok": False,
                 "severity": "block",
                 "text": f"Repository {repo_name!r} not found.",
-                "fix": "Add the repository first."
+                "fix": "Add the repository first.",
+                "fix_href": "",
             }]
         }
 
+    target = target_of(repo)
     items = []
 
     # Tracker: Jira must be configured for issues to become tasks
@@ -56,11 +78,11 @@ def assess(repo_name: str) -> dict:
     items.append(_assess_check(check_cmd))
 
     # Delivery: a production repo should use a forge
-    items.append(_assess_delivery(platform))
+    items.append(_assess_delivery(repo_name, platform))
 
     # Auto-merge: must be off for a forge repo
     auto_merge = repo.get("auto_merge", False)
-    items.append(_assess_auto_merge(auto_merge, platform))
+    items.append(_assess_auto_merge(repo_name, auto_merge, platform))
 
     # Read isolation: sandbox.read_isolation must be on
     items.append(_assess_read_isolation())
@@ -73,13 +95,14 @@ def assess(repo_name: str) -> dict:
 
     # Pilot mode: warn if not read-only
     mode = repo.get("mode", "write").strip().lower()
-    items.append(_assess_pilot_mode(mode))
+    items.append(_assess_pilot_mode(repo_name, mode))
 
     # A repo is "ready" when there are no failed "block" items
     ready = all(item["ok"] or item["severity"] == "warn" for item in items)
 
     return {
         "repo": repo_name,
+        "target": target,
         "ready": ready,
         "items": items
     }
@@ -94,9 +117,10 @@ def _assess_tracker() -> dict:
         "ok": ok,
         "severity": "warn",
         "text": "Jira is configured; issues can become tasks on their own."
-                if ok else "No tracker configured; issues will not become tasks on their own.",
-        "fix": "Set JIRA_BASE_URL, JIRA_EMAIL and JIRA_API_TOKEN in .env"
-               if not ok else ""
+                if ok else "New Jira bugs won't become tasks on their own.",
+        "fix": "Open Integrations → Connections and fill in the Jira card."
+               if not ok else "",
+        "fix_href": "/integrations" if not ok else "",
     }
 
 
@@ -108,13 +132,15 @@ def _assess_check(check_cmd: str) -> dict:
         "ok": ok,
         "severity": "block",
         "text": "A check command runs against every MR to gate merges."
-                if ok else "No check command configured.",
-        "fix": "Add a check: command to the repo (e.g., check: python -m pytest -q)."
-               if not ok else ""
+                if ok else "Nothing verifies a merge request before it lands.",
+        "fix": "Add a check: command to this repo in config.yaml "
+               "(e.g. check: python -m pytest -q)."
+               if not ok else "",
+        "fix_href": "",
     }
 
 
-def _assess_delivery(platform: str) -> dict:
+def _assess_delivery(repo_name: str, platform: str) -> dict:
     """A production repo should deliver via a forge so CI and branch protection apply."""
     ok = platform in ("github", "gitlab")
     return {
@@ -122,13 +148,14 @@ def _assess_delivery(platform: str) -> dict:
         "ok": ok,
         "severity": "warn",
         "text": "Delivery is through a forge (github/gitlab)."
-                if ok else f"Delivery is local (platform: {platform!r}); forge provides CI and branch protection.",
-        "fix": "Set platform: github or platform: gitlab in the repo config."
-               if not ok else ""
+                if ok else "Merges happen locally, with no CI or branch protection.",
+        "fix": "Open this repo's Edit page and set Platform to GitHub or GitLab."
+               if not ok else "",
+        "fix_href": f"/repos/{repo_name}" if not ok else "",
     }
 
 
-def _assess_auto_merge(auto_merge: bool, platform: str) -> dict:
+def _assess_auto_merge(repo_name: str, auto_merge: bool, platform: str) -> dict:
     """Auto-merge must be off for a forge repo (human review required)."""
     # Only a block if on a forge AND auto_merge is true
     ok = not (auto_merge and platform in ("github", "gitlab"))
@@ -139,9 +166,10 @@ def _assess_auto_merge(auto_merge: bool, platform: str) -> dict:
         # Say what is true: auto-merge on a local repo is allowed, not "off".
         "text": ("Auto-merge is off; MRs require a human merge." if not auto_merge
                  else "Auto-merge is on for a local repo; the forge gate does not apply."
-                 if ok else "Auto-merge is on; turn it off for a forge repo."),
-        "fix": "Set auto_merge: false in the repo config."
-               if not ok else ""
+                 if ok else "Approved MRs merge themselves without a human review."),
+        "fix": "Open this repo's Edit page and turn off Auto-merge approved MRs."
+               if not ok else "",
+        "fix_href": f"/repos/{repo_name}" if not ok else "",
     }
 
 
@@ -154,9 +182,10 @@ def _assess_read_isolation() -> dict:
         "ok": ok,
         "severity": "block",
         "text": "Read isolation is enabled; workers cannot read home outside an allowlist."
-                if ok else "Read isolation is disabled; workers can read the entire home directory.",
-        "fix": "Set sandbox.read_isolation: true in the config."
-               if not ok else ""
+                if ok else "Agents can read your whole home folder.",
+        "fix": "Set sandbox.read_isolation: true in config.yaml."
+               if not ok else "",
+        "fix_href": "",
     }
 
 
@@ -169,9 +198,10 @@ def _assess_egress() -> dict:
         "ok": ok,
         "severity": "block",
         "text": "Egress is controlled; worker network limited to an allowlisted proxy."
-                if ok else "Egress is open; workers have unrestricted network access.",
-        "fix": "Set sandbox.egress: true in the config."
-               if not ok else ""
+                if ok else "Agents can reach any website.",
+        "fix": "Set sandbox.egress: true in config.yaml."
+               if not ok else "",
+        "fix_href": "",
     }
 
 
@@ -184,7 +214,8 @@ def _assess_forge_token(platform: str, repo: dict) -> dict:
             "ok": True,
             "severity": "block",
             "text": "No forge token needed (local or unknown platform).",
-            "fix": ""
+            "fix": "",
+            "fix_href": "",
         }
 
     # Check for a per-repo token first, then fall back to global config
@@ -195,7 +226,8 @@ def _assess_forge_token(platform: str, repo: dict) -> dict:
             "ok": True,
             "severity": "block",
             "text": f"A {platform} token is configured (per-repo).",
-            "fix": ""
+            "fix": "",
+            "fix_href": "",
         }
 
     # Fall back to global config
@@ -207,19 +239,21 @@ def _assess_forge_token(platform: str, repo: dict) -> dict:
             "ok": True,
             "severity": "block",
             "text": f"A {platform} token is configured (global).",
-            "fix": ""
+            "fix": "",
+            "fix_href": "",
         }
 
     return {
         "key": "forge_token",
         "ok": False,
         "severity": "block",
-        "text": f"No {platform} token configured.",
-        "fix": f"Set {platform}.token in the config or set a per-repo token: for this repo."
+        "text": f"MRs to {platform} will fail until a token is set.",
+        "fix": f"Open Integrations → Connections and set the {platform} token.",
+        "fix_href": "/integrations",
     }
 
 
-def _assess_pilot_mode(mode: str) -> dict:
+def _assess_pilot_mode(repo_name: str, mode: str) -> dict:
     """A repo should start in read-only mode for a safe pilot."""
     ok = mode == "read-only"
     return {
@@ -227,7 +261,8 @@ def _assess_pilot_mode(mode: str) -> dict:
         "ok": ok,
         "severity": "warn",
         "text": "Repo is in read-only mode; a safe pilot before allowing writes."
-                if ok else f"Repo mode is {mode!r}; start with mode: read-only for a safe pilot.",
-        "fix": "Set mode: read-only in the repo config."
-               if not ok else ""
+                if ok else "Agents can push changes straight to the repo.",
+        "fix": "Open this repo's Edit page and tick Read-only."
+               if not ok else "",
+        "fix_href": f"/repos/{repo_name}" if not ok else "",
     }

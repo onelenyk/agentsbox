@@ -39,6 +39,31 @@ class TestReadinessAssess:
                 assert tracker_item["severity"] == "warn"
                 assert "fix" in tracker_item and tracker_item["fix"]
 
+    def test_tracker_fix_names_integrations_not_env(self):
+        """The tracker fix says where in the UI, never .env — credentials are
+        entered only in Integrations → Connections now."""
+        repo = {"name": "test", "check": "test"}
+        with patch("core.readiness.get_repo", return_value=repo):
+            with patch("core.jira.configured", return_value=False):
+                result = readiness.assess("test")
+                tracker_item = [i for i in result["items"] if i["key"] == "tracker"][0]
+                assert "Integrations" in tracker_item["fix"]
+                assert ".env" not in tracker_item["fix"]
+                assert tracker_item["fix_href"] == "/integrations"
+                assert tracker_item["text"] == "New Jira bugs won't become tasks on their own."
+
+    def test_target_defaults_to_local_and_is_reported(self):
+        """A repo without a target reads as local, and production is honoured."""
+        repo = {"name": "test", "check": "test"}
+        with patch("core.readiness.get_repo", return_value=repo):
+            result = readiness.assess("test")
+        assert result["target"] == "local"
+
+        repo["target"] = "production"
+        with patch("core.readiness.get_repo", return_value=repo):
+            result = readiness.assess("test")
+        assert result["target"] == "production"
+
     def test_missing_repo(self):
         """Assess returns block when repo is not found."""
         with patch("core.readiness.get_repo", return_value=None):
@@ -291,6 +316,33 @@ class TestReadinessRoute:
             assert ("not ready" in response.text.lower() or
                     "not found" in response.text.lower())
 
+    def test_readiness_route_local_note(self):
+        """A local-target repo's page notes that production checks are not applied."""
+        from web.app import app
+        client = TestClient(app)
+
+        repo = {"name": "test", "check": "test"}
+        with patch("core.repos.load_repos", return_value=[repo]), \
+             patch("core.jira.configured", return_value=False):
+            response = client.get("/api/repos/test/readiness")
+        assert response.status_code == 200
+        assert "production checks are not applied" in response.text
+
+    def test_readiness_page_route_renders_full_page(self):
+        """The full /repos/{name}/readiness page renders the assessment."""
+        from web.app import app
+        client = TestClient(app)
+
+        repo = {"name": "test", "check": "test", "target": "production"}
+        with patch("core.repos.load_repos", return_value=[repo]), \
+             patch("core.jira.configured", return_value=False):
+            response = client.get("/repos/test/readiness")
+        assert response.status_code == 200
+        assert "Production readiness" in response.text
+        assert "New Jira bugs won" in response.text
+        assert "become tasks on their own" in response.text
+        assert 'href="/integrations"' in response.text
+
 
 class TestReadinessCLI:
     """Test the repos readiness CLI command."""
@@ -324,11 +376,11 @@ class TestReadinessCLI:
                     assert "check" in result.output
 
     def test_cli_readiness_not_ready(self):
-        """CLI exits 1 when not ready."""
+        """CLI exits 1 when a production repo is not ready."""
         from sisyphus import cli
         from click.testing import CliRunner
 
-        repo = {"name": "test"}  # missing check
+        repo = {"name": "test", "target": "production"}  # missing check
         cfg_map = {"sandbox": {"read_isolation": False, "egress": False}}
 
         runner = CliRunner()
@@ -340,3 +392,21 @@ class TestReadinessCLI:
                 result = runner.invoke(cli, ["repos", "readiness", "test"])
                 assert result.exit_code == 1
                 assert "✗" in result.output
+
+    def test_cli_local_repo_exits_zero_even_when_not_ready(self):
+        """A local repo never fails the CLI — production checks are not applied."""
+        from sisyphus import cli
+        from click.testing import CliRunner
+
+        repo = {"name": "test"}  # missing check, target defaults to local
+        cfg_map = {"sandbox": {"read_isolation": False, "egress": False}}
+
+        runner = CliRunner()
+        with patch("core.readiness.get_repo", return_value=repo):
+            with patch("core.readiness.get_config") as mock_cfg:
+                def _cfg(key, default=None):
+                    return cfg_map.get(key, default)
+                mock_cfg.side_effect = _cfg
+                result = runner.invoke(cli, ["repos", "readiness", "test"])
+                assert result.exit_code == 0
+                assert "production checks are not applied" in result.output

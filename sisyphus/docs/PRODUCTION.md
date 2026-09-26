@@ -157,17 +157,21 @@ python3 sisyphus.py repos readiness my-app
 The output lists each check with a tick or cross and a fix if needed:
 
 ```
+Target: production
 ✓ check                 [BLOCK]  A check command runs against every MR to gate merges.
 ✓ delivery             [WARN]   Delivery is through a forge (github/gitlab).
-✓ auto_merge           [BLOCK]  Auto-merge is off; MRs require human review.
+✓ auto_merge           [BLOCK]  Auto-merge is off; MRs require a human merge.
 ✓ read_isolation       [BLOCK]  Read isolation is enabled; workers cannot read home outside an allowlist.
 ✓ egress               [BLOCK]  Egress is controlled; worker network limited to an allowlisted proxy.
 ✓ forge_token          [BLOCK]  A github token is configured (global).
-✗ pilot_mode           [WARN]   Repo mode is 'write'; start with mode: read-only for a safe pilot.
-  → Set mode: read-only in the repo config.
+✗ pilot_mode           [WARN]   Agents can push changes straight to the repo.
+  → Open this repo's Edit page and tick Read-only.
 ```
 
-Exit code is 0 when ready, 1 when any block items fail.
+Every repo has a readiness `target`: `local` (the default) or `production`
+(set on the repo's Edit page). A local repo prints its items but exits 0 —
+production checks are not applied to it. Exit code is 1 when a production repo
+has failing block items.
 
 ## What each check means
 

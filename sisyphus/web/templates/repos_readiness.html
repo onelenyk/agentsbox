@@ -8,6 +8,9 @@
         <span class="status status--failed">Not ready</span>
         {% endif %}
     </div>
+    {% if result.get('target') != 'production' %}
+    <div class="readiness__local">This repo is a local development repo — production checks are not applied. Its items are listed for reference; mark it <b>Production</b> on the Edit page to make Home flag them.</div>
+    {% endif %}
     <div class="readiness__items">
         {% for item in result['items'] %}
         {% set icon = '✓' if item.ok else '✗' %}
@@ -25,7 +28,7 @@
                 </span>
             </div>
             <div class="readiness__text">{{ item.text }}</div>
-            {% if item.fix %}<div class="readiness__fix">→ {{ item.fix }}</div>{% endif %}
+            {% if item.fix %}<div class="readiness__fix">→ {% if item.fix_href %}<a href="{{ item.fix_href }}">{{ item.fix }}</a>{% else %}{{ item.fix }}{% endif %}</div>{% endif %}
         </div>
         {% endfor %}
     </div>
