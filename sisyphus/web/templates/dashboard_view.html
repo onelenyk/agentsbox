@@ -40,7 +40,7 @@
                 <span class="k"><a href="{{ r.href }}" class="mono">{{ r.name }}</a></span>
                 <span class="v">
                     {%- if r.error %}{{ fact('could not assess', 'muted') }}
-                    {%- elif r.target != 'production' %}<span class="tone-muted">{{ r.name }} — local development repo; production checks not applied</span>
+                    {%- elif r.target != 'production' %}<span class="tone-muted">local development repo — production checks not applied</span>
                     {%- elif r.failing %}{{ fact(r.blockers ~ ' blocking · ' ~ r.warnings ~ ' warning' ~ ('s' if r.warnings != 1 else ''), 'bad' if r.blockers else 'warn') }}
                     {%- else %}{{ fact('ready for a pilot', 'good') }}{% endif %}
                 </span>
