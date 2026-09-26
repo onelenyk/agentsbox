@@ -229,16 +229,21 @@ async def dashboard_view(request: Request):
         try:
             result = readiness.assess(name)
             failed = [i for i in result.get("items", []) if not i.get("ok")]
+            # Blocking items first — a repo that can leak your files beats a
+            # styling nit, so the eye lands on what actually blocks first.
+            failed.sort(key=lambda i: 0 if i.get("severity") == "block" else 1)
             rows.append({
-                "name": name, "href": f"/repos/{name}",
+                "name": name, "href": f"/repos/{name}/readiness",
+                "target": result.get("target", "local"),
                 "ready": bool(result.get("ready")),
+                "failing": failed,
                 "blockers": sum(1 for i in failed if i.get("severity") == "block"),
                 "warnings": sum(1 for i in failed if i.get("severity") == "warn"),
             })
         except Exception:
             # One repo must not take down the whole dashboard.
             logger.warning("production readiness assessment failed for %r", name, exc_info=True)
-            rows.append({"name": name, "href": f"/repos/{name}", "error": True})
+            rows.append({"name": name, "href": f"/repos/{name}/readiness", "error": True})
 
     # Self-update status for the daemon's own checkout
     self_update_status = self_update.get_cached_status(_GIT_COMMIT, str(self_update.daemon_repo_root()))
@@ -509,12 +514,13 @@ async def repos_edit_form(request: Request, name: str):
     return _tmpl().TemplateResponse(request, "repos_edit.html", {"repo": repo})
 
 @router.post("/api/repos/{name}/edit")
-async def repos_edit(name: str, source: str = Form(""), platform: str = Form(""), branch: str = Form(""), auto_merge: str = Form(""), read_only: str = Form("")):
+async def repos_edit(name: str, source: str = Form(""), platform: str = Form(""), branch: str = Form(""), auto_merge: str = Form(""), read_only: str = Form(""), target: str = Form("")):
     from core.repos import update_repo_config
     from fastapi.responses import Response
     update_repo_config(name, source or None, platform, branch or None,
                        auto_merge=(auto_merge == "1"),
-                       mode="read-only" if read_only == "read-only" else "")
+                       mode="read-only" if read_only == "read-only" else "",
+                       target=target)
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "reposUpdated"
     return resp
@@ -603,6 +609,15 @@ async def repos_readiness(request: Request, name: str):
     from core import readiness
     result = readiness.assess(name)
     return _tmpl().TemplateResponse(request, "repos_readiness.html", {"result": result})
+
+@router.get("/repos/{name}/readiness", response_class=HTMLResponse)
+async def repos_readiness_page(request: Request, name: str):
+    """The full readiness page — the detail the Home card links to."""
+    from core import readiness
+    result = readiness.assess(name)
+    return _tmpl().TemplateResponse(request, "repos_readiness_page.html", {
+        "active_page": "repos", "result": result,
+    })
 
 # ── Runner CRUD ────────────────────────────────────────────────────────
 

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}{{ result['repo'] }} readiness — Sisyphus{% endblock %}
+{% import "_ui.html" as ui %}
+{% block content %}
+{% call ui.toolbar([{'label': 'Projects', 'href': '/repos'}, {'label': result['repo'], 'href': '/repos/' ~ result['repo']}, {'label': 'Readiness'}]) %}
+<a class="btn btn--ghost btn--sm" href="/repos/{{ result['repo'] }}">Project →</a>
+{% endcall %}
+<div class="panel task-main">
+    {% include "repos_readiness.html" %}
+</div>
+{% endblock %}

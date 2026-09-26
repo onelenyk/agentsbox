@@ -32,15 +32,30 @@
 {% if readiness %}
 <section class="sect">
     <h2 class="sect__h">Readiness <span class="sect__meta">{{ readiness|length }} repo{{ 's' if readiness|length != 1 }} configured</span></h2>
+    <p class="sect__quiet">Is this repo safe to hand to agents unattended?</p>
     <div class="sect__body">
         {% for r in readiness %}
-        <div class="meta-line">
-            <span class="k"><a href="{{ r.href }}" class="mono">{{ r.name }}</a></span>
-            <span class="v">
-                {%- if r.error %}{{ fact('could not assess', 'muted') }}
-                {%- elif r.ready %}{{ fact('ready for a pilot', 'good') }}
-                {%- else %}{{ fact(r.blockers ~ ' blockers · ' ~ r.warnings ~ ' warnings', 'bad') }}{% endif %}
-            </span>
+        <div class="rdl">
+            <div class="meta-line">
+                <span class="k"><a href="{{ r.href }}" class="mono">{{ r.name }}</a></span>
+                <span class="v">
+                    {%- if r.error %}{{ fact('could not assess', 'muted') }}
+                    {%- elif r.target != 'production' %}<span class="tone-muted">{{ r.name }} — local development repo; production checks not applied</span>
+                    {%- elif r.failing %}{{ fact(r.blockers ~ ' blocking · ' ~ r.warnings ~ ' warning' ~ ('s' if r.warnings != 1 else ''), 'bad' if r.blockers else 'warn') }}
+                    {%- else %}{{ fact('ready for a pilot', 'good') }}{% endif %}
+                </span>
+            </div>
+            {% if r.target == 'production' and r.failing %}
+            <ul class="rdl__items">
+                {% for item in r.failing %}
+                <li class="rdl__item">
+                    <span class="rdl__tag{{ ' rdl__tag--block' if item.severity == 'block' }}">{{ 'blocking' if item.severity == 'block' else 'warning' }}</span>
+                    <span class="rdl__text">{{ item.text }}</span>
+                    {%- if item.fix %}<span class="rdl__fix">{% if item.fix_href %}<a href="{{ item.fix_href }}">{{ item.fix }}</a>{% else %}{{ item.fix }}{% endif %}</span>{% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+            {% endif %}
         </div>
         {% endfor %}
     </div>

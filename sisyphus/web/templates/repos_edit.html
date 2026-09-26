@@ -1,4 +1,4 @@
-{% from "_ui.html" import modal %}
+{% from "_ui.html" import modal, choice %}
 {% set fa %}hx-post="/api/repos/{{ repo.name }}/edit" hx-target="#modal-container" hx-swap="outerHTML" hx-on:after-request="htmx.trigger('#repos-list', 'load')"{% endset %}
 {% call modal('Edit ' ~ repo.name, 'Save', fa) %}
 <div class="field"><label>Source</label><input type="text" name="source" value="{{ repo.source }}">
@@ -22,5 +22,14 @@
 <div class="field">
     <label class="check"><input type="checkbox" name="read_only" value="read-only" {% if repo.mode == 'read-only' %}checked{% endif %}> Read-only — agents may read and review, never change</label>
     <span class="hint">Pilot mode: agents explore and answer questions, never commit or open MRs</span>
+</div>
+<div class="field">
+    <label>Readiness target</label>
+    <div class="choices">
+        {{ choice('target', 'local', (repo.target or 'local') != 'production', 'Local development',
+                  'Home shows one calm line — production checks are not applied') }}
+        {{ choice('target', 'production', (repo.target or 'local') == 'production', 'Production',
+                  'Home lists what needs fixing before agents run unattended') }}
+    </div>
 </div>
 {% endcall %}

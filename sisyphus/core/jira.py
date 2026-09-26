@@ -178,7 +178,7 @@ def check() -> dict:
     if not configured():
         return {
             "ok": False,
-            "detail": "Jira is not configured: set JIRA_BASE_URL, JIRA_EMAIL and JIRA_API_TOKEN in .env"
+            "detail": "Jira is not configured: fill in the Jira card under Integrations → Connections"
         }
     try:
         me = myself(actor="human:cli")

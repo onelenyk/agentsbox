@@ -2184,6 +2184,25 @@ a.state__rest:hover { color: var(--text-2); }
 .sect__quiet { margin: 0; padding: var(--sp-5) 0; font-size: var(--fs-md); color: var(--muted); }
 @media (max-width: 900px) { .state__rest { margin-left: 0; text-align: left; } }
 
+/* ── The Readiness card on Home (dashboard_view.html) ──────────────────
+   One repo per block: a name line, then — only for a production repo that
+   fails — its items, blocking first. Each item says the consequence in plain
+   words and where to change it, so the card answers the question in its own
+   heading instead of dumping ids and counts. */
+.rdl { display: flex; flex-direction: column; gap: var(--sp-3); }
+.rdl__items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.rdl__item { display: flex; align-items: baseline; gap: var(--sp-3); font-size: var(--fs-sm); line-height: var(--lh-loose); }
+.rdl__tag {
+  flex: none; font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 1;
+  padding: var(--sp-1) var(--sp-3); border-radius: var(--r-pill);
+  background: var(--panel-2); color: var(--muted); border: 1px solid var(--border);
+}
+.rdl__tag--block { color: var(--bad); background: var(--bad-bg); border-color: var(--bad-bd); }
+.rdl__tag--warn { color: var(--warn); background: var(--warn-bg); border-color: var(--warn-bd); }
+.rdl__text { color: var(--text-2); }
+.rdl__fix { color: var(--muted); }
+.rdl__fix a { color: var(--accent-hi); text-decoration: underline; }
+
 /* ── The team (agents_list.html) ──────────────────────────────────────
    The orchestrator leads across the full width; workers sit in a grid. Each
    card reads top to bottom: who, what it is for, who it works with (counted
