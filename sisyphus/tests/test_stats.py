@@ -80,6 +80,12 @@ def _assess_map(results):
     return _assess
 
 
+def _visible_text(html):
+    """The rendered text with tags stripped — URLs and attributes don't count."""
+    import re
+    return re.sub(r"<[^>]+>", " ", html)
+
+
 def test_dashboard_local_repo_shows_calm_line_no_counts(db_path):
     """A local-target repo reads one calm line on Home and no red counts."""
     from unittest.mock import patch
@@ -92,7 +98,8 @@ def test_dashboard_local_repo_shows_calm_line_no_counts(db_path):
     with patch("core.repos.load_repos", return_value=repos), \
          patch("core.readiness.assess", side_effect=assess):
         html = TestClient(app).get("/api/dashboard/view").text
-    assert "alpha — local development repo; production checks not applied" in html
+    assert "local development repo — production checks not applied" in html
+    assert _visible_text(html).count("alpha") == 1
     assert "blocking" not in html
     assert "blockers" not in html
     assert "warnings" not in html
@@ -121,6 +128,7 @@ def test_dashboard_production_repo_lists_failing_items_blocking_first(db_path):
     assert 'href="/repos/beta"' in html
     assert 'href="/repos/beta/readiness"' in html
     assert "1 blocking · 1 warning" in html
+    assert _visible_text(html).count("beta") == 1
 
 
 def test_dashboard_shows_ready_for_a_ready_production_repo(db_path):
