@@ -1,6 +1,7 @@
 import pytest
 import os
 import sys
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -38,6 +39,32 @@ def _utc_clock(monkeypatch):
     yield
     monkeypatch.undo()
     time.tzset()
+
+
+@pytest.fixture(autouse=True)
+def _config_never_the_real_config_yaml(monkeypatch):
+    """Tests must never read the developer's own untracked config.yaml: the
+    suite's result must not depend on whose machine it runs on. When
+    core.config.config_file() would resolve to the real config.yaml, return the
+    tracked config.example.yaml instead, and reset the cache so every test
+    loads the pinned config.
+
+    The shim only substitutes the real config.yaml — a test that needs a
+    specific config keeps setting it itself (monkeypatching config_file or
+    setting SISYPHUS_CONFIG), and those overrides win."""
+    import core.config
+    root = Path(core.config.__file__).parent.parent
+    real = root / "config.yaml"
+    example = root / "config.example.yaml"
+    original = core.config.config_file
+
+    def _pinned():
+        resolved = original()
+        return example if resolved == real else resolved
+
+    monkeypatch.setattr(core.config, "config_file", _pinned)
+    core.config._config = None
+    yield
 
 
 @pytest.fixture
