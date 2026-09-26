@@ -359,6 +359,26 @@ class TestUpdateRepoConfig:
                    return_value=[{"name": "p", "source": "s", "branch": "main"}]):
             assert core.repos.get_repo("p").get("auto_merge") in (None, False)
 
+    def test_sets_readiness_target(self):
+        repos = [{"name": "repo1", "source": "old-src", "branch": "old-br"}]
+        with patch("core.repos.load_repos", return_value=[r.copy() for r in repos]):
+            fake_config = {"repos": [r.copy() for r in repos]}
+            with patch("core.repos.yaml.safe_load", return_value=fake_config):
+                with patch("core.repos.yaml.dump", return_value="dumped-yaml") as mock_dump:
+                    with patch("core.config.reload_config"):
+                        with patch.object(core.repos.Path, "read_text", return_value=""):
+                            with patch.object(core.repos.Path, "write_text"):
+                                core.repos.update_repo_config("repo1", target="production")
+
+        updated = mock_dump.call_args[0][0]["repos"][0]
+        assert updated["target"] == "production"
+
+    def test_target_defaults_to_local_when_absent(self):
+        """A repo entry without a target reads as local — the readiness default."""
+        with patch("core.repos.load_repos",
+                   return_value=[{"name": "p", "source": "s", "branch": "main"}]):
+            assert core.repos.get_repo("p").get("target", "local") == "local"
+
 
 class TestRepoCredential:
     """A single global token per forge holds only until there are two

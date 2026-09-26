@@ -80,36 +80,59 @@ def _assess_map(results):
     return _assess
 
 
-def test_dashboard_shows_blocker_and_warning_counts_per_repo(db_path):
-    """A repo that is not ready renders its failed items' counts, one line."""
+def test_dashboard_local_repo_shows_calm_line_no_counts(db_path):
+    """A local-target repo reads one calm line on Home and no red counts."""
     from unittest.mock import patch
     assess = _assess_map({
-        "alpha": {"repo": "alpha", "ready": True, "items": [
-            {"key": "check", "ok": True, "severity": "block", "text": "ok", "fix": ""}]},
-        "beta": {"repo": "beta", "ready": False, "items": [
-            {"key": "check", "ok": False, "severity": "block", "text": "no check", "fix": "add one"},
-            {"key": "delivery", "ok": False, "severity": "warn", "text": "local only", "fix": ""}]},
+        "alpha": {"repo": "alpha", "target": "local", "ready": False, "items": [
+            {"key": "check", "ok": False, "severity": "block", "text": "no check", "fix": "add one", "fix_href": ""},
+            {"key": "delivery", "ok": False, "severity": "warn", "text": "local only", "fix": "", "fix_href": ""}]},
     })
-    repos = [{"name": n, "source": f"/tmp/{n}", "branch": "main"} for n in ("alpha", "beta")]
+    repos = [{"name": "alpha", "source": "/tmp/alpha", "branch": "main"}]
     with patch("core.repos.load_repos", return_value=repos), \
          patch("core.readiness.assess", side_effect=assess):
         html = TestClient(app).get("/api/dashboard/view").text
-    assert "1 blockers · 1 warnings" in html
-    assert 'href="/repos/beta"' in html
-    assert 'href="/repos/alpha"' in html
-    assert "ready for a pilot" in html
+    assert "alpha — local development repo; production checks not applied" in html
+    assert "blocking" not in html
+    assert "blockers" not in html
+    assert "warnings" not in html
+    assert "Is this repo safe to hand to agents unattended?" in html
+    assert 'href="/repos/alpha/readiness"' in html
 
 
-def test_dashboard_shows_ready_for_a_ready_repo(db_path):
-    """A fully-ok repo reads 'ready for a pilot' and hides no counts."""
+def test_dashboard_production_repo_lists_failing_items_blocking_first(db_path):
+    """A production-target repo lists its failing items, blocking first."""
     from unittest.mock import patch
-    assess = _assess_map({"alpha": {"repo": "alpha", "ready": True, "items": [
-        {"key": "check", "ok": True, "severity": "block", "text": "ok", "fix": ""}]}})
+    assess = _assess_map({
+        "beta": {"repo": "beta", "target": "production", "ready": False, "items": [
+            {"key": "delivery", "ok": False, "severity": "warn", "text": "Merges happen locally", "fix": "Open the Edit page", "fix_href": "/repos/beta"},
+            {"key": "check", "ok": False, "severity": "block", "text": "Nothing verifies a merge request", "fix": "add one", "fix_href": ""}]},
+    })
+    repos = [{"name": "beta", "source": "/tmp/beta", "branch": "main"}]
+    with patch("core.repos.load_repos", return_value=repos), \
+         patch("core.readiness.assess", side_effect=assess):
+        html = TestClient(app).get("/api/dashboard/view").text
+    # blocking item renders first, marked as blocking
+    assert html.index("Nothing verifies a merge request") < html.index("Merges happen locally")
+    assert "blocking" in html
+    assert "Nothing verifies a merge request" in html
+    assert "Merges happen locally" in html
+    # fix links where a UI place exists
+    assert 'href="/repos/beta"' in html
+    assert 'href="/repos/beta/readiness"' in html
+    assert "1 blocking · 1 warning" in html
+
+
+def test_dashboard_shows_ready_for_a_ready_production_repo(db_path):
+    """A fully-ok production repo reads 'ready for a pilot' and hides no counts."""
+    from unittest.mock import patch
+    assess = _assess_map({"alpha": {"repo": "alpha", "target": "production", "ready": True, "items": [
+        {"key": "check", "ok": True, "severity": "block", "text": "ok", "fix": "", "fix_href": ""}]}})
     with patch("core.repos.load_repos", return_value=[{"name": "alpha", "source": "/tmp/a", "branch": "main"}]), \
          patch("core.readiness.assess", side_effect=assess):
         html = TestClient(app).get("/api/dashboard/view").text
     assert "ready for a pilot" in html
-    assert "blockers" not in html
+    assert "blocking" not in html
 
 
 def test_dashboard_survives_an_assess_that_raises(db_path):
@@ -118,8 +141,8 @@ def test_dashboard_survives_an_assess_that_raises(db_path):
     def _assess(name):
         if name == "beta":
             raise RuntimeError("boom")
-        return {"repo": name, "ready": True, "items": [
-            {"key": "check", "ok": True, "severity": "block", "text": "ok", "fix": ""}]}
+        return {"repo": name, "target": "production", "ready": True, "items": [
+            {"key": "check", "ok": True, "severity": "block", "text": "ok", "fix": "", "fix_href": ""}]}
     repos = [{"name": n, "source": f"/tmp/{n}", "branch": "main"} for n in ("alpha", "beta")]
     with patch("core.repos.load_repos", return_value=repos), \
          patch("core.readiness.assess", side_effect=_assess):

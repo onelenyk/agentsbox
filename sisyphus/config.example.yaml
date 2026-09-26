@@ -107,6 +107,9 @@ repos: []
 #    source: /path/to/my-app           # local path or a git URL
 #    branch: main
 #    platform: github                  # local | github | gitlab (inferred from source)
+#    target: local                     # local (default) | production — Home's
+#                                      # readiness card lists failing items only
+#                                      # for a production repo
 #    token: ${MY_APP_TOKEN}            # per-repo forge credential
 #    check: python -m pytest -q        # run against every MR; exit code is the verdict
 #    auto_merge: true                  # an MR that cleared the gate merges itself
