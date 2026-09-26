@@ -9,8 +9,15 @@ def config_file() -> Path:
     """config.yaml when it exists, else the tracked config.example.yaml — so a
     fresh checkout runs with documented defaults (and the ${VAR} placeholders
     the .env keys plug into) instead of a silently empty config. The daemon's
-    first write (Repos → Add) materialises config.yaml from that base."""
+    first write (Repos → Add) materialises config.yaml from that base.
+
+    SISYPHUS_CONFIG overrides both: when set it names the config file to use
+    (a path), letting a deploy — or the test suite — pin an explicit config and
+    never fall back to an untracked config.yaml. Unset keeps the default."""
     root = Path(__file__).parent.parent
+    override = os.environ.get("SISYPHUS_CONFIG")
+    if override:
+        return Path(override)
     real = root / "config.yaml"
     return real if real.exists() else root / "config.example.yaml"
 
