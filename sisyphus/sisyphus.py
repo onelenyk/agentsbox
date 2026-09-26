@@ -269,7 +269,8 @@ def repos_readiness(name):
     """Assess production readiness of a repository.
 
     Checks: check gate, forge delivery, isolation, egress, tokens, pilot mode.
-    Exit code 1 if any block items fail.
+    Exit code 1 if any block items fail for a production-target repo; a local
+    repo always exits 0, because production checks are not applied to it.
     """
     from core import readiness
     result = readiness.assess(name)
@@ -278,6 +279,11 @@ def repos_readiness(name):
         click.echo("No repo found.")
         raise SystemExit(1)
 
+    target = result.get("target", "local")
+    click.echo(f"Target: {target}")
+    if target != "production":
+        click.echo("Local development repo — production checks are not applied.")
+
     for item in result["items"]:
         icon = "✓" if item["ok"] else "✗"
         severity = f"[{item['severity'].upper()}]"
@@ -285,7 +291,7 @@ def repos_readiness(name):
         if item["fix"]:
             click.echo(f"  → {item['fix']}")
 
-    if not result["ready"]:
+    if target == "production" and not result["ready"]:
         raise SystemExit(1)
 
 

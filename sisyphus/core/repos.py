@@ -128,7 +128,7 @@ def is_read_only(repo_name: str) -> bool:
     return (repo.get("mode") or "").strip() == "read-only"
 
 
-def update_repo_config(name, source=None, platform=None, branch=None, auto_merge=None, mode=None):
+def update_repo_config(name, source=None, platform=None, branch=None, auto_merge=None, mode=None, target=None):
     """Update repo configuration without re-cloning.
 
     In-place edits of the existing entry, so every other key the UI does not
@@ -156,6 +156,14 @@ def update_repo_config(name, source=None, platform=None, branch=None, auto_merge
                     r["mode"] = mode
                 else:
                     r.pop("mode", None)
+            if target is not None:
+                # Readiness target: local (default) or production. Anything
+                # else reads as local, so an empty/garbage value means "not
+                # production" and the key is dropped rather than kept lying.
+                if target in ("local", "production"):
+                    r["target"] = target
+                else:
+                    r.pop("target", None)
             break
     config["repos"] = repos
     _write_config_file(config)
