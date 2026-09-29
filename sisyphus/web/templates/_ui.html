@@ -69,6 +69,23 @@
 <span class="fact{{ ' fact--' ~ tone if tone }}">{{ text }}</span>
 {%- endmacro %}
 
+{# A page an agent generated (the show_html tool), in a frame that sizes to
+   its content. Isolation is the served response's (routes.VIEW_CSP); the
+   sandbox attribute repeats it for the embedding. hx-preserve keeps the frame
+   from reloading on every page refresh. #}
+{% macro agent_view(task_id, m) -%}
+<figure class="aview" id="view-{{ m.seq }}" hx-preserve="true">
+    <figcaption class="aview__head">
+        <span class="aview__title">{{ m.text }}</span>
+        <span class="aview__by">{{ m.author }}</span>
+        <a class="aview__open" href="/api/tasks/{{ task_id }}/view/{{ m.attachment }}" target="_blank" rel="noopener">open ↗</a>
+    </figcaption>
+    <iframe class="aview__frame" src="/api/tasks/{{ task_id }}/view/{{ m.attachment }}"
+            sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
+            referrerpolicy="no-referrer" title="{{ m.text }}"></iframe>
+</figure>
+{%- endmacro %}
+
 {# One file a task left behind, opened the way its kind reads. #}
 {% macro file_row(task_id, f, icon='📎') -%}
 <div class="file">

@@ -14,7 +14,8 @@ speaks the same words.
 
 from core.config import get_config
 from core.repos import get_repo
-from core.providers import detect_platform, _token
+from core.providers import _token
+from core.repos import repo_platform
 
 LOCAL = "local"
 PRODUCTION = "production"
@@ -69,9 +70,7 @@ def assess(repo_name: str) -> dict:
     # Tracker: Jira must be configured for issues to become tasks
     items.append(_assess_tracker())
 
-    # Determine platform (explicit or inferred)
-    source = repo.get("source", "")
-    platform = (repo.get("platform") or "").strip() or detect_platform(source)
+    platform = repo_platform(repo)
 
     # Check: the repo must have a check command
     check_cmd = repo.get("check", "").strip()

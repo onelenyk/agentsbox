@@ -25,7 +25,6 @@
                         hx-on:htmx:before-request="this.textContent='Checking…'"
                         hx-on:htmx:after-request="this.textContent='Check'">Check</button>
                 <button class="btn btn--ghost btn--sm" hx-get="/api/repos/{{ r.name }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
-                <button class="btn btn--ghost btn--sm" hx-post="/api/repos/{{ r.name }}/update" hx-swap="none">Fetch</button>
                 <button class="btn btn--danger btn--sm" hx-delete="/api/repos/{{ r.name }}" hx-confirm="Delete {{ r.name }}?" hx-swap="none" hx-on:after-request="htmx.trigger('#repos-list', 'load')">Delete</button>
             </div>
         </div>

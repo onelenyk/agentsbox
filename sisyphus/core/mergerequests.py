@@ -46,12 +46,8 @@ def is_forge_mr(mr: dict) -> bool:
     """
     if mr.get("forge_url"):
         return True
-    from .repos import get_repo
-    from .providers import detect_platform
-    repo = get_repo(mr.get("repo", "")) or {}
-    source = repo.get("source", "")
-    platform = (repo.get("platform") or "").strip() or detect_platform(source)
-    return platform in ("github", "gitlab")
+    from .repos import get_repo, repo_platform
+    return repo_platform(get_repo(mr.get("repo", "")) or {}) in ("github", "gitlab")
 
 
 # ── Git actions on the user's real local repo (choose target / check / land) ──

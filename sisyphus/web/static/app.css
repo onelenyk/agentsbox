@@ -1440,6 +1440,15 @@ a.ev:hover .txt { color: var(--text); }
 .rawthread > summary:hover { color: var(--text-2); }
 .rawthread + .rawthread { margin-top: var(--sp-6); }
 .outcome__files { margin-top: var(--sp-6); border: 1px solid var(--border); border-radius: var(--r); }
+/* An agent-generated page (_ui.html agent_view). Height comes from the frame's
+   own content via base.html; the default only covers the first paint. */
+.aview { margin: var(--sp-6) 0 0; border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
+.aview__head { display: flex; align-items: baseline; gap: var(--sp-4); padding: var(--sp-4) var(--sp-6); border-bottom: 1px solid var(--border); font-size: var(--fs-base); }
+.aview__title { color: var(--text); font-weight: var(--fw-strong); }
+.aview__by { color: var(--muted); }
+.aview__open { margin-left: auto; color: var(--muted); }
+.aview__open:hover { color: var(--text); }
+.aview__frame { display: block; width: 100%; height: var(--h, 320px); border: 0; background: var(--panel); }
 .rail-trail { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); }
 .rail-delete { align-self: flex-start; }
 

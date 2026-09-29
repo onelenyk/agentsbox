@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import json
 import logging
 import os
@@ -451,13 +452,12 @@ async def repos_list(request: Request):
 
 @router.get("/repos/{name}", response_class=HTMLResponse)
 async def repo_detail_page(request: Request, name: str):
-    from core.repos import get_repo, REPOS_DIR
+    from core.repos import get_repo, source_reach
     from core import repo_context, store
     repo = get_repo(name)
     if not repo:
         return HTMLResponse('<div class="empty">Repository not found</div>', status_code=404)
-    bare = REPOS_DIR / name
-    repo["cloned"] = bare.exists() and (bare / "HEAD").exists()
+    repo["reach"] = source_reach(repo.get("source", ""))
     source = repo.get("source", "")
     tasks = [t for t in store.list_tasks() if t.get("repo") == name and not t.get("parent_id")]
     return _tmpl().TemplateResponse(request, "repos_detail.html", {
@@ -486,22 +486,19 @@ async def repos_add(name: str = Form(...), source: str = Form(...), platform: st
     from core.repos import add_repo
     from fastapi.responses import Response
     try:
-        add_repo(name, source, platform, branch)
-        resp = Response(status_code=200)
-        resp.headers["HX-Trigger"] = "reposUpdated"
-        return resp
-    except Exception as e:
-        return HTMLResponse(f'<div class="error-banner">Error: {e}</div>')
+        await asyncio.to_thread(add_repo, name, source, platform, branch)
+    except Exception as e:  # noqa: BLE001 — the reason goes back to the form
+        return _repo_error(str(e))
+    resp = Response(status_code=200)
+    resp.headers["HX-Trigger"] = "reposUpdated"
+    return resp
 
 @router.get("/api/repos/health")
 async def repos_health():
     from core.repos import list_repos
     repos = list_repos()
-    total = len(repos)
-    cloned = sum(1 for r in repos if r.get("cloned"))
     unreachable = sum(1 for r in repos if r.get("reach") == "missing")
-    return {"total": total, "cloned": cloned, "pending": total - cloned,
-            "unreachable": unreachable}
+    return {"total": len(repos), "unreachable": unreachable}
 
 
 
@@ -517,10 +514,13 @@ async def repos_edit_form(request: Request, name: str):
 async def repos_edit(name: str, source: str = Form(""), platform: str = Form(""), branch: str = Form(""), auto_merge: str = Form(""), read_only: str = Form(""), target: str = Form("")):
     from core.repos import update_repo_config
     from fastapi.responses import Response
-    update_repo_config(name, source or None, platform, branch or None,
-                       auto_merge=(auto_merge == "1"),
-                       mode="read-only" if read_only == "read-only" else "",
-                       target=target)
+    try:
+        update_repo_config(name, source or None, platform, branch or None,
+                           auto_merge=(auto_merge == "1"),
+                           mode="read-only" if read_only == "read-only" else "",
+                           target=target)
+    except ValueError as e:
+        return _repo_error(str(e))
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "reposUpdated"
     return resp
@@ -532,16 +532,6 @@ async def repos_delete(name: str):
     from core.repos import delete_repo
     from fastapi.responses import Response
     delete_repo(name)
-    resp = Response(status_code=200)
-    resp.headers["HX-Trigger"] = "reposUpdated"
-    return resp
-
-
-@router.post("/api/repos/{name}/update")
-async def repos_update(name: str):
-    from core.repos import update_repo
-    from fastapi.responses import Response
-    update_repo(name)
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "reposUpdated"
     return resp
@@ -2073,6 +2063,86 @@ def _classify_diff(text: str):
     adds = sum(1 for c, _ in lines if c == "add")
     dels = sum(1 for c, _ in lines if c == "del")
     return lines, adds, dels
+
+
+# An agent-generated page (the show_html tool) is untrusted markup served from
+# the daemon's own origin, so the isolation is the response's, not the
+# embedding's: the CSP `sandbox` directive gives the document an opaque origin
+# even when opened directly in a tab — no cookies, no same-origin calls to the
+# daemon, no fetch/XHR/websocket anywhere (connect-src 'none'). What stays
+# allowed is what a view is for: inline style and script, data:/https images,
+# and links that open in a new tab.
+VIEW_CSP = ("sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox; "
+            "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+            "img-src data: blob: https:; font-src data:; media-src data: blob:; "
+            "connect-src 'none'; form-action 'none'; base-uri 'none'")
+
+# Appended to every view: reports the page's height to the embedding frame (so
+# it sizes to its content, not a scrollbox) and takes the UI's theme from it
+# as <html data-theme>. The parent only listens to frames it rendered.
+_VIEW_BRIDGE = """<script>(function(){
+var d=document.documentElement;
+function h(){parent.postMessage({sisyphusView:1,h:Math.ceil(d.getBoundingClientRect().height)},"*");}
+addEventListener("message",function(e){if(e.source===parent&&e.data&&e.data.sisyphusTheme){d.dataset.theme=e.data.sisyphusTheme;d.style.colorScheme=e.data.sisyphusTheme;}});
+addEventListener("load",h);if(window.ResizeObserver)new ResizeObserver(h).observe(d);h();
+})();</script>"""
+
+
+@functools.lru_cache(maxsize=1)
+def _view_tokens() -> str:
+    """The UI's design tokens (both themes) as a <style> for agent views, so a
+    page styled with var(--panel), var(--text), var(--accent)… looks like the
+    rest of Sisyphus and follows the theme switch. Wrapped in :where() — zero
+    specificity — so any variable or body rule the agent writes itself wins."""
+    css = (Path(__file__).parent / "static" / "app.css").read_text()
+    blocks = []
+    for sel, scope in ((":root {", ":where(:root)"),
+                       (':root[data-theme="light"] {', ':where(:root[data-theme="light"])')):
+        i = css.index(sel) + len(sel)
+        blocks.append(f"{scope} {{{css[i:css.index('}', i)]}}}")
+    blocks.append(":where(body) { margin: 0; padding: var(--sp-6); background: var(--panel); "
+                  "color: var(--text); font-family: var(--sans); font-size: var(--fs-body); "
+                  "line-height: var(--lh-normal); }")
+    return "<style>" + "\n".join(blocks) + "</style>"
+
+
+_VIEW_HEAD_RE = re.compile(r"<head\b[^>]*>", re.I)
+_VIEW_DOCTYPE_RE = re.compile(r"^\s*<!doctype[^>]*>", re.I)
+
+
+def _with_view_tokens(html: str) -> str:
+    """Insert the tokens first thing in <head> — or right after the doctype, or
+    at the very top: never before a doctype, which would drop the page into
+    quirks mode."""
+    m = _VIEW_HEAD_RE.search(html) or _VIEW_DOCTYPE_RE.search(html)
+    at = m.end() if m else 0
+    return html[:at] + _view_tokens() + html[at:]
+
+
+@router.get("/api/tasks/{task_id}/view/{filename}")
+async def task_view(request: Request, task_id: str, filename: str):
+    """Serve a page an agent showed with show_html, sandboxed (see VIEW_CSP).
+
+    Revalidated by ETag rather than never cached: htmx 1.9's hx-preserve moves
+    the frame on every task-page refresh, and a moved iframe reloads — from
+    the cache (a 304) that is instant instead of a blank flash."""
+    from core import attachments
+    html = attachments.read(task_id, filename) if filename.endswith(".html") else None
+    if html is None:
+        return HTMLResponse("view not found", status_code=404)
+    st = os.stat(attachments.path(task_id, filename))
+    etag = f'"{st.st_mtime_ns:x}-{st.st_size:x}"'
+    headers = {
+        "Content-Security-Policy": VIEW_CSP,
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+        "Cache-Control": "private, no-cache",
+        "ETag": etag,
+    }
+    if request.headers.get("if-none-match") == etag:
+        from fastapi.responses import Response
+        return Response(status_code=304, headers=headers)
+    return HTMLResponse(_with_view_tokens(html) + _VIEW_BRIDGE, headers=headers)
 
 
 @router.get("/api/tasks/{task_id}/read/{filename}", response_class=HTMLResponse)

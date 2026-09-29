@@ -62,7 +62,7 @@ def _daemon(method: str, path: str, payload: dict | None = None, params: dict | 
 
 # ── Tool Functions (thin forwards to the daemon) ─────────────────────────────
 
-# ── Repos (4) ────────────────────────────────────────────────────────────────
+# ── Repos (3) ────────────────────────────────────────────────────────────────
 
 def sisyphus_list_repos() -> dict[str, Any]:
     """List all configured git repos."""
@@ -75,20 +75,15 @@ def sisyphus_add_repo(
     branch: str = "main",
     platform: str = "",
 ) -> dict[str, Any]:
-    """Add a git repo (bare clone + config entry)."""
+    """Add a git repo (config entry; source and platform must agree)."""
     return _daemon("POST", "/api/v1/repos", {
         "name": name, "source": source, "branch": branch, "platform": platform,
     })
 
 
 def sisyphus_delete_repo(name: str) -> dict[str, Any]:
-    """Delete a repo (removes bare clone + config entry)."""
+    """Delete a repo's config entry (the source itself is untouched)."""
     return _daemon("DELETE", f"/api/v1/repos/{name}")
-
-
-def sisyphus_update_repo(name: str) -> dict[str, Any]:
-    """Fetch latest from origin for a bare repo."""
-    return _daemon("POST", f"/api/v1/repos/{name}/update")
 
 
 # ── Runners (6) ─────────────────────────────────────────────────────────────
@@ -236,7 +231,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     },
     {
         "name": "sisyphus_add_repo",
-        "description": "Add a git repository (bare clone + config entry)",
+        "description": "Add a git repository. platform is local (source is a path), github or gitlab (source is a clone URL); empty auto-detects",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -246,7 +241,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 },
                 "source": {
                     "type": "string",
-                    "description": "Git clone URL (e.g. https://github.com/user/repo.git)",
+                    "description": "Local path or git clone URL (e.g. https://github.com/user/repo.git)",
                 },
                 "branch": {
                     "type": "string",
@@ -255,7 +250,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 },
                 "platform": {
                     "type": "string",
-                    "description": "Platform identifier (optional)",
+                    "description": "local, github or gitlab; empty = detect from source",
                     "default": "",
                 },
             },
@@ -264,27 +259,13 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     },
     {
         "name": "sisyphus_delete_repo",
-        "description": "Delete a repo (removes bare clone from disk and config entry)",
+        "description": "Delete a repo's config entry (the source itself is untouched)",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
                     "description": "Repository name to delete",
-                },
-            },
-            "required": ["name"],
-        },
-    },
-    {
-        "name": "sisyphus_update_repo",
-        "description": "Fetch latest changes from origin for a bare repo",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Repository name to update",
                 },
             },
             "required": ["name"],
@@ -535,7 +516,6 @@ HANDLERS: dict[str, Any] = {
     "sisyphus_list_repos": sisyphus_list_repos,
     "sisyphus_add_repo": sisyphus_add_repo,
     "sisyphus_delete_repo": sisyphus_delete_repo,
-    "sisyphus_update_repo": sisyphus_update_repo,
     "sisyphus_list_runners": sisyphus_list_runners,
     "sisyphus_add_runner": sisyphus_add_runner,
     "sisyphus_update_runner": sisyphus_update_runner,

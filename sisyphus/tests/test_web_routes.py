@@ -47,20 +47,17 @@ def test_repos_list(db_path):
 
 
 def test_repos_health(db_path):
-    """Repos health returns 200 with JSON containing total/cloned/pending."""
+    """Repos health counts repos and the ones whose source is gone."""
     client = _make_client()
     mock_repos = [
-        {"name": "r1", "cloned": True},
-        {"name": "r2", "cloned": False},
-        {"name": "r3", "cloned": False},
+        {"name": "r1", "reach": "ok"},
+        {"name": "r2", "reach": "remote"},
+        {"name": "r3", "reach": "missing"},
     ]
     with patch("core.repos.list_repos", return_value=mock_repos):
         response = client.get("/api/repos/health")
     assert response.status_code == 200
-    data = response.json()
-    assert data["total"] == 3
-    assert data["cloned"] == 1
-    assert data["pending"] == 2
+    assert response.json() == {"total": 3, "unreachable": 1}
 
 
 def test_repo_edit_form_toggles_auto_merge_and_keeps_check(db_path, monkeypatch):

@@ -2,7 +2,7 @@
 {% set fa %}hx-post="/api/repos/{{ repo.name }}/edit" hx-target="#modal-container" hx-swap="outerHTML" hx-on:after-request="htmx.trigger('#repos-list', 'load')"{% endset %}
 {% call modal('Edit ' ~ repo.name, 'Save', fa) %}
 <div class="field"><label>Source</label><input type="text" name="source" value="{{ repo.source }}">
-    <span class="hint">Local path or git URL — a URL is cloned</span>
+    <span class="hint">Local path → Local; clone URL → GitHub or GitLab</span>
 </div>
 <div class="field-pair">
     <div class="field"><label>Branch</label><input type="text" name="branch" value="{{ repo.branch }}"></div>

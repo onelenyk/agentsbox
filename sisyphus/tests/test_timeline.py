@@ -175,6 +175,18 @@ class TestFilesListTheDirectoryNotJustWhatWasLinked:
         assert [(x["name"], x["by"]) for x in f["logs"]] == [("task-x-engineer.log", "engineer")]
         assert f["count"] == 4
 
+    def test_a_view_is_not_listed_as_a_file(self, tmp_path):
+        """A page an agent showed is rendered in the result area; listing it
+        again as a file to open would show it twice."""
+        adir = tmp_path / "tasks" / "task-x" / "attachments"
+        adir.mkdir(parents=True)
+        (adir / "view.html").write_text("<h1>x</h1>")
+        (adir / "notes.html").write_text("<p>attached, not shown</p>")
+        msgs = [_m(1, "view", "explorer", "Jira", attachment="view.html"),
+                _m(2, "note", "explorer", "attached", attachment="notes.html")]
+        f = tl.files("task-x", msgs, workspace=str(tmp_path))
+        assert [x["name"] for x in f["produced"]] == ["notes.html"]
+
     def test_a_task_with_nothing_on_disk_has_nothing(self, tmp_path):
         assert tl.files("task-none", [], workspace=str(tmp_path))["count"] == 0
 
