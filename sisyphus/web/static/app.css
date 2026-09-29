@@ -1919,6 +1919,89 @@ body.has-overlay { overflow: hidden; }
   margin-left: calc(var(--stage-col) + var(--sp-3));
 }
 
+/* repos_health.html — the repo health card (core.health). Stage lines reuse
+   .repocheck__*; this adds the proposal form, error excerpts and history. */
+.repo-health { margin-top: var(--sp-8); }
+.repo-health__note { font-size: var(--fs-sm); color: var(--text-2); margin: var(--sp-3) 0; }
+.repo-health__note .status { margin-right: var(--sp-3); }
+.repo-health__notes { font-size: var(--fs-sm); color: var(--text-2); padding: var(--sp-4) var(--sp-6); margin: var(--sp-3) 0; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--panel-2); }
+.repo-health__form { margin: var(--sp-4) 0; }
+.repo-health__detail {
+  margin: var(--sp-2) 0 0 calc(var(--stage-col) + var(--sp-3));
+  font-family: var(--mono); font-size: var(--fs-2xs); line-height: var(--lh-normal);
+  color: var(--text-2); white-space: pre-wrap; word-break: break-word;
+}
+.repo-health__out { margin-left: calc(var(--stage-col) + var(--sp-3)); margin-top: var(--sp-2); font-size: var(--fs-2xs); color: var(--muted); }
+.repo-health__out .repo-health__detail { margin-left: 0; max-height: 320px; overflow: auto; }
+.repo-health__history { display: flex; gap: var(--sp-2); margin: var(--sp-5) 0 var(--sp-3); }
+.repo-health__dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+.repo-health__dot--ok { background: var(--good); }
+.repo-health__dot--fail { background: var(--bad); }
+.repo-health__dot--unknown { background: var(--warn); }
+.repo-health__acts { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--sp-3); margin-top: var(--sp-4); }
+.repo-health__edit > summary { list-style: none; display: inline-flex; }
+.repo-health__edit[open] { flex-basis: 100%; }
+.repos-list__health { display: block; margin-top: var(--sp-3); text-decoration: none; }
+
+/* Screenshots as task resources (_ui.html shot, image_modal.html). */
+.shots { margin-top: var(--sp-6); }
+.shots__head { font-size: var(--fs-xs); font-weight: var(--fw-semibold); letter-spacing: var(--ls-wide); text-transform: uppercase; color: var(--muted); margin-bottom: var(--sp-3); }
+.shots__strip { display: flex; gap: var(--sp-4); overflow-x: auto; padding-bottom: var(--sp-2); }
+.shot { display: flex; flex-direction: column; gap: var(--sp-2); width: 148px; flex: none; padding: var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--panel-2); color: inherit; font: inherit; text-align: left; cursor: zoom-in; }
+.shot:hover { border-color: var(--border-2); }
+.shot__img { width: 100%; height: 260px; object-fit: contain; border-radius: var(--r-xs); background: var(--inset); }
+.shot__cap { font-size: var(--fs-2xs); line-height: var(--lh-snug); color: var(--text-2); }
+.shot--small { width: 88px; }
+.shot--small .shot__img { height: 150px; }
+.shot-view { display: flex; flex-direction: column; align-items: center; gap: var(--sp-4); }
+.shot-view__img { max-height: 70vh; max-width: 100%; border-radius: var(--r-md); border: 1px solid var(--border); background: var(--inset); }
+.shot-view__meta { display: flex; flex-wrap: wrap; gap: var(--sp-5); font-size: var(--fs-xs); color: var(--muted); }
+
+/* devices.html / devices_list.html — the Devices page (core.devices). */
+.devices__lede { max-width: 760px; margin: 0 0 var(--sp-6); font-size: var(--fs-sm); color: var(--text-2); }
+.devices__summary { display: flex; gap: var(--sp-3); flex-wrap: wrap; margin-bottom: var(--sp-4); }
+.devices__grid { margin-bottom: var(--sp-8); }
+.device__title { min-width: 0; }
+.device__glyph--android { color: var(--good); background: var(--good-bg); }
+.device__glyph--ios { color: var(--text); background: var(--panel-2); }
+.device__glyph--ios::before { content: ""; display: block; width: 10px; height: 16px; border: 1.5px solid currentColor; border-radius: var(--r-xs); }
+.device__specs { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); margin-top: var(--sp-4); font-size: var(--fs-xs); color: var(--muted); }
+.device__specs b { color: var(--text); font-weight: var(--fw-strong); }
+.device__meta { margin-top: var(--sp-3); font-size: var(--fs-2xs); color: var(--muted); word-break: break-all; }
+.device__lease { margin-top: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-sm); background: var(--accent-bg); color: var(--text-2); font-size: var(--fs-xs); }
+.device--leased { border-color: var(--accent-bd); }
+.device--physical .device__allow { border-color: var(--warn-bd); }
+.device .ecard__foot { flex-wrap: wrap; gap: var(--sp-3); }
+.device__acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-left: auto; }
+.device-presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); }
+.device-preset { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-4); border: 1px solid var(--border); border-radius: var(--r-sm); cursor: pointer; }
+.device-preset:has(input:checked) { border-color: var(--accent); background: var(--accent-bg); }
+.device-preset input { position: absolute; opacity: 0; pointer-events: none; }
+.device-preset__name { font-weight: var(--fw-strong); color: var(--text); }
+.device-preset__spec { font-size: var(--fs-2xs); color: var(--muted); }
+.device-peek { display: flex; justify-content: center; }
+.device-peek__img { max-height: 70vh; max-width: 100%; border-radius: var(--r-md); border: 1px solid var(--border); }
+
+/* tools_view.html — the Tools page (core.tools). */
+.tools { margin-bottom: var(--sp-8); }
+.tools__group { margin: var(--sp-6) 0 var(--sp-2); font-size: var(--fs-xs); font-weight: var(--fw-semibold); letter-spacing: var(--ls-wide); text-transform: uppercase; color: var(--muted); }
+.tools__row { display: grid; grid-template-columns: 88px 120px 96px minmax(0, 1fr) minmax(0, 1.4fr); gap: var(--sp-5); align-items: baseline; padding: var(--sp-3) 0; border-top: 1px solid var(--border); font-size: var(--fs-sm); }
+.tools__bin { color: var(--text); font-weight: var(--fw-strong); }
+.tools__ver { color: var(--text-2); }
+.tools__what { color: var(--text-2); }
+.tools__path { color: var(--muted); font-size: var(--fs-xs); word-break: break-all; }
+.tools__hint { color: var(--warn); font-family: var(--sans); }
+.tools__row--missing .tools__bin { color: var(--muted); }
+.tools__pathrow { display: flex; align-items: baseline; gap: var(--sp-4); padding: var(--sp-2) 0; font-size: var(--fs-sm); flex-wrap: wrap; }
+.tools__idx { color: var(--muted); min-width: 24px; text-align: right; }
+.tools__dir { color: var(--text-2); word-break: break-all; }
+.tools__pathrow--gone .tools__dir { color: var(--muted); text-decoration: line-through; }
+.tools__gone { color: var(--warn); font-size: var(--fs-xs); }
+.tools__suggest { margin: var(--sp-3) 0 var(--sp-5); padding: var(--sp-3) var(--sp-5); border: 1px dashed var(--border-2); border-radius: var(--r-sm); }
+.tools__form { margin-top: var(--sp-4); }
+.tools__form textarea { width: 100%; }
+.tools__acts { display: flex; gap: var(--sp-3); margin-top: var(--sp-4); }
+
 /* repos_list.html component styles */
 .repos-list__link {
   display: block;

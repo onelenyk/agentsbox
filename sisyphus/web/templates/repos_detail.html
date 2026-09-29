@@ -20,6 +20,8 @@
 
     <div id="repo-readiness-detail"></div>
 
+    <div id="repo-health-slot" hx-get="/api/repos/{{ repo.name }}/health" hx-trigger="load" hx-swap="innerHTML"></div>
+
     {# The newest few, one line each — the whole history is the project's
        board, one click on. This list used to print every goal in full and ran
        to twenty thousand pixels. #}
@@ -42,7 +44,7 @@
             <span class="resicon">{{ '📁' if res.kind == 'dir' else '📄' }}</span>
             <div class="resmeta">
                 <span class="mono">{{ res.path }}</span>
-                <span class="ressub">{{ res.label }}{% if res.kind == 'file' %} · {{ (res.size / 1024)|round(1) }} KB{% else %} · {{ res.count }} file{{ 's' if res.count != 1 else '' }}{% endif %}</span>
+                <span class="ressub">{{ res.label }}{% if res.kind == 'file' %} · {{ (res.size / 1024)|round(1) }} KB{% else %} · {{ res.count }}{{ '+' if res.capped }} file{{ 's' if res.count != 1 else '' }}{% endif %}</span>
             </div>
             {% if res.kind == 'file' %}
             <button class="btn btn--ghost btn--sm" hx-get="/api/repos/{{ repo.name }}/resource?path={{ res.path|urlencode }}" hx-target="#modal-container" hx-swap="innerHTML">View</button>

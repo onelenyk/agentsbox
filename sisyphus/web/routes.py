@@ -1,4 +1,5 @@
 import asyncio
+import time
 import functools
 import json
 import logging
@@ -173,6 +174,15 @@ async def startup():
     from core import jira_intake
     lifecycle.start_loop(jira_intake.poll_forever(), "jira poll")
 
+    # Repo health (core.health): re-run each repo's build/tests once a day after
+    # its first, human-started run.
+    from core import health
+    lifecycle.start_loop(health.health_forever(), "health")
+
+    # Devices (core.devices): emulators we started go off after sitting idle.
+    from core import devices
+    lifecycle.start_loop(devices.devices_forever(), "devices")
+
     # A consistent snapshot at boot and daily after — restore is only as good
     # as the last time anything actually called snapshot().
     from core import backup
@@ -326,6 +336,175 @@ def _loops() -> list:
     return loops
 
 
+# ── Devices (core.devices) ─────────────────────────────────────────────
+
+@router.get("/devices", response_class=HTMLResponse)
+async def devices_page(request: Request):
+    return _tmpl().TemplateResponse(request, "devices.html", {"active_page": "devices"})
+
+
+def _device_error(message: str):
+    from fastapi.responses import Response
+    resp = Response(status_code=400)
+    resp.headers["HX-Trigger"] = json.dumps({"formError": message})
+    return resp
+
+
+def _devices_said(message: str):
+    from fastapi.responses import Response
+    resp = Response(status_code=200)
+    resp.headers["HX-Trigger"] = json.dumps({"devicesUpdated": True, "devicesSaid": message})
+    return resp
+
+
+@router.get("/api/devices/list", response_class=HTMLResponse)
+async def devices_list(request: Request, fresh: str = ""):
+    from core import devices
+    devs = await asyncio.to_thread(devices.discover, bool(fresh))
+    return _tmpl().TemplateResponse(request, "devices_list.html", {
+        "devices": devs, "max_leases": devices.max_leases()})
+
+
+@router.post("/api/devices/{device_id}/allow")
+async def device_allow(device_id: str, allowed: str = Form("0")):
+    from core import devices
+    devices.set_allowed(device_id, allowed == "1")
+    return _devices_said("Agents may use it" if allowed == "1" else "Agents will not use it")
+
+
+async def _device_action(fn, *args, said: str, **kw):
+    from core import devices
+    try:
+        await asyncio.to_thread(fn, *args, **kw)
+    except devices.DeviceError as e:
+        return _device_error(str(e))
+    return _devices_said(said)
+
+
+@router.post("/api/devices/{device_id}/start")
+async def device_start(device_id: str, window: str = ""):
+    from core import devices
+    # Returns at once: a cold boot takes a minute, and the list polls while booting.
+    return await _device_action(devices.start, device_id, window=bool(window), wait=False,
+                                said="Starting…")
+
+
+@router.post("/api/devices/{device_id}/stop")
+async def device_stop(device_id: str):
+    from core import devices
+    return await _device_action(devices.stop, device_id, said="Stopped")
+
+
+@router.post("/api/devices/{device_id}/wipe")
+async def device_wipe(device_id: str):
+    from core import devices
+    return await _device_action(devices.wipe, device_id, said="Wiped")
+
+
+@router.post("/api/devices/{device_id}/delete")
+async def device_delete(device_id: str):
+    from core import devices
+    return await _device_action(devices.delete, device_id, said="Deleted")
+
+
+@router.get("/api/devices/new-form", response_class=HTMLResponse)
+async def device_new_form(request: Request):
+    from core import devices
+    images, runtimes = await asyncio.gather(asyncio.to_thread(devices.android_images),
+                                            asyncio.to_thread(devices.ios_runtimes))
+    return _tmpl().TemplateResponse(request, "device_new.html", {
+        "presets": devices.PRESETS, "android_images": images, "ios_runtimes": runtimes})
+
+
+@router.post("/api/devices")
+async def device_create(platform: str = Form("android"), preset: str = Form("phone"),
+                        name: str = Form(""), image: str = Form("")):
+    from core import devices
+    # The image list mixes both platforms; keep the one that fits.
+    if platform == "android" and not image.startswith("system-images;"):
+        image = ""
+    if platform == "ios" and image.startswith("system-images;"):
+        image = ""
+    return await _device_action(devices.create, platform, preset, name, image, said="Created")
+
+
+@router.get("/api/devices/{device_id}/peek", response_class=HTMLResponse)
+async def device_peek(request: Request, device_id: str):
+    from core import devices
+    d = devices.get(device_id)
+    if not d:
+        return _device_error("no such device")
+    import urllib.parse
+    src = f"/api/devices/{urllib.parse.quote(device_id, safe='')}/screen.png?t={int(time.time())}"
+    return _tmpl().TemplateResponse(request, "device_peek.html", {"name": d["name"], "src": src})
+
+
+@router.get("/api/devices/{device_id}/screen.png")
+async def device_screen(device_id: str):
+    from core import devices
+    from fastapi.responses import Response
+    d = devices.get(device_id)
+    if not d or d["state"] != "ready":
+        return Response(status_code=404)
+    try:
+        png = await asyncio.to_thread(devices.screenshot, d)
+    except devices.DeviceError as e:
+        return Response(str(e), status_code=502)
+    return Response(png, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+# ── Tools & PATH (core.tools) ──────────────────────────────────────────
+
+@router.get("/tools", response_class=HTMLResponse)
+async def tools_page(request: Request):
+    return _tmpl().TemplateResponse(request, "tools.html", {"active_page": "tools"})
+
+
+def _tools_context() -> dict:
+    from core import tools
+    rows = tools.tools()
+    return {"tools": rows, "groups": list(dict.fromkeys(r["group"] for r in rows)),
+            "path": tools.path_entries(), "settings": tools.settings(),
+            "suggestions": tools.suggestions(), "sdk": tools.android_sdk()}
+
+
+async def _tools_view(request: Request, flash: str = ""):
+    # Every tool is probed for its version — a cold pass is seconds, off the loop.
+    ctx = await asyncio.to_thread(_tools_context)
+    resp = _tmpl().TemplateResponse(request, "tools_view.html", ctx)
+    if flash:
+        resp.headers["HX-Trigger"] = json.dumps({"toolsSaved": flash})
+    return resp
+
+
+@router.get("/api/tools/view", response_class=HTMLResponse)
+async def tools_view(request: Request, fresh: str = ""):
+    if fresh:
+        from core.runner_catalog import clear_cache
+        clear_cache()
+    return await _tools_view(request)
+
+
+@router.post("/api/tools/settings", response_class=HTMLResponse)
+async def tools_settings(request: Request, extra_path: str = Form(""), ANDROID_HOME: str = Form(""),
+                         JAVA_HOME: str = Form("")):
+    from core import tools
+    from core.runner_catalog import clear_cache
+    tools.save_settings(extra_path.splitlines(), {"ANDROID_HOME": ANDROID_HOME, "JAVA_HOME": JAVA_HOME})
+    clear_cache()
+    return await _tools_view(request, "Saved — new workers get this environment")
+
+
+@router.post("/api/tools/add-path", response_class=HTMLResponse)
+async def tools_add_path(request: Request, path: str = Form(...)):
+    from core import tools
+    from core.runner_catalog import clear_cache
+    cur = tools.settings()
+    tools.save_settings(cur["extra_path"] + [path], {v: cur[v] for v in tools.EDITABLE_VARS})
+    clear_cache()
+    return await _tools_view(request, f"Added {path}")
+
+
 @router.get("/runtime", response_class=HTMLResponse)
 async def runtime_page(request: Request):
     import os
@@ -441,13 +620,14 @@ async def repos_page(request: Request):
 @router.get("/api/repos/list", response_class=HTMLResponse)
 async def repos_list(request: Request):
     from core.repos import list_repos
-    from core import store
+    from core import health, store
     repos = list_repos()
     tasks = [t for t in store.list_tasks() if not t.get("parent_id")]
     for r in repos:  # annotate each repo with its task progress (Projects-style)
         rt = [t for t in tasks if t.get("repo") == r["name"]]
         r["task_total"] = len(rt)
         r["task_done"] = sum(1 for t in rt if t["status"] == "done")
+        r["health_last"] = health.last_run(r["name"])
     return _tmpl().TemplateResponse(request, "repos_list.html", {"repos": repos})
 
 @router.get("/repos/{name}", response_class=HTMLResponse)
@@ -460,10 +640,15 @@ async def repo_detail_page(request: Request, name: str):
     repo["reach"] = source_reach(repo.get("source", ""))
     source = repo.get("source", "")
     tasks = [t for t in store.list_tasks() if t.get("repo") == name and not t.get("parent_id")]
+    # Both walk the human's checkout — off the event loop, so a big or slow
+    # tree slows this page down instead of freezing the whole daemon.
+    resources, summary = await asyncio.gather(
+        asyncio.to_thread(repo_context.resources, source),
+        asyncio.to_thread(repo_context.summary, source))
     return _tmpl().TemplateResponse(request, "repos_detail.html", {
         "active_page": "repos", "repo": repo,
-        "resources": repo_context.resources(source),
-        "summary": repo_context.summary(source),
+        "resources": resources,
+        "summary": summary,
         "tasks": tasks,
         "done": sum(1 for t in tasks if t["status"] == "done"),
     })
@@ -489,6 +674,7 @@ async def repos_add(name: str = Form(...), source: str = Form(...), platform: st
         await asyncio.to_thread(add_repo, name, source, platform, branch)
     except Exception as e:  # noqa: BLE001 — the reason goes back to the form
         return _repo_error(str(e))
+    _start_health_profiling(name)
     resp = Response(status_code=200)
     resp.headers["HX-Trigger"] = "reposUpdated"
     return resp
@@ -608,6 +794,78 @@ async def repos_readiness_page(request: Request, name: str):
     return _tmpl().TemplateResponse(request, "repos_readiness_page.html", {
         "active_page": "repos", "result": result,
     })
+
+# ── Repo health (core.health) ──────────────────────────────────────────
+
+def _start_health_profiling(name: str) -> None:
+    """Kick off the repo-profiler for a freshly added repo. Best-effort: the
+    repo is added either way, and the card offers the same button."""
+    from core import health
+    try:
+        if not health.profile(name) and not health.profiling_task(name):
+            health.start_profiling(name)
+    except Exception:  # noqa: BLE001
+        logger.exception("could not start health profiling for %s", name)
+
+
+async def _health_card(request: Request, name: str, flash: str = ""):
+    from core import health
+    from core.repos import get_repo
+    if not get_repo(name):
+        return HTMLResponse('<div class="empty">Repository not found</div>', status_code=404)
+    history = health.runs(name, 10)
+    return _tmpl().TemplateResponse(request, "repos_health.html", {
+        "name": name,
+        "profile": health.profile(name),
+        "proposal": health.get_proposal(name),
+        "profiling": health.profiling_task(name),
+        "running": health.running().get(name),
+        "busy": bool(health.running()),
+        "last": history[0] if history else None,
+        "history": list(reversed(history)),
+        "flash": flash,
+    })
+
+
+@router.get("/api/repos/{name}/health", response_class=HTMLResponse)
+async def repo_health(request: Request, name: str):
+    """The health card: build · tests · coverage from the latest run."""
+    return await _health_card(request, name)
+
+
+@router.post("/api/repos/{name}/health/run", response_class=HTMLResponse)
+async def repo_health_run(request: Request, name: str):
+    from core import health
+    if not health.profile(name):
+        return _repo_error(f"{name} has no health profile yet")
+    started = health.start(name)
+    return await _health_card(request, name, "" if started else "another health run is in progress")
+
+
+@router.post("/api/repos/{name}/health/profile", response_class=HTMLResponse)
+async def repo_health_profile(request: Request, name: str):
+    from core import health
+    if not health.profiling_task(name):
+        health.clear_proposal(name)
+        health.start_profiling(name)
+    return await _health_card(request, name)
+
+
+@router.post("/api/repos/{name}/health/save", response_class=HTMLResponse)
+async def repo_health_save(request: Request, name: str, build: str = Form(""), test: str = Form(""),
+                           coverage: str = Form(""), junit: str = Form(""),
+                           coverage_report: str = Form(""), timeout: str = Form("")):
+    """Confirm a profile (the agent's proposal, possibly edited) into config.yaml."""
+    from core import health
+    from core.repos import update_repo_config
+    prof = health.clean_profile({"build": build, "test": test, "coverage": coverage, "junit": junit,
+                                 "coverage_report": coverage_report, "timeout": timeout})
+    if not (prof.get("build") or prof.get("test")):
+        return _repo_error("a health profile needs at least a build or a test command")
+    update_repo_config(name, health=prof)
+    health.clear_proposal(name)
+    return await _health_card(request, name)
+
 
 # ── Runner CRUD ────────────────────────────────────────────────────────
 
@@ -2143,6 +2401,40 @@ async def task_view(request: Request, task_id: str, filename: str):
         from fastapi.responses import Response
         return Response(status_code=304, headers=headers)
     return HTMLResponse(_with_view_tokens(html) + _VIEW_BRIDGE, headers=headers)
+
+
+@router.get("/api/tasks/{task_id}/file/{filename}")
+async def task_file(request: Request, task_id: str, filename: str):
+    """A task's image attachment, as the image. Raster types only (see
+    attachments.IMAGE_TYPES) — anything else is not served from here."""
+    from core import attachments
+    from fastapi.responses import FileResponse, Response
+    ctype = attachments.image_type(filename)
+    path = attachments.path(task_id, filename)
+    if not ctype or not attachments._is_bare(filename) or not os.path.isfile(path):
+        return Response(status_code=404)
+    st = os.stat(path)
+    etag = f'"{st.st_mtime_ns:x}-{st.st_size:x}"'
+    headers = {"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-cache", "ETag": etag}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    return FileResponse(path, media_type=ctype, headers=headers)
+
+
+@router.get("/api/tasks/{task_id}/image/{filename}", response_class=HTMLResponse)
+async def task_image_modal(request: Request, task_id: str, filename: str):
+    """One screenshot, full size, with its caption and its neighbours."""
+    from core import store, timeline
+    msgs = store.get_thread(task_id)
+    images = sorted((f for f in timeline.files(task_id, msgs)["produced"] if f["kind"] == "image"),
+                    key=lambda f: f["at"])
+    names = [f["name"] for f in images]
+    if filename not in names:
+        return HTMLResponse('<div class="modal-backdrop" onclick="this.remove()"><div class="modal"><div class="modal__body"><div class="empty">Image not found.</div></div></div></div>')
+    i = names.index(filename)
+    return _tmpl().TemplateResponse(request, "image_modal.html", {
+        "task_id": task_id, "img": images[i], "index": i, "count": len(images),
+        "prev": names[i - 1] if i > 0 else None, "next": names[i + 1] if i + 1 < len(names) else None})
 
 
 @router.get("/api/tasks/{task_id}/read/{filename}", response_class=HTMLResponse)

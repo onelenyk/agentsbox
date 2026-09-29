@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Tools — Sisyphus{% endblock %}
+{% import "_ui.html" as ui %}
+{% block content %}
+{% call ui.toolbar([{'label': 'Tools'}], 'what agents can run, and the PATH that finds it') %}
+<button class="btn btn--ghost btn--sm" hx-get="/api/tools/view?fresh=1" hx-target="#tools-view" hx-swap="innerHTML">Re-check</button>
+{% endcall %}
+<div id="tools-view" hx-get="/api/tools/view" hx-trigger="load" hx-swap="innerHTML">
+    <div class="empty">Looking for tools…</div>
+</div>
+{% endblock %}

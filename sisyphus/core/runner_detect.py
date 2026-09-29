@@ -28,6 +28,12 @@ _EXTRA_DIRS = [
     "~/.bun/bin",
     "~/n/bin",
     "~/.volta/bin",
+    # Device tooling (core.devices, the QA agent): the Android SDK's own dirs
+    # and Maestro's installer target. Never on a shell PATH by default.
+    "~/Library/Android/sdk/platform-tools",
+    "~/Library/Android/sdk/emulator",
+    "~/Library/Android/sdk/cmdline-tools/latest/bin",
+    "~/.maestro/bin",
 ]
 
 

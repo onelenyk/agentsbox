@@ -44,18 +44,28 @@ def resources(source_path: str) -> list:
         if not p.exists():
             continue
         if p.is_dir():
-            files = []
-            for f in sorted(p.rglob("*")):
-                if f.is_file():
-                    files.append(str(f.relative_to(root)))
-                    if len(files) >= 100:
-                        break
+            files = _first_files(root, p, 100)
             out.append({"path": rel, "label": label, "kind": "dir",
-                        "count": len(files), "files": files})
+                        "count": len(files), "capped": len(files) >= 100, "files": files})
         else:
             out.append({"path": rel, "label": label, "kind": "file",
                         "size": p.stat().st_size})
     return out
+
+
+def _first_files(root: Path, top: Path, limit: int) -> list:
+    """Up to *limit* files under *top*, in sorted order, stopping as soon as it
+    has them. rglob("*") + sorted() walked and sorted the whole tree first: a
+    repo's .claude dir held 575k files (11 GB of worktrees) and the repo page
+    took ten seconds — with the daemon frozen the whole time."""
+    files: list = []
+    for dirpath, dirnames, filenames in os.walk(top):
+        dirnames[:] = sorted(d for d in dirnames if d not in _SKIP_DIRS)
+        for fn in sorted(filenames):
+            files.append(str((Path(dirpath) / fn).relative_to(root)))
+            if len(files) >= limit:
+                return files
+    return files
 
 
 def read_resource(source_path: str, rel: str):

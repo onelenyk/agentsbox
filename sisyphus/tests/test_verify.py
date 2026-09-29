@@ -190,3 +190,27 @@ class TestDiffBaseline:
         rng = mergerequests.diff_range({"bare_path": "/nonexistent",
                                         "target_branch": "main", "source_branch": "x"})
         assert rng["base"] == "" and rng["head"] == ""
+
+
+class TestSetupHook:
+    """The check runs with the repo's setup hook applied — kmp-driver's
+    `make test` needs a gitignored local.properties the clone never has."""
+
+    def test_gitignored_file_reaches_the_check(self, repo, tmp_path, monkeypatch):
+        from unittest.mock import patch
+        secret = tmp_path / "local.properties"
+        secret.write_text("sdk.dir=/x")
+        monkeypatch.setattr(verify, "check_command", lambda name: "test -f local.properties")
+        cfg = [{"name": "r", "source": str(repo),
+                "setup": {"copy": [{"from": str(secret), "to": "local.properties"}]}}]
+        with patch("core.repos.load_repos", return_value=cfg):
+            res = verify.run_check(_mr(repo))
+        assert res["ok"] is True, res
+
+    def test_a_failing_hook_fails_the_check_with_its_reason(self, repo, monkeypatch):
+        from unittest.mock import patch
+        monkeypatch.setattr(verify, "check_command", lambda name: "true")
+        cfg = [{"name": "r", "source": str(repo), "setup": {"copy": ["nope.properties"]}}]
+        with patch("core.repos.load_repos", return_value=cfg):
+            res = verify.run_check(_mr(repo))
+        assert res["ok"] is False and res["reason"] == "setup hook failed"

@@ -21,13 +21,26 @@ def _is_bare(name: str) -> bool:
     return bool(name) and "/" not in name and "\\" not in name and not name.startswith(".")
 
 
+# Raster images a browser shows as-is. SVG is left out on purpose: it is a
+# document that can carry script, and it would be served from the daemon's origin.
+IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+               ".webp": "image/webp", ".gif": "image/gif"}
+MAX_ATTACH_BYTES = 10 * 1024 * 1024
+
+
+def image_type(filename: str) -> Optional[str]:
+    """The image/* type of an attachment, or None when it is not an image."""
+    return IMAGE_TYPES.get(os.path.splitext(filename or "")[1].lower())
+
+
 def save_from_worktree(task_id: str, worktree: str, filename: str) -> bool:
     """Copy *filename* out of the worker's worktree into the task's store.
-    Returns False if the name is unsafe or the file isn't there."""
+    Returns False if the name is unsafe, the file isn't there, or it is larger
+    than MAX_ATTACH_BYTES."""
     if not _is_bare(filename) or not worktree:
         return False
     src = Path(worktree) / filename
-    if not src.is_file():
+    if not src.is_file() or src.stat().st_size > MAX_ATTACH_BYTES:
         return False
     d = _dir(task_id)
     d.mkdir(parents=True, exist_ok=True)

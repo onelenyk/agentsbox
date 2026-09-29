@@ -1,3 +1,4 @@
+{% from "_ui.html" import fact %}
 {% if repos %}
 <div class="card-grid">
     {% for r in repos %}
@@ -13,6 +14,11 @@
             {% else %}<span class="status status--failed right" title="source path not found or not a git repo">unreachable</span>{% endif %}
         </div>
         <a href="/repos/{{ r.name }}" class="term wrap repos-list__link">{{ r.source }}</a>
+        {% if r.health_last %}{% set h = r.health_last %}
+        <a class="repos-list__health" href="/repos/{{ r.name }}" title="health · {{ h.ran_at[:16].replace('T', ' ') }}">
+            {{ fact(('✓ ' if h.status == 'ok' else ('✗ ' if h.status == 'fail' else '? ')) ~ (h.summary or h.status), {'ok': 'good', 'fail': 'bad'}.get(h.status, 'warn')) }}
+        </a>
+        {% endif %}
         {# "remote" above only means the source looks like a URL — nothing has
            ever dialled it. The check below is the part that actually tries. #}
         <div id="repo-check-{{ loop.index0 }}"></div>

@@ -41,3 +41,29 @@ def test_summary_prunes_and_counts(tmp_path):
 def test_missing_source(tmp_path):
     assert repo_context.resources(str(tmp_path / "nope")) == []
     assert repo_context.summary(str(tmp_path / "nope")) == {"exists": False}
+
+
+def test_a_huge_context_dir_is_listed_without_walking_all_of_it(tmp_path, monkeypatch):
+    """kmp-driver's .claude held 575k files; listing it walked and sorted every
+    one before taking 100, freezing the repo page (and the daemon) for 10s.
+    The walk must stop at the limit, in sorted order, skipping build dirs."""
+    import os
+    from core import repo_context
+    d = tmp_path / ".claude"
+    for sub in ("b", "a", "build"):
+        (d / sub).mkdir(parents=True)
+        for i in range(80):
+            (d / sub / f"f{i:03}.txt").write_text("x")
+    seen = []
+    real_walk = os.walk
+
+    def counting_walk(top, *a, **k):
+        for entry in real_walk(top, *a, **k):
+            seen.append(entry[0])
+            yield entry
+
+    monkeypatch.setattr(repo_context.os, "walk", counting_walk)
+    res = {r["path"]: r for r in repo_context.resources(str(tmp_path))}[".claude"]
+    assert res["count"] == 100 and res["capped"] is True
+    assert res["files"][0] == ".claude/a/f000.txt" and res["files"][-1] == ".claude/b/f019.txt"
+    assert not any(p.endswith("build") for p in seen)       # pruned, never entered

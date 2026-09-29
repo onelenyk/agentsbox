@@ -73,17 +73,18 @@ def run_check(mr: dict, timeout: int = DEFAULT_TIMEOUT) -> dict:
                     "output": add.stderr.strip()[:OUTPUT_TAIL], "duration_ms": _ms(started),
                     "reason": f"could not check out {branch!r}"}
 
-        env = dict(os.environ)
-        from core.config import worker_env
-        env.update(worker_env() or {})
-        from core.runner_detect import path_with_install_dirs
-        env["PATH"] = path_with_install_dirs(env.get("PATH", ""))
-        # The check reads the repo; it has no business reaching the daemon's DB.
-        from .db import DB_PATH as _daemon_db
-        env["SISYPHUS_DB_PROTECT"] = _daemon_db
+        # The gitignored files the build needs (local.properties, .env…) —
+        # without them a check fails on the environment, not on the change.
+        from . import setup_hook
+        try:
+            setup_hook.apply_setup(mr.get("repo", ""), wt)
+        except setup_hook.SetupHookError as e:
+            return {"ran": True, "ok": False, "exit_code": None, "command": cmd,
+                    "output": str(e)[:OUTPUT_TAIL], "duration_ms": _ms(started),
+                    "reason": "setup hook failed"}
 
         try:
-            proc = subprocess.run(cmd, shell=True, cwd=wt, env=env,
+            proc = subprocess.run(cmd, shell=True, cwd=wt, env=check_env(),
                                   capture_output=True, text=True, timeout=timeout)
         except subprocess.TimeoutExpired:
             return {"ran": True, "ok": False, "exit_code": None, "command": cmd,
@@ -98,6 +99,20 @@ def run_check(mr: dict, timeout: int = DEFAULT_TIMEOUT) -> dict:
         subprocess.run(["git", "-C", bare, "worktree", "remove", "--force", wt],
                        capture_output=True, text=True)
         shutil.rmtree(wt, ignore_errors=True)
+
+
+def check_env() -> dict:
+    """The environment a daemon-run command gets (this check, core.health):
+    the daemon's own plus worker_env, with the runner install dirs on PATH."""
+    env = dict(os.environ)
+    from core.config import worker_env
+    env.update(worker_env() or {})
+    from core.runner_detect import path_with_install_dirs
+    env["PATH"] = path_with_install_dirs(env.get("PATH", ""))
+    # The command reads the repo; it has no business reaching the daemon's DB.
+    from .db import DB_PATH as _daemon_db
+    env["SISYPHUS_DB_PROTECT"] = _daemon_db
+    return env
 
 
 def _ms(started: float) -> int:

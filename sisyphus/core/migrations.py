@@ -26,7 +26,9 @@ logger = logging.getLogger(__name__)
 # 6 = jira_sync, tracks polling state per JQL for intake polling (2026-09-25).
 # 7 = tasks.no_result_role / no_result_streak, the per-task no-result escalation
 #     counter (2026-09-26).
-CURRENT_VERSION = 7
+# 8 = repo_health_runs / repo_health_proposals, the repo health card (2026-09-29).
+# 9 = devices / device_leases / device_boots, agents' devices (2026-09-29).
+CURRENT_VERSION = 9
 
 # Tables of features that are gone. Dropped on upgrade so a database does not
 # keep carrying — and a reader keep wondering about — data nothing reads.
@@ -62,6 +64,8 @@ def migrate_all() -> int:
     from core.model_classes import init_classes_table
     from core.integrations import init_integrations_table
     from core.jira_intake import init_jira_sync_table
+    from core.health import init_health_table
+    from core.devices import init_devices_tables
 
     before = db_version()
     init_db()
@@ -74,6 +78,8 @@ def migrate_all() -> int:
     init_classes_table()
     init_integrations_table()
     init_jira_sync_table()
+    init_health_table()
+    init_devices_tables()
     conn = get_conn()
     try:
         for table in RETIRED_TABLES:

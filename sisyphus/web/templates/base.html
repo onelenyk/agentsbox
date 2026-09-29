@@ -35,6 +35,8 @@
                 <a href="/agents" class="{{ 'active' if ap == 'agents' else '' }}" title="Who does the work, with which tools">{{ ui.nav_icon("agents") }} Agents</a>
                 <a href="/runners" class="{{ 'active' if ap == 'runners' else '' }}" title="The CLIs that run agents">{{ ui.nav_icon("runners") }} Runners</a>
                 <a href="/autopilots" class="{{ 'active' if ap == 'autopilots' else '' }}" title="Tasks that start themselves">{{ ui.nav_icon("autopilot") }} Autopilot</a>
+                <a href="/devices" class="{{ 'active' if ap == 'devices' else '' }}" title="Emulators, simulators and phones agents may use">{{ ui.nav_icon("devices") }} Devices</a>
+                <a href="/tools" class="{{ 'active' if ap == 'tools' else '' }}" title="What agents can run, and the PATH that finds it">{{ ui.nav_icon("tools") }} Tools</a>
                 <div class="nav-sec"><span>Observe</span></div>
                 <a href="/stats" class="{{ 'active' if ap == 'stats' else '' }}" title="Spend, throughput, outcomes">{{ ui.nav_icon("stats") }} Statistics</a>
                 <a href="/integrations" class="{{ 'active' if ap == 'integrations' else '' }}" title="What Sisyphus did in Jira and the forges, and who did it">{{ ui.nav_icon("integrations") }} Integrations</a>
@@ -272,6 +274,8 @@
         b.addEventListener("agentsUpdated",  function () { flash("Saved"); });
         b.addEventListener("taskCreated",    function (e) { if (!(e.detail && e.detail.quiet)) flash("Task created"); });
         b.addEventListener("formError",      function (e) { flash(e.detail.value || e.detail, "err"); });
+        b.addEventListener("toolsSaved",     function (e) { flash(e.detail.value || e.detail); });
+        b.addEventListener("devicesSaid",    function (e) { flash(e.detail.value || e.detail); });
         b.addEventListener("taskUpdated",    function () { flash("Updated"); });
         // Runner writes reject unsupported types and duplicate names; the route
         // sends the reason on this trigger so the toast can say what went wrong

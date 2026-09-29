@@ -57,12 +57,31 @@ def _attach(session, filename="", description="", **_):
     from core import attachments
 
     if not attachments.save_from_worktree(session["task_id"], session.get("worktree", ""), filename):
-        return {"error": f"no file named {filename!r} in your working dir to attach"}
+        return {"error": f"no file named {filename!r} in your working dir to attach "
+                         f"(or it is over {attachments.MAX_ATTACH_BYTES // (1024 * 1024)} MB)"}
     store.post_message(
         session["task_id"], session["role"], kind="note",
         text=description or f"attached {filename}", attachment=filename,
     )
     return {"ok": True}
+
+
+def _device_screenshot(session, caption="", **_):
+    """A PNG of the leased device's screen, stored on the task as a resource."""
+    from core import attachments, devices
+
+    lease = devices.lease_of(session["task_id"], session["role"])
+    if not lease:
+        return {"error": "you hold no device — only an agent that needs one gets one"}
+    try:
+        png = devices.screenshot(lease)
+    except devices.DeviceError as e:
+        return {"error": f"screenshot failed: {e}"}
+    name = attachments.save_bytes(session["task_id"], "screen.png", png)
+    store.post_message(session["task_id"], session["role"], kind="note",
+                       text=(caption or "").strip() or f"screenshot of {lease['name']}",
+                       attachment=name)
+    return {"ok": True, "file": name}
 
 
 # A view is a whole page, not a note — big enough for a 50-row table with its
@@ -84,6 +103,29 @@ def _show_html(session, title="", html="", **_):
     store.post_message(session["task_id"], session["role"], kind="view",
                        text=(title or "").strip() or "view", attachment=name)
     return {"ok": True, "file": name}
+
+
+def _propose_health_profile(session, build="", test="", coverage="", junit="",
+                            coverage_report="", notes="", **_):
+    """The repo-profiler's answer: how to build/test/cover the task's repo.
+    Stored as a proposal only — config changes when the human confirms it on the
+    repo page (core.health)."""
+    from core import health
+
+    task = store.get_task(session["task_id"])
+    repo = (task or {}).get("repo") or ""
+    if not repo:
+        return {"error": "this task has no repo to profile"}
+    prof = health.clean_profile({"build": build, "test": test, "coverage": coverage,
+                                 "junit": junit, "coverage_report": coverage_report})
+    if not (prof.get("build") or prof.get("test")):
+        return {"error": "propose at least a build or a test command"}
+    health.save_proposal(repo, prof, notes=notes, task_id=session["task_id"])
+    lines = [f"- {k}: `{v}`" for k, v in prof.items()]
+    store.post_message(session["task_id"], session["role"], kind="note",
+                       text="Proposed health profile — confirm it on the repo page:\n"
+                            + "\n".join(lines) + (f"\n\n{notes.strip()}" if notes.strip() else ""))
+    return {"ok": True, "profile": prof}
 
 
 def _propose_subtasks(session, items=None, **_):
@@ -345,7 +387,7 @@ def _record(session, decision: dict):
     return {"ok": True, "note": "decision recorded; it executes after this session ends — end your turn"}
 
 
-def _decide_spawn_worker(session, agent="", instruction="", why="", **_):
+def _decide_spawn_worker(session, agent="", instruction="", why="", device="", **_):
     if not agent.strip():
         return {"error": "agent required (the worker agent to run)"}
     # Validate against the real roster so a hallucinated name (e.g. a weak model
@@ -357,8 +399,10 @@ def _decide_spawn_worker(session, agent="", instruction="", why="", **_):
     if not a or a["kind"] != "worker":
         names = ", ".join(x["name"] for x in agents.list_agents(kind="worker"))
         return {"error": f"unknown agent '{agent}'. Call decide_spawn_worker again with exactly one of: {names}"}
-    return _record(session, {"action": "spawn_worker", "role": agent,
-                             "instruction": instruction, "why": why})
+    decision = {"action": "spawn_worker", "role": agent, "instruction": instruction, "why": why}
+    if device.strip() in ("android", "ios"):
+        decision["device"] = device.strip()
+    return _record(session, decision)
 
 
 def _decide_spawn_task(session, subtasks=None, why="", **_):
@@ -665,6 +709,11 @@ TOOLS = {
                 {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}, _comment),
     "attach": ("Attach a file you saved in your working dir to the task.",
                {"type": "object", "properties": {"filename": {"type": "string"}, "description": {"type": "string"}}, "required": ["filename"]}, _attach),
+    "device_screenshot": ("Screenshot the device you were given and store it on the task, with a "
+                          "caption saying what it shows (e.g. 'login code: 123456 typed, after backspace "
+                          "→ 12345'). Take one for every state you claim.",
+                          {"type": "object", "properties": {"caption": {"type": "string"}},
+                           "required": ["caption"]}, _device_screenshot),
     "show_html": ("Show the human a page you generated — cards, a table, a chart — right in the "
                   "task's result area. Use it whenever the answer is a lot of structured data (a "
                   "list of issues, a table, a comparison). Pass one complete, self-contained HTML "
@@ -680,6 +729,17 @@ TOOLS = {
                   "summary short — totals and what stands out; never repeat the rows in text.",
                   {"type": "object", "properties": {"title": {"type": "string"}, "html": {"type": "string"}},
                    "required": ["html"]}, _show_html),
+    "propose_health_profile": (
+        "Propose how to check this repo's health: `build` and/or `test` commands (shell, run "
+        "from the repo root), optional `coverage` command, `junit` = glob(s) of the JUnit XML "
+        "the tests write (comma-separated), `coverage_report` = path/glob of the coverage XML "
+        "(Kover/JaCoCo or Cobertura), `notes` = what you read and assumed. The human confirms "
+        "it before anything runs.",
+        {"type": "object", "properties": {
+            "build": {"type": "string"}, "test": {"type": "string"},
+            "coverage": {"type": "string"}, "junit": {"type": "string"},
+            "coverage_report": {"type": "string"}, "notes": {"type": "string"}},
+         "required": ["notes"]}, _propose_health_profile),
     "propose_subtasks": ("Propose a multi-repo fan-out: one {repo, goal} per repo.",
                          {"type": "object", "properties": {"items": {"type": "array", "items": {
                              "type": "object",
@@ -722,8 +782,9 @@ TOOLS = {
                      {"type": "object", "properties": {"text": {"type": "string"}, "key": {"type": "string"}},
                       "required": ["text"]}, _jira_comment),
     # Orchestrator decision tools (kind=orchestrator agents).
-    "decide_spawn_worker": ("Decide: run a worker agent on the task.",
-                            {"type": "object", "properties": {"agent": {"type": "string"}, "instruction": {"type": "string"}, "why": {"type": "string"}}, "required": ["agent"]}, _decide_spawn_worker),
+    "decide_spawn_worker": ("Decide: run a worker agent on the task. For an agent that runs the app "
+                            "on a device (qa), `device` picks the platform: android or ios.",
+                            {"type": "object", "properties": {"agent": {"type": "string"}, "instruction": {"type": "string"}, "why": {"type": "string"}, "device": {"type": "string", "enum": ["android", "ios"]}}, "required": ["agent"]}, _decide_spawn_worker),
     "decide_spawn_task": ("Decide: fan out across repos (one child task per {repo, goal}).",
                           {"type": "object", "properties": {"subtasks": {"type": "array", "items": {"type": "object", "properties": {"repo": {"type": "string"}, "goal": {"type": "string"}}, "required": ["goal"]}}, "why": {"type": "string"}}, "required": ["subtasks"]}, _decide_spawn_task),
     "decide_ask_human": ("Decide: pause and ask the human a question.",
