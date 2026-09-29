@@ -791,3 +791,108 @@ class TestNoopNoteDedupe:
         assert len(noop_notes_2) == 1, (f"Expected 1 noop note after 2 passes, "
                                          f"got {len(noop_notes_2)}: {noop_notes_2}")
         assert noop_notes_2[0] == noop_message, "Noop message should be unchanged"
+
+
+class TestQaVerdict:
+    """A device check (qa) is the last word on a change a person would see: a
+    FAIL goes back to the engineer, and anything but PASS blocks done — on
+    SLN-25944 tests, check and two approvals were green while the symptom
+    stayed on the device."""
+
+    def _approved_task(self):
+        task = store.create_task("fix the login backspace", repo="sisyphus")
+        tid = task["id"]
+        store.post_message(tid, "engineer", kind="commit", text="fix(auth): clamp")
+        store.post_message(tid, "engineer", kind="result", text="done")
+        mergerequests.create_mr(task_id=tid, repo="sisyphus", source_branch="sisyphus/t",
+                                target_branch="main", source_path="/tmp/r", bare_path="/tmp/b")
+        store.post_message(tid, "reviewer", kind="result", text="APPROVED: looks right")
+        return store.get_task(tid)
+
+    def test_qa_fail_sends_it_back_to_the_engineer_with_the_findings(self, db_path):
+        task = self._approved_task()
+        store.post_message(task["id"], "qa", kind="result",
+                           text="FAIL — after 6 digits clearFocus() hides the keyboard")
+        d = orchestrator._obvious_step(task, store.get_thread(task["id"]))
+        assert d.action == "spawn_worker" and d.role == "engineer"
+        assert d.why == "rule: qa failed on the device"
+        assert "clearFocus() hides the keyboard" in d.instruction
+
+    def test_a_commit_after_the_fail_is_the_answer_not_another_fail(self, db_path):
+        task = self._approved_task()
+        store.post_message(task["id"], "qa", kind="result", text="FAIL — still there")
+        store.post_message(task["id"], "engineer", kind="commit", text="fix(auth): keep focus")
+        d = orchestrator._obvious_step(task, store.get_thread(task["id"]))
+        assert d is None or d.why != "rule: qa failed on the device"
+
+    def test_an_unanswered_inconclusive_blocks_done(self, db_path):
+        task = self._approved_task()
+        store.post_message(task["id"], "qa", kind="result", text="INCONCLUSIVE — the build failed")
+        with patch.object(mergerequests, "merge_block_reason", return_value=None), \
+             patch.object(orchestrator, "_reviewer_approved", return_value=True):
+            d = orchestrator._obvious_step(task, store.get_thread(task["id"]))
+        assert d is None or d.action != "done"
+
+    def test_qa_pass_lets_done_through(self, db_path):
+        task = self._approved_task()
+        store.post_message(task["id"], "qa", kind="result", text="PASS — backspace erases")
+        with patch.object(mergerequests, "merge_block_reason", return_value=None), \
+             patch.object(orchestrator, "_reviewer_approved", return_value=True):
+            d = orchestrator._obvious_step(task, store.get_thread(task["id"]))
+        assert d is not None and d.action == "done"
+
+    def test_a_qa_result_is_not_an_engineer_result_to_review(self, db_path):
+        task = store.create_task("check it", repo="sisyphus")
+        mergerequests.create_mr(task_id=task["id"], repo="sisyphus", source_branch="sisyphus/t",
+                                target_branch="main", source_path="/tmp/r", bare_path="/tmp/b")
+        store.post_message(task["id"], "qa", kind="result", text="REPRODUCED — backspace dead")
+        d = orchestrator._obvious_step(task, store.get_thread(task["id"]))
+        assert d is None or d.role != "reviewer"
+
+    def test_verdict_parsing(self):
+        th = [{"kind": "result", "author": "qa", "text": "  not reproduced: fine"}]
+        assert orchestrator._latest_qa_verdict(th) == (0, "NOT REPRODUCED")
+        assert orchestrator._latest_qa_verdict([]) == (-1, "")
+
+
+class TestRepoWantsDeviceCheck:
+    """repos[].qa: a delivered change gets qa on a device before the reviewer,
+    and is not done without a PASS on its last commit."""
+
+    def _delivered(self):
+        task = store.create_task("fix the login backspace", repo="kmp")
+        tid = task["id"]
+        store.post_message(tid, "engineer", kind="commit", text="fix(auth): keep focus")
+        store.post_message(tid, "engineer", kind="result", text="done")
+        mergerequests.create_mr(task_id=tid, repo="kmp", source_branch="sisyphus/t",
+                                target_branch="main", source_path="/tmp/r", bare_path="/tmp/b")
+        return store.get_task(tid)
+
+    def test_qa_runs_before_the_reviewer(self, db_path):
+        task = self._delivered()
+        with patch("core.repos.load_repos", return_value=[{"name": "kmp", "source": "/x", "qa": "android"}]):
+            d = orchestrator._obvious_step(task, store.get_thread(task["id"]))
+        assert d.role == "qa" and d.device == "android"
+        assert d.why == "rule: the repo wants a device check before review"
+
+    def test_after_qa_the_reviewer_runs(self, db_path):
+        task = self._delivered()
+        store.post_message(task["id"], "qa", kind="result", text="PASS — backspace erases")
+        with patch("core.repos.load_repos", return_value=[{"name": "kmp", "source": "/x", "qa": "android"}]):
+            d = orchestrator._obvious_step(task, store.get_thread(task["id"]))
+        assert d.role == "reviewer"
+
+    def test_not_done_without_a_pass_on_the_last_commit(self, db_path):
+        task = self._delivered()
+        store.post_message(task["id"], "reviewer", kind="result", text="APPROVED")
+        with patch("core.repos.load_repos", return_value=[{"name": "kmp", "source": "/x", "qa": "android"}]), \
+             patch.object(mergerequests, "merge_block_reason", return_value=None), \
+             patch.object(orchestrator, "_reviewer_approved", return_value=True):
+            d = orchestrator._obvious_step(task, store.get_thread(task["id"]))
+        assert d is None or d.action != "done"
+
+    def test_a_repo_without_qa_is_unchanged(self, db_path):
+        task = self._delivered()
+        with patch("core.repos.load_repos", return_value=[{"name": "kmp", "source": "/x"}]):
+            d = orchestrator._obvious_step(task, store.get_thread(task["id"]))
+        assert d.role == "reviewer"

@@ -72,7 +72,7 @@ def init_agents_table() -> None:
 # that agent by hand the task could never run — the review simply never
 # happened. Same reasoning as _seed_orchestrator, which is why this is a
 # create-if-absent and never an update: a persona someone has tuned is theirs.
-PINNED_BY_CODE = ("mr-reviewer",)
+PINNED_BY_CODE = ("mr-reviewer", "repo-profiler", "qa")
 
 
 def _ensure_pinned_workers(conn) -> None:

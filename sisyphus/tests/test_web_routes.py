@@ -1150,8 +1150,9 @@ class TestFlatNav:
         with patch("core.repos.load_repos", return_value=[]):
             html = _make_client().get("/dashboard").text
         nav = html.split('<nav class="nav">')[1].split("</nav>")[0]
-        assert nav.count("<a ") == 9
-        order = ["Home", "Tasks", "/repos", "Agents", "Runners", "Autopilot", "Statistics", "Integrations", "Daemon"]
+        assert nav.count("<a ") == 11
+        order = ["Home", "Tasks", "/repos", "Agents", "Runners", "Autopilot", "Devices", "Tools",
+                 "Statistics", "Integrations", "Daemon"]
         at = [nav.index(label) for label in order]
         assert at == sorted(at), "the sidebar is out of order"
         assert "Backups" not in nav

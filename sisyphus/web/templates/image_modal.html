@@ -1,0 +1,24 @@
+{# A task's screenshot, full size — a stored resource (core.attachments), with
+   its caption and a way to step through the others. #}
+{% set base = '/api/tasks/' ~ task_id %}
+<div class="modal-backdrop" onclick="if(event.target===this)this.remove()">
+    <div class="modal modal--wide" onclick="event.stopPropagation()">
+        <div class="modal__head"><h2>{{ img.caption or img.name }}</h2></div>
+        <div class="modal__body shot-view">
+            <img class="shot-view__img" src="{{ base }}/file/{{ img.name|urlencode }}" alt="{{ img.caption or img.name }}">
+            <div class="shot-view__meta">
+                <span>{{ index + 1 }} of {{ count }}</span>
+                <span>{{ img.by or '—' }} · {{ img.at|when }}</span>
+                <span class="mono">{{ img.name }} · {{ img.size_h }}</span>
+            </div>
+        </div>
+        <div class="modal__actions">
+            <div class="modal__aside">
+                {% if prev %}<button type="button" class="btn btn--ghost btn--sm" hx-get="{{ base }}/image/{{ prev|urlencode }}" hx-target="#modal-container" hx-swap="innerHTML">← Previous</button>{% endif %}
+                {% if next %}<button type="button" class="btn btn--ghost btn--sm" hx-get="{{ base }}/image/{{ next|urlencode }}" hx-target="#modal-container" hx-swap="innerHTML">Next →</button>{% endif %}
+            </div>
+            <a class="btn btn--ghost" href="{{ base }}/file/{{ img.name|urlencode }}" target="_blank" rel="noopener">Open original</a>
+            <button type="button" class="btn btn--ghost" onclick="this.closest('.modal-backdrop').remove()">Close</button>
+        </div>
+    </div>
+</div>

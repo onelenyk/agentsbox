@@ -385,8 +385,14 @@ def files(task_id: str, messages: list, workspace: Optional[str] = None) -> dict
                 role = f.stem.rsplit("_", 1)[-1] if "_" in f.stem else ""
                 recovered.append(_file(f, "salvaged", by or role))
             else:
-                kind = "patch" if f.suffix in (".patch", ".diff") else ("report" if f.suffix == ".md" else "file")
-                produced.append(_file(f, kind, by))
+                from .attachments import image_type
+                kind = ("patch" if f.suffix in (".patch", ".diff") else
+                        "report" if f.suffix == ".md" else
+                        "image" if image_type(f.name) else "file")
+                row = _file(f, kind, by)
+                if kind == "image":
+                    row["caption"] = posted.get(f.name, {}).get("text", "")
+                produced.append(row)
 
     ldir = ws / "runs" / task_id / "logs"
     if ldir.is_dir():

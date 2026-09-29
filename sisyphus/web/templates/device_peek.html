@@ -1,0 +1,12 @@
+{# What a device shows right now — a fresh PNG, not a stored resource. #}
+<div class="modal-backdrop" onclick="if(event.target===this)this.remove()">
+    <div class="modal modal--wide" onclick="event.stopPropagation()">
+        <div class="modal__head"><h2>{{ name }}</h2></div>
+        <div class="modal__body device-peek">
+            <img src="{{ src }}" alt="Screen of {{ name }}" class="device-peek__img">
+        </div>
+        <div class="modal__actions">
+            <button type="button" class="btn btn--ghost" onclick="this.closest('.modal-backdrop').remove()">Close</button>
+        </div>
+    </div>
+</div>

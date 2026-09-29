@@ -1,0 +1,31 @@
+{% from "_ui.html" import modal %}
+{% set fa %}hx-post="/api/devices" hx-target="#modal-container" hx-swap="outerHTML" hx-on:after-request="if(event.detail.successful)this.closest('.modal-backdrop').remove()"{% endset %}
+{% call modal('New emulator', 'Create', fa) %}
+<div class="field"><label>Platform</label>
+    <select name="platform">
+        <option value="android">Android emulator</option>
+        {% if ios_runtimes %}<option value="ios">iOS simulator</option>{% endif %}
+    </select>
+</div>
+<div class="field"><label>Preset</label>
+    <div class="device-presets">
+        {% for key, p in presets.items() %}
+        <label class="device-preset">
+            <input type="radio" name="preset" value="{{ key }}" {{ 'checked' if key == 'phone' }}>
+            <span class="device-preset__name">{{ p.label }}</span>
+            <span class="device-preset__spec">Android: {{ (p.ram_mb / 1024)|int }} GB RAM · {{ p.disk|replace('G', ' GB') }} · {{ p.cores }} cores · {{ p.android_device|replace('_', ' ') }}</span>
+            <span class="device-preset__spec">iOS: {{ p.ios_type }}</span>
+        </label>
+        {% endfor %}
+    </div>
+</div>
+<div class="field-pair">
+    <div class="field"><label>Name</label><input type="text" name="name" placeholder="QA_Phone" required></div>
+    <div class="field"><label>System image</label>
+        <select name="image">
+            {% for i in android_images %}<option value="{{ i.package }}">{{ i.label }}</option>{% endfor %}
+            {% for r in ios_runtimes %}<option value="{{ r.id }}">{{ r.label }} (iOS)</option>{% endfor %}
+        </select>
+    </div>
+</div>
+{% endcall %}

@@ -1,0 +1,99 @@
+{# Repo repo-health (core.health): does it build, do the tests pass, what is covered.
+   Rendered into #repo-health-slot; every button re-renders the whole card. While
+   a run or the profiler is in flight the card polls itself. #}
+{% set url = '/api/repos/' ~ name ~ '/health' %}
+<div class="repo-health"{% if running is not none or profiling %} hx-get="{{ url }}" hx-trigger="every 5s" hx-target="#repo-health-slot" hx-swap="innerHTML"{% endif %}>
+    <div class="section-title">Health <span class="chip">build · tests · coverage</span></div>
+
+    {% if flash %}<div class="repo-health__note">{{ flash }}</div>{% endif %}
+
+    {% macro profile_form(p, submit) -%}
+    <form class="repo-health__form" hx-post="{{ url }}/save" hx-target="#repo-health-slot" hx-swap="innerHTML">
+        <div class="field-pair">
+            <div class="field"><label>Build</label><input type="text" name="build" value="{{ p.build or '' }}" placeholder="make build"></div>
+            <div class="field"><label>Test</label><input type="text" name="test" value="{{ p.test or '' }}" placeholder="make test"></div>
+        </div>
+        <div class="field-pair">
+            <div class="field"><label>JUnit XML</label><input type="text" name="junit" value="{{ p.junit or '' }}" placeholder="**/build/test-results/**/*.xml"></div>
+            <div class="field"><label>Timeout, s per stage</label><input type="text" name="timeout" value="{{ p.timeout or '' }}" placeholder="1800"></div>
+        </div>
+        <div class="field-pair">
+            <div class="field"><label>Coverage</label><input type="text" name="coverage" value="{{ p.coverage or '' }}" placeholder="optional"></div>
+            <div class="field"><label>Coverage report</label><input type="text" name="coverage_report" value="{{ p.coverage_report or '' }}" placeholder="Kover/JaCoCo or Cobertura XML"></div>
+        </div>
+        <div class="repo-health__acts"><button type="submit" class="btn btn--primary btn--sm">{{ submit }}</button></div>
+    </form>
+    {%- endmacro %}
+
+    {% if profiling %}
+    <div class="repo-health__note">
+        <span class="status status--active">profiling</span>
+        The repo-profiler agent is reading the repo to work out how it builds and tests —
+        <a href="/tasks/{{ profiling.id }}">follow the task</a>.
+    </div>
+    {% elif proposal %}
+    <div class="repo-health__proposal">
+        <div class="repo-health__note"><span class="status status--waiting">proposed</span> The agent suggests this profile. Edit anything, then save — nothing runs until you do.</div>
+        {% if proposal.notes %}<div class="repo-health__notes msg__body--md">{{ proposal.notes | md }}</div>{% endif %}
+        {{ profile_form(proposal.profile, 'Save profile') }}
+        <div class="repo-health__acts">
+            <button type="button" class="btn btn--ghost btn--sm" hx-post="{{ url }}/profile" hx-target="#repo-health-slot" hx-swap="innerHTML">Ask again</button>
+        </div>
+    </div>
+    {% elif not profile %}
+    <div class="repo-health__note">
+        No repo-health profile yet. An agent reads the repo's docs and build files and proposes how to build and test it; you confirm.
+    </div>
+    <div class="repo-health__acts">
+        <button type="button" class="btn btn--primary btn--sm" hx-post="{{ url }}/profile" hx-target="#repo-health-slot" hx-swap="innerHTML">Set up health</button>
+    </div>
+    {% endif %}
+
+    {% if profile %}
+    <div class="repo-check">
+        <div class="row repocheck__row">
+            {% if running is not none %}
+            <span class="status status--active">running · {{ running }}s</span>
+            <span class="repocheck__summary">building and testing a fresh checkout of the branch…</span>
+            {% elif last %}
+            <span class="status status--{{ {'ok': 'done', 'fail': 'failed'}.get(last.status, 'waiting') }}">{{ {'ok': 'healthy', 'fail': 'broken'}.get(last.status, 'unknown') }}</span>
+            <span class="repocheck__summary">{{ last.summary }}</span>
+            <span class="muted repocheck__duration" title="{{ last.ran_at[:19] }}">{{ last.ran_at|when }} · {{ (last.duration_ms // 60000) }}m{{ '%02d'|format((last.duration_ms // 1000) % 60) }}s{% if last.head %} · <span class="mono">{{ last.head[:8] }}</span>{% endif %}</span>
+            {% else %}
+            <span class="status status--waiting">never run</span>
+            <span class="repocheck__summary">The profile is saved. Run it once; after that it re-runs daily.</span>
+            {% endif %}
+        </div>
+
+        {% if last and running is none %}
+        {% for s in last.stages %}
+        {% set tone = {'ok': 'var(--good)', 'fail': 'var(--bad)', 'unknown': 'var(--warn)'}.get(s.status, 'var(--text-2)') %}
+        <div class="repocheck__line" style="--tone-color: {{ tone }}">
+            <div class="row repocheck__stage-row">
+                <span class="mono repocheck__stage-name">{{ s.name }}</span>
+                <span class="mono repocheck__stage-status">{{ s.status }}{% if s.secs %} · {{ s.secs|int }}s{% endif %}</span>
+            </div>
+            {% if s.detail %}<pre class="repo-health__detail">{{ s.detail }}</pre>{% endif %}
+            {% if s.output and s.status != 'ok' %}
+            <details class="repo-health__out"><summary>output <span class="mono">{{ s.command }}</span></summary><pre class="repo-health__detail">{{ s.output }}</pre></details>
+            {% endif %}
+        </div>
+        {% endfor %}
+        {% endif %}
+    </div>
+
+    {% if history|length > 1 %}
+    <div class="repo-health__history" title="last {{ history|length }} runs, oldest first">
+        {% for r in history %}<span class="repo-health__dot repo-health__dot--{{ r.status }}" title="{{ r.ran_at[:16].replace('T', ' ') }} · {{ r.trigger }} · {{ r.summary }}"></span>{% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="repo-health__acts">
+        <button type="button" class="btn btn--ghost btn--sm" hx-post="{{ url }}/run" hx-target="#repo-health-slot" hx-swap="innerHTML"{% if busy %} disabled title="a repo-health run is in progress"{% endif %}>Run now</button>
+        <details class="repo-health__edit">
+            <summary class="btn btn--ghost btn--sm">Edit profile</summary>
+            {{ profile_form(profile, 'Save') }}
+        </details>
+    </div>
+    {% endif %}
+</div>

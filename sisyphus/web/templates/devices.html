@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Devices — Sisyphus{% endblock %}
+{% import "_ui.html" as ui %}
+{% block content %}
+{% call ui.toolbar([{'label': 'Devices'}], 'emulators, simulators and phones agents may use') %}
+<button class="btn btn--ghost btn--sm" hx-get="/api/devices/list?fresh=1" hx-target="#devices-list" hx-swap="innerHTML">Refresh</button>
+<button class="btn btn--primary btn--sm" hx-get="/api/devices/new-form" hx-target="body" hx-swap="beforeend">+ Emulator</button>
+{% endcall %}
+<p class="devices__lede">An agent that needs a device gets one from here when its run starts, and gives it back when it ends — never a device you have not allowed. Emulators and simulators are allowed by default; a physical phone only once you switch it on.</p>
+<div id="devices-list" hx-get="/api/devices/list" hx-trigger="load, devicesUpdated from:body" hx-swap="innerHTML">
+    <div class="empty">Looking for devices…</div>
+</div>
+{% endblock %}

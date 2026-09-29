@@ -122,9 +122,21 @@
             </span>
         </div>
         {% endif %}
-        {% if files.produced %}
+        {% set shots = files.produced|selectattr('kind', 'equalto', 'image')|sort(attribute='at')|list %}
+        {% set others = files.produced|rejectattr('kind', 'equalto', 'image')|list %}
+        {% if others %}
         <div class="files outcome__files">
-            {% for f in files.produced %}{{ ui.file_row(task.id, f, '📄' if f.kind == 'report' else '📎') }}{% endfor %}
+            {% for f in others %}{{ ui.file_row(task.id, f, '📄' if f.kind == 'report' else '📎') }}{% endfor %}
+        </div>
+        {% endif %}
+        {% if shots %}
+        {# Screenshots are resources of the task, not pictures inside a page:
+           stored next to its other files, each with the caption it was taken with. #}
+        <div class="shots">
+            <div class="shots__head">Screenshots <span class="chip">{{ shots|length }}</span></div>
+            <div class="shots__strip">
+                {% for f in shots %}{{ ui.shot(task.id, f) }}{% endfor %}
+            </div>
         </div>
         {% endif %}
         {% for v in messages if v.kind == 'view' and v.attachment %}{{ ui.agent_view(task.id, v) }}{% endfor %}
@@ -341,6 +353,8 @@
         {{ msg_body(m) }}
         {% if m.kind == 'view' and m.attachment %}
         <div class="msg__att">▦ <a href="/api/tasks/{{ task.id }}/view/{{ m.attachment }}" target="_blank" rel="noopener">shown above · open ↗</a></div>
+        {% elif m.attachment and m.attachment.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.gif')) %}
+        <div class="msg__att">{{ ui.shot(task.id, {'name': m.attachment, 'caption': ''}, small=true) }}</div>
         {% elif m.attachment %}
         <div class="msg__att">📎 <a href="#" hx-get="/api/tasks/{{ task.id }}/diff/{{ m.attachment }}" hx-target="#modal-container" hx-swap="innerHTML" onclick="return false">{{ m.attachment }}</a></div>
         {% endif %}

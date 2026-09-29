@@ -153,7 +153,19 @@ async def add_repo(body: AddRepo):
         _add_repo(body.name, body.source, body.platform, body.branch)
     except (ValueError, RuntimeError) as e:
         raise HTTPException(status_code=400, detail=str(e))
+    from web.routes import _start_health_profiling
+    _start_health_profiling(body.name)
     return {"name": body.name, "source": body.source, "branch": body.branch}
+
+
+@api.get("/repos/{name}/health")
+async def repo_health(name: str):
+    from core import health
+    from core.repos import get_repo
+    if not get_repo(name):
+        raise HTTPException(status_code=404, detail=f"Repo {name} not found")
+    return {"repo": name, "profile": health.profile(name), "proposal": health.get_proposal(name),
+            "running": name in health.running(), "runs": health.runs(name, 10)}
 
 
 @api.delete("/repos/{name}")

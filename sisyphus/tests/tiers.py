@@ -38,7 +38,7 @@ TIERS = {
         "test_credentials", "test_git_ops", "test_goal_report", "test_integrations_page", "test_jira_tools", "test_mcp_server",
         "test_mr_actions", "test_mr_resolve",
         "test_page_smoke", "test_providers", "test_read_only_repo", "test_readiness", "test_repo_check",
-        "test_setup_hook", "test_stats", "test_task_lifecycle", "test_verify",
+        "test_health", "test_devices", "test_tools", "test_setup_hook", "test_stats", "test_task_lifecycle", "test_verify",
         "test_jira_client", "test_jira_trail", "test_limits", "test_pause", "test_web_routes", "test_webhook_auth", "test_webhooks", "test_worker",
         "test_worktree", "test_worktree_utils",
         # Shell out to git in real temp repos — "If it shells out, it is not a

@@ -86,6 +86,16 @@
 </figure>
 {%- endmacro %}
 
+{# A screenshot a task holds: a thumbnail that opens the full image with its
+   caption (image_modal.html). *small* is the inline form in the thread. #}
+{% macro shot(task_id, f, small=false) -%}
+<button type="button" class="shot{{ ' shot--small' if small }}" title="{{ f.caption or f.name }}"
+        hx-get="/api/tasks/{{ task_id }}/image/{{ f.name|urlencode }}" hx-target="#modal-container" hx-swap="innerHTML">
+    <img class="shot__img" src="/api/tasks/{{ task_id }}/file/{{ f.name|urlencode }}" alt="{{ f.caption or f.name }}" loading="lazy">
+    {% if not small and f.caption %}<span class="shot__cap">{{ f.caption }}</span>{% endif %}
+</button>
+{%- endmacro %}
+
 {# One file a task left behind, opened the way its kind reads. #}
 {% macro file_row(task_id, f, icon='📎') -%}
 <div class="file">
@@ -275,6 +285,8 @@ hx-post="/api/tasks/{{ task_id }}/messages" hx-target="closest .askc" hx-swap="o
   'model':    'M10 3.5l1.6 4.9 4.9 1.6-4.9 1.6L10 16.5l-1.6-4.9L3.5 10l4.9-1.6z',
   'shield':   'M10 3.5l5.5 2v4.5c0 3.2-2.3 5.6-5.5 6.5-3.2-.9-5.5-3.3-5.5-6.5V5.5z',
   'key':      'M12.5 4.5a3 3 0 1 1-2.6 4.5L4.5 14.5v1.5h2v-1.5h1.5V13h1.5l1.4-1.4',
+  'devices':  'M6.5 3.5h7a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-11a1 1 0 0 1 1-1zM9 14h2',
+  'tools':    'M12.8 4.2a3.2 3.2 0 0 0-4 4L4 13l3 3 4.8-4.8a3.2 3.2 0 0 0 4-4l-2 2-2-.8-.8-2z',
 }.get(name, 'M5 10h10') -%}
 <svg class="ic" width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor"
      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ d }}"></path></svg>

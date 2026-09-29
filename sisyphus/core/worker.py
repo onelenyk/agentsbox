@@ -721,6 +721,7 @@ async def spawn_worker(
     role: str,
     instruction: str,
     repo_name: Optional[str] = None,
+    device: Optional[dict] = None,
     timeout: Optional[int] = None,
     idle_timeout: Optional[int] = None,
     prefer_next_runner: bool = False,
@@ -825,6 +826,12 @@ async def spawn_worker(
                            prefix=prefix)
 
     agent_def = {"name": role, "opencode_config": {}}
+    if device:
+        # The leased device (core.devices): its serial in the env, so adb and
+        # Gradle pick it by default, and one paragraph that says so.
+        from . import devices
+        agent_def["opencode_config"]["env"] = devices.env_for(device)
+        prompt += devices.prompt_for(device)
     # Publish a cancel event for the lifetime of the run. The launcher's monitor
     # loop already knows what to do with it; until now nobody handed it one, so
     # stopping a task meant killing a pid by hand.

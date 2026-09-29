@@ -91,6 +91,8 @@ def db_path(tmp_path):
     from core.model_classes import init_classes_table
     from core.integrations import init_integrations_table
     from core.jira_intake import init_jira_sync_table
+    from core.health import init_health_table
+    from core.devices import init_devices_tables
     init_runners_table()
     init_agents_table()
     init_usage_table()
@@ -100,5 +102,7 @@ def db_path(tmp_path):
     init_classes_table()
     init_integrations_table()
     init_jira_sync_table()
+    init_health_table()
+    init_devices_tables()
 
     yield str(db)

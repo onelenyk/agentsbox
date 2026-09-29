@@ -167,7 +167,8 @@ def is_read_only(repo_name: str) -> bool:
     return (repo.get("mode") or "").strip() == "read-only"
 
 
-def update_repo_config(name, source=None, platform=None, branch=None, auto_merge=None, mode=None, target=None):
+def update_repo_config(name, source=None, platform=None, branch=None, auto_merge=None, mode=None, target=None,
+                       health=None):
     """Update repo configuration.
 
     In-place edits of the existing entry, so every other key the UI does not
@@ -208,6 +209,14 @@ def update_repo_config(name, source=None, platform=None, branch=None, auto_merge
                     r["target"] = target
                 else:
                     r.pop("target", None)
+            if health is not None:
+                # The confirmed health profile (core.health). Empty clears it.
+                from core.health import clean_profile
+                cleaned = clean_profile(health)
+                if cleaned:
+                    r["health"] = cleaned
+                else:
+                    r.pop("health", None)
             break
     config["repos"] = repos
     _write_config_file(config)

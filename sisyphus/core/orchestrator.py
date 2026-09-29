@@ -47,6 +47,7 @@ class Decision(BaseModel):
     text: Optional[str] = None                 # for answer (the reply to the human)
     reason: Optional[str] = None
     subtasks: Optional[list[Subtask]] = None   # for spawn_task (fan-out)
+    device: Optional[str] = None               # spawn_worker: android | ios, for a device agent
 
 
 @dataclass
@@ -235,6 +236,11 @@ Read the task thread, then CALL exactly one decision tool:
   instruct the worker to show it with show_html — the page appears in the
   task's result area — and to keep its result a short summary. Your answer
   then summarises too: the rows are already on the page, never repeat them.
+- A change a person would see in the app (a UI bug, a screen, a flow) is not
+  done on tests alone: after the engineer's merge request, spawn "qa" with
+  `device` (android or ios — the platform the task is about) to build, install
+  and check it on a device, before the reviewer. The reviewer reads its verdict;
+  a FAIL goes back to the engineer.
 - decide_complete(why) — the task is done. ONLY after a reviewer has APPROVED on
   the thread (or all children are done); otherwise spawn a reviewer instead. A
   branch already reviewed by its own review task counts as approved — never
@@ -257,6 +263,7 @@ as text; make exactly one call, then stop."""
 SHIPPED_PERSONAS = {
     "63961b0fa071a676b50995f82578e44d48c0f16b73a5157ddea54cbc480c8fab",  # to 2026-09-22
     "2ab632ca990f0468ad82e6c2c713bdafa8cad63e255615f157712ed650305b5b",  # to 2026-09-29
+    "1fbb70722a8b798c90d293f16a788c3c2901f5b01deeb4b18f0093eafc6c5e93",  # to 2026-09-29 (show_html)
 }
 
 
@@ -848,7 +855,7 @@ def _obvious_step(task: dict, thread: list) -> Optional[Decision]:
             if m["kind"] == "result" and m["author"] != "orchestrator":
                 # This is a result from a worker. Check if it's from a non-reviewer.
                 role = m["author"]
-                if "review" not in (role or "").lower():
+                if "review" not in (role or "").lower() and role != "qa":
                     engineer_result_idx = i
                     break
 
@@ -948,6 +955,17 @@ def _obvious_step(task: dict, thread: list) -> Optional[Decision]:
             if m["kind"] == "commit":
                 return None  # newer engineer commit exists
 
+        # A device check that did not pass, with no commit after it, is not done;
+        # in a repo that wants device checks, no PASS on the last commit is not done.
+        qa_idx, qa_verdict = _latest_qa_verdict(thread)
+        if qa_idx >= 0 and qa_verdict != "PASS" \
+                and not any(m["kind"] == "commit" for m in thread[qa_idx + 1:]):
+            return None
+        if _repo_qa_platform(task):
+            last_commit = max((i for i, m in enumerate(thread) if m["kind"] == "commit"), default=-1)
+            if qa_idx < last_commit or qa_verdict != "PASS":
+                return None
+
         return Decision(action="done", why="rule: reviewer approved and the check passed")
 
     # Case c: reviewer requested changes, no engineer since.
@@ -960,6 +978,58 @@ def _obvious_step(task: dict, thread: list) -> Optional[Decision]:
             instruction="Address the reviewer's requested changes on this branch (see the latest reviewer result in the thread), commit, and update the merge request with open_mr.",
             why="rule: reviewer requested changes"
         )
+
+    # Case q0: a repo that asks for a device check (repos[].qa: android|ios)
+    # gets one on every delivered change, before the review: the deterministic
+    # "engineer delivered an MR → reviewer" rule below would otherwise always
+    # win, and qa would never run.
+    def _check_qa_needed() -> Optional[Decision]:
+        platform = _repo_qa_platform(task)
+        if not platform or not mergerequests.latest_for_task(task["id"]):
+            return None
+        last_commit = max((i for i, m in enumerate(thread) if m["kind"] == "commit"), default=-1)
+        if last_commit < 0:
+            return None
+        if any(m["kind"] == "result" and m["author"] == "qa" for m in thread[last_commit + 1:]):
+            return None
+        if not any(m["kind"] == "result" and m["author"] not in ("qa", "orchestrator")
+                   and "review" not in (m["author"] or "").lower() for m in thread[last_commit + 1:]):
+            return None  # the engineer has not reported on this commit yet
+        return Decision(
+            action="spawn_worker", role="qa", device=platform,
+            instruction=(f"Check this change on a device: {task['goal']}\n\nBuild and install "
+                         "the app from this branch, drive it to the screen the goal is about, "
+                         "and reproduce the scenario it describes. Verdict first: PASS only if "
+                         "the reported behaviour is right in that scenario."),
+            why="rule: the repo wants a device check before review")
+
+    # Case q: a device check (qa) is the last word on a change a person would
+    # see. Tests and an approval were all green on SLN-25944 while the symptom
+    # was still on the device — only qa saw it. So a FAIL goes back to the
+    # engineer with qa's findings, and it blocks done until a new commit exists.
+    def _check_qa_failed() -> Optional[Decision]:
+        idx, verdict = _latest_qa_verdict(thread)
+        if idx < 0 or verdict != "FAIL":
+            return None
+        if any(m["kind"] == "commit" for m in thread[idx + 1:]):
+            return None  # the engineer already answered it; the next qa run decides
+        return Decision(
+            action="spawn_worker", role="engineer",
+            instruction=("The on-device check (qa) FAILED — the symptom is still there on the "
+                         "device. Read qa's latest result in the thread (its steps and "
+                         "screenshots) and fix the cause it observed, not the one assumed "
+                         "before. Add a test that fails on the current branch for that cause, "
+                         "commit, and update the merge request with open_mr.\n\n"
+                         "qa's result:\n" + (thread[idx]["text"] or "")[:3000]),
+            why="rule: qa failed on the device")
+
+    result = _check_qa_failed()
+    if result:
+        return result
+
+    result = _check_qa_needed()
+    if result:
+        return result
 
     # Try the three cases in order.
     result = _check_engineer_result_needs_review()
@@ -975,6 +1045,29 @@ def _obvious_step(task: dict, thread: list) -> Optional[Decision]:
         return result
 
     return None
+
+
+QA_VERDICTS = ("NOT REPRODUCED", "INCONCLUSIVE", "REPRODUCED", "PASS", "FAIL")
+
+
+def _repo_qa_platform(task: dict) -> str:
+    """"android" / "ios" when the task's repo asks for a device check on every
+    change (config.yaml repos[].qa), else ""."""
+    from .repos import get_repo
+    value = ((get_repo(task.get("repo") or "") or {}).get("qa") or "").strip().lower()
+    return value if value in ("android", "ios") else ""
+
+
+def _latest_qa_verdict(thread: list) -> tuple:
+    """(index, verdict) of qa's latest result — verdict is the first word(s) of
+    its first line, one of QA_VERDICTS, or "" when it starts with none; (-1, "")
+    when qa never reported."""
+    for i in reversed(range(len(thread))):
+        m = thread[i]
+        if m["kind"] == "result" and m["author"] == "qa":
+            head = (m["text"] or "").lstrip().upper()
+            return i, next((v for v in QA_VERDICTS if head.startswith(v)), "")
+    return -1, ""
 
 
 async def handle_event(
@@ -1368,7 +1461,8 @@ def _queue_worker(task_id: str, role: str) -> bool:
     return True
 
 
-def _start_worker(task_id: str, role: str, instruction: str, repo_name) -> Optional[asyncio.Task]:
+def _start_worker(task_id: str, role: str, instruction: str, repo_name,
+                  device: Optional[str] = None) -> Optional[asyncio.Task]:
     """Queue a worker now and run it in the background; None if the task was
     paused instead. The actual runner is picked in core.worker.spawn_worker;
     this hands down whether the no-result ladder wants the NEXT runner option."""
@@ -1378,11 +1472,12 @@ def _start_worker(task_id: str, role: str, instruction: str, repo_name) -> Optio
     prefer_next = streak_role == role and streak >= NO_RESULT_SWITCH_AFTER
     return asyncio.create_task(
         _spawn_worker_safe(task_id, role, instruction, repo_name, queued=True,
-                           prefer_next_runner=prefer_next))
+                           prefer_next_runner=prefer_next, device=device))
 
 
 async def _spawn_worker_safe(task_id: str, role: str, instruction: str, repo_name,
-                             queued: bool = False, prefer_next_runner: bool = False):
+                             queued: bool = False, prefer_next_runner: bool = False,
+                             device: Optional[str] = None):
     """Run a worker, but never let a startup failure (an unknown/hallucinated
     agent name, a clone error, …) vanish into a lost background task and leave
     the task stalled 'active'. Any exception before the worker reports is turned
@@ -1397,8 +1492,16 @@ async def _spawn_worker_safe(task_id: str, role: str, instruction: str, repo_nam
         finally:
             _release_slot_wait(task_id)
         try:
-            await spawn_worker(task_id, role, instruction, repo_name=repo_name,
-                               prefer_next_runner=prefer_next_runner)
+            lease = await _lease_device(task_id, role, device)
+            try:
+                await spawn_worker(task_id, role, instruction, repo_name=repo_name,
+                                   prefer_next_runner=prefer_next_runner, device=lease)
+            finally:
+                # However the run ended — finish, crash, timeout, Stop — the
+                # device goes back. An agent cannot forget to return it.
+                if lease:
+                    from . import devices
+                    devices.release(lease["device_id"])
         finally:
             gate.release()
     except Exception as exc:  # noqa: BLE001
@@ -1406,6 +1509,30 @@ async def _spawn_worker_safe(task_id: str, role: str, instruction: str, repo_nam
         store.post_message(task_id, "system", kind="worker_finished",
                            text=f"{role} failed to start: {exc}")
         emit(task_id, "worker_finished")
+
+
+async def _lease_device(task_id: str, role: str, platform: Optional[str]) -> Optional[dict]:
+    """The device this run gets, or None for an agent that needs none. Waits
+    (visibly) while every allowed device is taken; the wait counts as queued,
+    so the watchdog does not call the task abandoned."""
+    from . import devices
+    from .roles import ROLES
+    wants = list((ROLES.get(role) or {}).get("devices") or [])
+    if not wants:
+        return None
+    platform = platform if platform in wants else wants[0]
+    _AWAITING_SLOT[task_id] = _AWAITING_SLOT.get(task_id, 0) + 1
+    try:
+        lease = await devices.wait_acquire(
+            platform, task_id, role,
+            on_wait=lambda: store.post_message(
+                task_id, "system", kind="note",
+                text=f"{role} is waiting for a free {platform} device (see Devices)"))
+    finally:
+        _release_slot_wait(task_id)
+    store.post_message(task_id, "system", kind="note",
+                       text=f"{role} got device {lease['name']} ({lease['serial']})")
+    return lease
 
 
 async def _execute(task_id: str, decision: Decision):
@@ -1420,7 +1547,7 @@ async def _execute(task_id: str, decision: Decision):
         from . import cancellation
         cancellation.register(task_id, decision.role or "")
         return _start_worker(task_id, decision.role, decision.instruction or "",
-                             task.get("repo") if task else None)
+                             task.get("repo") if task else None, device=decision.device)
     if decision.action == "spawn_task":
         # Fan out: one child task per repo, each running the normal loop. The
         # parent stays active and waits for their child_finished roll-ups.
@@ -1480,6 +1607,14 @@ def reconcile_on_boot() -> int:
         orphans.reap()
     except Exception:  # noqa: BLE001
         logger.exception("orphan reaper failed — surviving workers may still be running")
+    # A lease belongs to a running worker, and none survives a restart.
+    try:
+        from . import devices
+        n = devices.clear_stale_leases()
+        if n:
+            logger.info("devices: released %d lease(s) held across a restart", n)
+    except Exception:  # noqa: BLE001
+        logger.exception("could not clear stale device leases")
 
     # Work that closing Sisyphus interrupted picks up where it stopped. A pause
     # of any other kind is still owed what it was waiting for.

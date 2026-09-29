@@ -1,0 +1,55 @@
+{# Tools, as a worker sees them (core.tools): resolved against the worker's
+   PATH — core.verify.check_env — never the human's shell. #}
+{% from "_ui.html" import fact %}
+<div class="panel tools">
+    <div class="result__label">Tools <span class="muted">· {{ tools|selectattr('ok')|list|length }} of {{ tools|length }} found</span></div>
+    {% for gname in groups %}
+    <div class="tools__group">{{ gname }}</div>
+    {% for t in tools if t.group == gname %}
+    <div class="tools__row{{ ' tools__row--missing' if not t.ok }}">
+        <span class="tools__status">{{ fact('found' if t.ok else 'missing', 'good' if t.ok else 'bad') }}</span>
+        <span class="tools__bin mono">{{ t.binary }}</span>
+        <span class="tools__ver mono">{{ t.version }}</span>
+        <span class="tools__what">{{ t.what }}</span>
+        <span class="tools__path mono">{% if t.ok %}{{ t.path }}{% else %}<span class="tools__hint">{{ t.hint }}</span>{% endif %}</span>
+    </div>
+    {% endfor %}
+    {% endfor %}
+</div>
+
+<div class="panel tools">
+    <div class="result__label">Worker PATH <span class="muted">· searched top to bottom</span></div>
+    {% for e in path %}
+    <div class="tools__pathrow{{ ' tools__pathrow--gone' if not e.exists }}">
+        <span class="tools__idx mono">{{ loop.index }}</span>
+        <span class="mono tools__dir">{{ e.path }}</span>
+        <span class="chip">{{ e.source }}</span>
+        {% if not e.exists %}<span class="tools__gone">does not exist</span>{% endif %}
+    </div>
+    {% endfor %}
+</div>
+
+<div class="panel tools">
+    <div class="result__label">Worker environment <span class="muted">· saved to config.yaml → worker_env</span></div>
+    {% if suggestions %}
+    <div class="tools__suggest">
+        {% for s in suggestions %}
+        <div class="tools__pathrow">
+            <span class="mono tools__dir">{{ s.path }}</span>
+            <span class="muted">has {{ s.why }}, not on PATH</span>
+            <button type="button" class="btn btn--ghost btn--sm" hx-post="/api/tools/add-path" hx-vals='{"path": "{{ s.path }}"}' hx-target="#tools-view" hx-swap="innerHTML">Add to PATH</button>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    <form hx-post="/api/tools/settings" hx-target="#tools-view" hx-swap="innerHTML" class="tools__form">
+        <div class="field"><label>Extra PATH dirs</label>
+            <textarea name="extra_path" rows="4" class="mono" placeholder="one directory per line — searched before the daemon's PATH">{{ settings.extra_path|join('\n') }}</textarea>
+        </div>
+        <div class="field-pair">
+            <div class="field"><label>ANDROID_HOME</label><input type="text" name="ANDROID_HOME" class="mono" value="{{ settings.ANDROID_HOME }}" placeholder="{{ sdk or '~/Library/Android/sdk' }}"></div>
+            <div class="field"><label>JAVA_HOME</label><input type="text" name="JAVA_HOME" class="mono" value="{{ settings.JAVA_HOME }}" placeholder="the daemon's own, if unset"></div>
+        </div>
+        <div class="tools__acts"><button type="submit" class="btn btn--primary btn--sm">Save</button></div>
+    </form>
+</div>

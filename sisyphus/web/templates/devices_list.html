@@ -1,0 +1,74 @@
+{# Devices (core.devices), grouped the way a person looks for them. Polls while
+   something is booting or leased, so the page tells the truth without reloads. #}
+{% set busy = devices|selectattr('state', 'equalto', 'booting')|list or devices|selectattr('lease')|list %}
+<div class="devices"{% if busy %} hx-get="/api/devices/list" hx-trigger="every 5s" hx-target="#devices-list" hx-swap="innerHTML"{% endif %}>
+    <div class="devices__summary">
+        <span class="chip">{{ devices|selectattr('state', 'equalto', 'ready')|list|length }} running</span>
+        <span class="chip">{{ devices|selectattr('lease')|list|length }} of {{ max_leases }} in use by agents</span>
+        <span class="chip">{{ devices|selectattr('allowed')|list|length }} allowed</span>
+    </div>
+    {% for title, kinds, platform in [('Android emulators', ['emulator'], 'android'), ('iOS simulators', ['simulator'], 'ios'), ('Connected devices', ['physical'], None)] %}
+    {% set group = devices|selectattr('kind', 'in', kinds)|list %}
+    <div class="section-title">{{ title }} <span class="chip">{{ group|length }}</span></div>
+    {% if not group %}
+    <div class="empty">{% if platform == 'android' %}No emulators yet — “+ Emulator” creates one from a preset.{% elif platform == 'ios' %}No simulators — needs Xcode.{% else %}No phone or tablet connected. Plug one in over USB (Android: USB debugging on).{% endif %}</div>
+    {% else %}
+    <div class="card-grid devices__grid">
+        {% for d in group %}
+        {% set url = '/api/devices/' ~ (d.id|urlencode) %}
+        {% set pill = {'ready': ('running', 'done'), 'booting': ('booting…', 'active'), 'off': ('off', 'paused'), 'offline': ('offline', 'failed'), 'unauthorized': ('unauthorized', 'failed'), 'broken': ('broken', 'failed')}[d.state] %}
+        <div class="ecard device{{ ' device--leased' if d.lease }}{{ ' device--physical' if d.kind == 'physical' }}">
+            <div class="ecard__head">
+                <div class="ecard__glyph device__glyph device__glyph--{{ d.platform }}">{{ 'A' if d.platform == 'android' else '' }}</div>
+                <div class="device__title">
+                    <div class="ecard__name">{{ d.name }}</div>
+                    <div class="ecard__sub">{{ d.specs.os or d.platform }}{% if d.kind == 'physical' and d.specs.model %} · {{ d.specs.model }}{% endif %}</div>
+                </div>
+                <span class="status status--{{ 'active' if d.lease else pill[1] }} right">{{ 'in use' if d.lease else pill[0] }}</span>
+            </div>
+            {% if d.specs.ram_mb or d.specs.disk_gb or d.specs.screen %}
+            <div class="device__specs">
+                {% if d.specs.ram_mb %}<span><b>{{ (d.specs.ram_mb / 1024)|round(1)|string|replace('.0', '') }} GB</b> RAM</span>{% endif %}
+                {% if d.specs.disk_gb %}<span><b>{{ d.specs.disk_gb|string|replace('.0', '') }} GB</b> storage</span>{% endif %}
+                {% if d.specs.cpu %}<span><b>{{ d.specs.cpu }}</b> cores</span>{% endif %}
+                {% if d.specs.screen %}<span class="mono">{{ d.specs.screen }}</span>{% endif %}
+                {% if d.specs.play %}<span>Play Store</span>{% endif %}
+            </div>
+            {% endif %}
+            {% if d.serial %}<div class="device__meta mono">{{ d.serial }}{% if d.booted_by_us %} · started by Sisyphus{% endif %}</div>{% endif %}
+            {% if d.lease %}
+            <div class="device__lease">Leased to <b>{{ d.lease.role }}</b> on <a href="/tasks/{{ d.lease.task_id }}">{{ d.lease.task_id }}</a> · since {{ d.lease.since|when }}</div>
+            {% endif %}
+            {% if d.state == 'unauthorized' %}<div class="ecard__note--warn">Unlock the phone and accept “Allow USB debugging”.</div>{% endif %}
+            {% if d.state == 'broken' %}<div class="ecard__note--bad">Listed by the emulator, but its folder is missing — delete it.</div>{% endif %}
+            <div class="ecard__foot">
+                <label class="check device__allow" title="{{ 'Agents may lease this device' }}">
+                    <input type="checkbox" {{ 'checked' if d.allowed }}
+                           hx-post="{{ url }}/allow" hx-vals='{"allowed": "{{ '0' if d.allowed else '1' }}"}' hx-swap="none"
+                           {% if d.kind == 'physical' and not d.allowed %}hx-confirm="Let agents install and run apps on {{ d.name }}? They will never wipe it, but they will use it."{% endif %}>
+                    Agents may use
+                </label>
+                <div class="device__acts">
+                    {% if d.kind != 'physical' %}
+                    {% if d.state == 'off' %}
+                    <button type="button" class="btn btn--ghost btn--sm" hx-post="{{ url }}/start" hx-swap="none" hx-disabled-elt="this">Start</button>
+                    <button type="button" class="btn btn--ghost btn--sm" hx-post="{{ url }}/start?window=1" hx-swap="none" hx-disabled-elt="this" title="Start with a visible window">Show</button>
+                    {% elif d.state in ('ready', 'booting') and not d.lease %}
+                    <button type="button" class="btn btn--ghost btn--sm" hx-post="{{ url }}/stop" hx-swap="none" hx-disabled-elt="this">Stop</button>
+                    {% endif %}
+                    {% endif %}
+                    {% if d.state == 'ready' and not (d.platform == 'ios' and d.kind == 'physical') %}
+                    <button type="button" class="btn btn--ghost btn--sm" hx-get="{{ url }}/peek" hx-target="#modal-container" hx-swap="innerHTML">Screen</button>
+                    {% endif %}
+                    {% if d.kind != 'physical' and not d.lease %}
+                    <button type="button" class="btn btn--ghost btn--sm" hx-post="{{ url }}/wipe" hx-swap="none" hx-disabled-elt="this" hx-confirm="Wipe {{ d.name }}? Every app and all data on it are erased.">Wipe</button>
+                    <button type="button" class="btn btn--danger btn--sm" hx-post="{{ url }}/delete" hx-swap="none" hx-confirm="Delete {{ d.name }} for good?">Delete</button>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endfor %}
+</div>
