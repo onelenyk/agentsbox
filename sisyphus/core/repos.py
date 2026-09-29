@@ -1,23 +1,82 @@
-"""Git repository manager — bare clones + platform mapping."""
-import os, subprocess, yaml
+"""Git repositories — config entries, one per repo, on one of three platforms.
+
+A repo is a ``source`` (a local path or a clone URL) plus the platform that
+source lives on: ``local``, ``github`` or ``gitlab``. The two must agree, and
+resolve_platform is the one place that decides whether they do.
+
+Nothing is cloned here. Workers clone ``source`` per task (core.worker) and
+cleanup_task reclaims that clone, so there is no persistent copy to keep fresh.
+"""
+import yaml
 from pathlib import Path
 
-WORKSPACE_ROOT = os.environ.get("WORKSPACE_ROOT", "/workspace")
-REPOS_DIR = Path(WORKSPACE_ROOT) / "repos"
+PLATFORMS = ("local", "github", "gitlab")
+_PLATFORM_LABEL = {"local": "Local", "github": "GitHub", "gitlab": "GitLab"}
+
 
 def load_repos():
     from core.config import get_config
     return get_config("repos", [])
 
+
+def is_remote(source: str) -> bool:
+    """A clone URL (https://, ssh://, git@host:…) rather than a filesystem path."""
+    source = (source or "").strip()
+    return "://" in source or source.startswith("git@")
+
+
+def resolve_platform(source: str, platform: str = "") -> str:
+    """The platform a repo with this *source* is on, given the *platform* the
+    human picked ("" = auto-detect). Raises ValueError when the two disagree.
+
+    The rules are the whole local/remote split: ``local`` is a path on this
+    machine, ``github``/``gitlab`` is a clone URL. A URL whose host names one
+    forge cannot be saved as the other, and a URL on a host we cannot place (a
+    self-hosted GitLab on its own domain) needs the platform picked explicitly —
+    auto-detect would otherwise leave it with no publisher, found out only when
+    the finished task tries to open its merge request.
+    """
+    from core.providers import detect_platform
+
+    source = (source or "").strip()
+    platform = (platform or "").strip().lower()
+    if platform and platform not in PLATFORMS:
+        raise ValueError(f"unknown platform {platform!r} — pick Local, GitHub or GitLab")
+    detected = detect_platform(source)
+    if platform == "local" and is_remote(source):
+        raise ValueError("platform is Local but the source is a URL — "
+                         "a local repo is a path on this machine")
+    if platform in ("github", "gitlab") and not is_remote(source):
+        raise ValueError(f"platform is {_PLATFORM_LABEL[platform]} but the source is a path — "
+                         f"a {_PLATFORM_LABEL[platform]} repo needs its clone URL")
+    if platform and detected in ("github", "gitlab") and detected != platform:
+        raise ValueError(f"platform is {_PLATFORM_LABEL[platform]} but the URL is on "
+                         f"{_PLATFORM_LABEL[detected]}")
+    if not platform and detected == "unknown":
+        raise ValueError("cannot tell which forge hosts this URL — pick GitHub or GitLab")
+    return platform or detected
+
+
+def repo_platform(repo: dict) -> str:
+    """The platform a saved repo entry is on: its picked ``platform``, else the
+    one its source implies. Never raises — an entry saved before
+    resolve_platform guarded the form may disagree, and readers of an existing
+    repo must still get an answer (``unknown`` publishes nothing)."""
+    from core.providers import detect_platform
+    return (repo.get("platform") or "").strip() or detect_platform(repo.get("source", ""))
+
+
 def add_repo(name, source, platform, branch="main"):
-    bare_path = REPOS_DIR / name
-    REPOS_DIR.mkdir(parents=True, exist_ok=True)
-    if not bare_path.exists():
-        result = subprocess.run(["git", "clone", "--bare", source, str(bare_path)], capture_output=True, text=True, timeout=120)
-        if result.returncode != 0:
-            raise RuntimeError(f"Clone failed: {result.stderr}")
+    """Save a repo after proving its source and platform agree and git can read
+    the source. Nothing is cloned — see the module docstring."""
+    from core.repo_check import FAIL, _check_reachable, _ls_remote
+
+    source = (source or "").strip()
+    resolve_platform(source, platform)
+    reach = _check_reachable(source, branch, 30, _ls_remote)
+    if reach["status"] == FAIL:
+        raise RuntimeError(reach["detail"])
     _save_repo_config(name, source, platform, branch)
-    return str(bare_path)
 
 def get_repo(name):
     for r in load_repos():
@@ -41,39 +100,24 @@ def repo_setup(name):
 def list_repos():
     repos = load_repos()
     for r in repos:
-        bare_path = REPOS_DIR / r["name"]
-        r["cloned"] = bare_path.exists() and (bare_path / "HEAD").exists()
         r["reach"] = source_reach(r.get("source", ""))
     return repos
 
 
 def source_reach(source: str) -> str:
     """Whether work can actually start against this repo: ``ok``, ``missing``
-    or ``remote``.
-
-    Not the same question as ``cloned``. Workers clone per task into
-    ``repos/<task_id>_<name>`` and cleanup_task deletes it, so the persistent
-    ``repos/<name>`` bare clone that ``cloned`` looks for exists only if
-    add_repo made one — leaving every repo reading "pending" forever, including
-    ones that have run dozens of tasks. What decides whether the next task can
-    run is the source being reachable.
+    or ``remote``. Workers clone ``source`` per task, so a reachable source is
+    what decides whether the next task can run.
     """
     source = (source or "").strip()
     if not source:
         return "missing"
-    if "://" in source or source.startswith("git@"):
+    if is_remote(source):
         return "remote"        # can't verify without a network round-trip
     p = Path(source).expanduser()
     if not p.exists():
         return "missing"
     return "ok" if (p / ".git").exists() or (p / "HEAD").exists() else "missing"
-
-def update_repo(name):
-    bare_path = REPOS_DIR / name
-    if bare_path.exists():
-        subprocess.run(["git", "-C", str(bare_path), "fetch", "origin"], capture_output=True, timeout=30)
-        return True
-    return False
 
 def _read_config_file() -> dict:
     """The raw on-disk config, ${VAR} placeholders intact (this is what gets
@@ -107,12 +151,7 @@ def _save_repo_config(name, source, platform, branch):
 
 
 def delete_repo(name):
-    """Delete a repo from config and remove bare clone from disk."""
-    import shutil
-    bare_path = REPOS_DIR / name
-    if bare_path.exists():
-        shutil.rmtree(str(bare_path), ignore_errors=True)
-    # Remove from config
+    """Delete a repo's config entry. Its source is the human's and stays."""
     config = _read_config_file()
     repos = config.get("repos", [])
     config["repos"] = [r for r in repos if r.get("name") != name]
@@ -129,12 +168,15 @@ def is_read_only(repo_name: str) -> bool:
 
 
 def update_repo_config(name, source=None, platform=None, branch=None, auto_merge=None, mode=None, target=None):
-    """Update repo configuration without re-cloning.
+    """Update repo configuration.
 
     In-place edits of the existing entry, so every other key the UI does not
     know about — ``check``, ``setup``, ``token``, … — survives the save.
     ``_save_repo_config`` cannot be used here: it rebuilds the entry from
-    scratch and would drop those keys."""
+    scratch and would drop those keys.
+
+    Raises ValueError, before anything is written, when the edit would leave
+    source and platform disagreeing (see resolve_platform)."""
     # The raw entries, placeholders intact: the loaded config has every
     # ${VAR} already filled from the vault, and writing that back would put
     # a token into config.yaml in plain text.
@@ -142,6 +184,8 @@ def update_repo_config(name, source=None, platform=None, branch=None, auto_merge
     repos = config.get("repos") or []
     for r in repos:
         if r.get("name") == name:
+            resolve_platform(source or r.get("source", ""),
+                             r.get("platform", "") if platform is None else platform)
             if source: r["source"] = source
             if branch: r["branch"] = branch
             if platform is not None:
@@ -197,12 +241,10 @@ def repo_credential(name: str) -> dict:
     configured".
     """
     from core.config import get_config
-    from core.providers import detect_platform
-
     from core.credentials import get as credential, repo_token_name
 
     repo = get_repo(name) or {}
-    platform = (repo.get("platform") or "").strip() or detect_platform(repo.get("source", ""))
+    platform = repo_platform(repo)
 
     own = credential(repo_token_name(name)) or _resolved(repo.get("token"))
     if own:

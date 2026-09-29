@@ -127,6 +127,7 @@
             {% for f in files.produced %}{{ ui.file_row(task.id, f, '📄' if f.kind == 'report' else '📎') }}{% endfor %}
         </div>
         {% endif %}
+        {% for v in messages if v.kind == 'view' and v.attachment %}{{ ui.agent_view(task.id, v) }}{% endfor %}
     </div>
     {% endcall %}
 
@@ -338,7 +339,9 @@
             <span class="msg__time reltime" data-created="{{ m.created_at }}" title="{{ m.created_at[:19] }}">{{ m.created_at[11:16] }}</span>
         </div>
         {{ msg_body(m) }}
-        {% if m.attachment %}
+        {% if m.kind == 'view' and m.attachment %}
+        <div class="msg__att">▦ <a href="/api/tasks/{{ task.id }}/view/{{ m.attachment }}" target="_blank" rel="noopener">shown above · open ↗</a></div>
+        {% elif m.attachment %}
         <div class="msg__att">📎 <a href="#" hx-get="/api/tasks/{{ task.id }}/diff/{{ m.attachment }}" hx-target="#modal-container" hx-swap="innerHTML" onclick="return false">{{ m.attachment }}</a></div>
         {% endif %}
     </div>

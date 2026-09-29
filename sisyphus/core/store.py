@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS messages (
     task_id    TEXT NOT NULL REFERENCES tasks(id),
     seq        INTEGER NOT NULL,          -- 1..N monotonic per task
     author     TEXT NOT NULL,             -- orchestrator | <role> | human | system
-    kind       TEXT NOT NULL DEFAULT 'note',  -- note|question|answer|result|worker_started|worker_finished
+    kind       TEXT NOT NULL DEFAULT 'note',  -- note|question|answer|result|view|worker_started|worker_finished
     text       TEXT NOT NULL DEFAULT '',
     attachment TEXT,                       -- optional filename on disk in the task dir
     created_at TEXT NOT NULL,
@@ -467,7 +467,7 @@ def message_lane(m: dict) -> str:
     # Conversation proper — plus "commit", which stays in the dialogue flow
     # (the template renders it as a thin single line).
     if kind in ("answer", "question", "result", "mr", "plan", "external",
-                "child_finished", "commit"):
+                "child_finished", "commit", "view"):
         return "dialogue"
 
     # Worker lifecycle bookkeeping.

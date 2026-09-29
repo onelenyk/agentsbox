@@ -57,36 +57,7 @@ class TestGetRepo:
 # list_repos
 # ---------------------------------------------------------------------------
 class TestListRepos:
-    """list_repos() adds a "cloned" field based on filesystem checks."""
-
-    REPOS = [
-        {"name": "repo-a", "source": "git@host:org/a.git", "branch": "main"},
-        {"name": "repo-b", "source": "git@host:org/b.git", "branch": "dev"},
-    ]
-
-    def test_adds_cloned_false_when_dirs_do_not_exist(self):
-        """When bare repos don't exist on disk, cloned=False."""
-        with patch("core.repos.load_repos", return_value=[r.copy() for r in self.REPOS]):
-            result = core.repos.list_repos()
-
-        assert len(result) == 2
-        for r in result:
-            assert "cloned" in r
-            assert r["cloned"] is False
-            assert "name" in r
-            assert "source" in r
-            assert "branch" in r
-        assert result[0]["name"] == "repo-a"
-        assert result[1]["name"] == "repo-b"
-
-    def test_adds_cloned_true_when_bare_repos_exist(self):
-        """When bare repo dirs and their HEAD files exist, cloned=True."""
-        with patch("core.repos.load_repos", return_value=[r.copy() for r in self.REPOS]):
-            with patch("pathlib.Path.exists", return_value=True):
-                result = core.repos.list_repos()
-
-        for r in result:
-            assert r["cloned"] is True
+    """list_repos() adds a "reach" field: can the next task clone the source."""
 
     def test_reach_is_ok_for_a_real_local_checkout(self, tmp_path):
         """A repo whose source is a live git checkout is ready to work in —
@@ -98,7 +69,6 @@ class TestListRepos:
                    return_value=[{"name": "p", "source": str(src), "branch": "main"}]):
             r = core.repos.list_repos()[0]
         assert r["reach"] == "ok"
-        assert r["cloned"] is False   # and that must not be what the UI reports
 
     def test_reach_is_missing_when_the_source_is_gone(self, tmp_path):
         with patch("core.repos.load_repos",
@@ -112,12 +82,12 @@ class TestListRepos:
                        return_value=[{"name": "p", "source": url, "branch": "main"}]):
                 assert core.repos.list_repos()[0]["reach"] == "remote"
 
-    def test_does_not_mutate_load_repos_result_in_place(self):
-        """list_repos adds 'cloned' to the same list objects returned by load_repos."""
+    def test_annotates_load_repos_result_in_place(self):
+        """list_repos adds 'reach' to the same list objects returned by load_repos."""
         original = [{"name": "x", "source": "s", "branch": "b"}]
         with patch("core.repos.load_repos", return_value=original):
             result = core.repos.list_repos()
-        assert "cloned" in original[0]
+        assert "reach" in original[0]
         assert result is original  # same list object, mutated in place
 
     def test_includes_stored_platform(self):
@@ -161,13 +131,87 @@ class TestSaveRepoConfig:
 # add_repo
 # ---------------------------------------------------------------------------
 class TestAddRepo:
-    """add_repo forwards the platform override to _save_repo_config."""
+    """add_repo saves a config entry once source and platform agree and git can
+    read the source — and clones nothing."""
 
-    def test_passes_platform_through_to_save(self):
-        with patch("pathlib.Path.exists", return_value=True), \
-             patch("core.repos._save_repo_config") as save:
-            core.repos.add_repo("r", "src", "gitlab", "main")
-        save.assert_called_once_with("r", "src", "gitlab", "main")
+    def _git_repo(self, tmp_path):
+        import subprocess
+        src = tmp_path / "proj"
+        src.mkdir()
+        subprocess.run(["git", "init", "-q", "-b", "main", str(src)], check=True)
+        return src
+
+    def test_passes_platform_through_to_save(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path / "ws"))
+        src = self._git_repo(tmp_path)
+        with patch("core.repos._save_repo_config") as save:
+            core.repos.add_repo("r", str(src), "local", "main")
+        save.assert_called_once_with("r", str(src), "local", "main")
+        assert not (tmp_path / "ws").exists()   # no persistent clone anywhere
+
+    def test_refuses_a_contradicting_platform_before_touching_git(self):
+        with patch("core.repos._save_repo_config") as save, \
+             patch("core.repo_check._ls_remote") as ls:
+            try:
+                core.repos.add_repo("r", "/some/path", "github", "main")
+            except ValueError as e:
+                assert "clone URL" in str(e)
+            else:
+                raise AssertionError("expected ValueError")
+        ls.assert_not_called()
+        save.assert_not_called()
+
+    def test_refuses_a_path_that_is_not_a_git_repo(self, tmp_path):
+        with patch("core.repos._save_repo_config") as save:
+            try:
+                core.repos.add_repo("r", str(tmp_path), "", "main")
+            except RuntimeError as e:
+                assert "not a git repository" in str(e)
+            else:
+                raise AssertionError("expected RuntimeError")
+        save.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# resolve_platform
+# ---------------------------------------------------------------------------
+class TestResolvePlatform:
+    """Local is a path, GitHub/GitLab is a clone URL — and nothing else saves."""
+
+    OK = [
+        ("/Users/me/proj", "", "local"),
+        ("/Users/me/proj", "local", "local"),
+        ("https://github.com/o/r.git", "", "github"),
+        ("git@github.com:o/r.git", "github", "github"),
+        ("https://gitlab.com/o/r.git", "", "gitlab"),
+        ("https://git.acme.io/o/r.git", "gitlab", "gitlab"),   # self-hosted
+        ("https://git.acme.io/o/r.git", "GitHub", "github"),   # case-insensitive
+    ]
+    BAD = [
+        ("/Users/me/proj", "github", "clone URL"),
+        ("/Users/me/proj", "gitlab", "clone URL"),
+        ("https://github.com/o/r.git", "local", "Local but the source is a URL"),
+        ("https://github.com/o/r.git", "gitlab", "on GitHub"),
+        ("https://git.acme.io/o/r.git", "", "pick GitHub or GitLab"),
+        ("/Users/me/proj", "bitbucket", "unknown platform"),
+    ]
+
+    def test_agreeing_pairs_resolve(self):
+        for source, platform, want in self.OK:
+            assert core.repos.resolve_platform(source, platform) == want, (source, platform)
+
+    def test_contradictions_are_refused_by_name(self):
+        for source, platform, words in self.BAD:
+            try:
+                core.repos.resolve_platform(source, platform)
+            except ValueError as e:
+                assert words in str(e), (source, platform, str(e))
+            else:
+                raise AssertionError(f"{source!r} + {platform!r} resolved")
+
+    def test_repo_platform_never_raises_on_a_saved_entry(self):
+        assert core.repos.repo_platform({"source": "https://git.acme.io/o/r.git"}) == "unknown"
+        assert core.repos.repo_platform({"source": "/p", "platform": "gitlab"}) == "gitlab"
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +315,7 @@ class TestUpdateRepoConfig:
         assert dumped_config["other"] == "preserved"
 
     def test_preserves_existing_platform_when_other_fields_change(self):
-        repos = [{"name": "repo1", "source": "old-src", "branch": "old-br", "platform": "gitlab"}]
+        repos = [{"name": "repo1", "source": "https://gitlab.com/o/r.git", "branch": "old-br", "platform": "gitlab"}]
         with patch("core.repos.load_repos", return_value=[r.copy() for r in repos]):
             fake_config = {"repos": [r.copy() for r in repos]}
             with patch("core.repos.yaml.safe_load", return_value=fake_config):
@@ -279,14 +323,14 @@ class TestUpdateRepoConfig:
                     with patch("core.config.reload_config"):
                         with patch.object(core.repos.Path, "read_text", return_value=""):
                             with patch.object(core.repos.Path, "write_text"):
-                                core.repos.update_repo_config("repo1", source="new-src")
+                                core.repos.update_repo_config("repo1", source="https://gitlab.com/o/new.git")
 
         updated = mock_dump.call_args[0][0]["repos"][0]
         assert updated["platform"] == "gitlab"
-        assert updated["source"] == "new-src"
+        assert updated["source"] == "https://gitlab.com/o/new.git"
 
     def test_can_change_platform(self):
-        repos = [{"name": "repo1", "source": "old-src", "branch": "old-br", "platform": "gitlab"}]
+        repos = [{"name": "repo1", "source": "https://git.acme.io/o/r.git", "branch": "old-br", "platform": "gitlab"}]
         with patch("core.repos.load_repos", return_value=[r.copy() for r in repos]):
             fake_config = {"repos": [r.copy() for r in repos]}
             with patch("core.repos.yaml.safe_load", return_value=fake_config):
@@ -300,7 +344,7 @@ class TestUpdateRepoConfig:
         assert updated["platform"] == "github"
 
     def test_clears_platform_on_empty_string(self):
-        repos = [{"name": "repo1", "source": "old-src", "branch": "old-br", "platform": "gitlab"}]
+        repos = [{"name": "repo1", "source": "https://gitlab.com/o/r.git", "branch": "old-br", "platform": "gitlab"}]
         with patch("core.repos.load_repos", return_value=[r.copy() for r in repos]):
             fake_config = {"repos": [r.copy() for r in repos]}
             with patch("core.repos.yaml.safe_load", return_value=fake_config):
@@ -313,11 +357,30 @@ class TestUpdateRepoConfig:
         updated = mock_dump.call_args[0][0]["repos"][0]
         assert "platform" not in updated
 
+    def test_refuses_an_edit_that_contradicts_the_source_and_writes_nothing(self):
+        """Switching a URL repo to Local, or a path repo's platform to GitHub,
+        is refused before config.yaml is touched."""
+        repos = [{"name": "repo1", "source": "/on/disk", "branch": "main"}]
+        fake_config = {"repos": [r.copy() for r in repos]}
+        with patch("core.repos.yaml.safe_load", return_value=fake_config), \
+             patch("core.repos.yaml.dump") as mock_dump, \
+             patch.object(core.repos.Path, "read_text", return_value=""), \
+             patch.object(core.repos.Path, "exists", return_value=True):
+            for kwargs in ({"platform": "github"},
+                           {"source": "https://github.com/o/r.git", "platform": "local"}):
+                try:
+                    core.repos.update_repo_config("repo1", **kwargs)
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError(f"{kwargs} was saved")
+        mock_dump.assert_not_called()
+
     def test_toggling_auto_merge_keeps_every_other_key(self):
         """_save_repo_config rebuilds the entry and would drop `check`, so the
         toggle must route through update_repo_config's in-place edit — and the
         save must keep check/setup/platform untouched while flipping the flag."""
-        repos = [{"name": "repo1", "source": "old-src", "branch": "old-br",
+        repos = [{"name": "repo1", "source": "https://gitlab.com/o/r.git", "branch": "old-br",
                   "platform": "gitlab", "check": "pytest -q",
                   "setup": {"copy": ["local.properties"]}}]
         with patch("core.repos.load_repos", return_value=[r.copy() for r in repos]):
@@ -334,7 +397,7 @@ class TestUpdateRepoConfig:
         assert updated["check"] == "pytest -q"
         assert updated["setup"] == {"copy": ["local.properties"]}
         assert updated["platform"] == "gitlab"
-        assert updated["source"] == "old-src"
+        assert updated["source"] == "https://gitlab.com/o/r.git"
         assert updated["branch"] == "old-br"
 
     def test_unchecking_auto_merge_sets_it_false(self):

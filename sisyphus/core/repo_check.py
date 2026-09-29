@@ -34,6 +34,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from core.repos import is_remote
+
 logger = logging.getLogger(__name__)
 
 # Generous enough for a cold TLS handshake to a self-hosted GitLab on a slow
@@ -166,16 +168,12 @@ def _api_base(platform: str) -> str:
 
 # ── stages ───────────────────────────────────────────────────────────────
 
-def _is_remote(source: str) -> bool:
-    return "://" in source or source.startswith("git@")
-
-
 def _check_reachable(source: str, branch: str, timeout: int, ls_remote) -> dict:
     if not source:
         return _stage("reachable", FAIL, "no source configured",
                       "set the repo's source to a local path or a git URL")
 
-    if not _is_remote(source):
+    if not is_remote(source):
         p = Path(source).expanduser()
         if not p.exists():
             return _stage("reachable", FAIL, f"no such path: {p}",

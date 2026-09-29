@@ -10,10 +10,10 @@
   <div class="panel task-main">
     <div class="panel__head">
         <h2>⎇ {{ repo.name }}</h2>
-        {% if repo.cloned %}<span class="status status--done">cloned</span>{% else %}<span class="status status--waiting">pending</span>{% endif %}
+        {% if repo.reach == 'ok' %}<span class="status status--done">ready</span>{% elif repo.reach == 'remote' %}<span class="status status--active">remote</span>{% else %}<span class="status status--failed" title="source path not found or not a git repo">unreachable</span>{% endif %}
     </div>
     <div class="term wrap">{{ repo.source }}</div>
-    {# "cloned" says a bare clone exists on disk; it says nothing about whether
+    {# The status above only looks at the source; it says nothing about whether
        this repo can be read, authenticated against, or published to. Check
        connection fills that slot with what was actually proved. #}
     <div id="repo-check-detail"></div>
@@ -58,7 +58,7 @@
   <aside class="task-rail">
     <div class="rail-sec">
         <div class="rail-h">Properties</div>
-        <div class="prop"><span class="k">Status</span>{% if repo.cloned %}<span class="status status--done">cloned</span>{% else %}<span class="status status--waiting">pending</span>{% endif %}</div>
+        <div class="prop"><span class="k">Status</span>{% if repo.reach == 'ok' %}<span class="status status--done">ready</span>{% elif repo.reach == 'remote' %}<span class="status status--active">remote</span>{% else %}<span class="status status--failed" title="source path not found or not a git repo">unreachable</span>{% endif %}</div>
         <div class="prop"><span class="k">Branch</span><span class="v mono">⎇ {{ repo.branch }}</span></div>
         <div class="prop"><span class="k">Tasks</span><span class="v">{{ done }}/{{ tasks|length }}</span></div>
         <div class="prop"><span class="k">Context files</span><span class="v">{{ resources|length }}</span></div>
@@ -81,7 +81,6 @@
                     hx-target="#repo-readiness-detail" hx-swap="innerHTML" hx-disabled-elt="this"
                     hx-on:htmx:before-request="this.textContent='Checking…'"
                     hx-on:htmx:after-request="this.textContent='Production readiness'">Production readiness</button>
-            <button class="btn btn--ghost btn--sm" hx-post="/api/repos/{{ repo.name }}/update" hx-swap="none">Fetch</button>
             <button class="btn btn--ghost btn--sm" hx-get="/api/repos/{{ repo.name }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
         </div>
     </div>

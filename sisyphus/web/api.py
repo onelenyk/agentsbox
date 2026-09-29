@@ -149,8 +149,11 @@ async def list_repos():
 async def add_repo(body: AddRepo):
     from core.repos import add_repo as _add_repo
 
-    path = _add_repo(body.name, body.source, body.platform, body.branch)
-    return {"name": body.name, "source": body.source, "branch": body.branch, "bare_path": path}
+    try:
+        _add_repo(body.name, body.source, body.platform, body.branch)
+    except (ValueError, RuntimeError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"name": body.name, "source": body.source, "branch": body.branch}
 
 
 @api.delete("/repos/{name}")
@@ -159,13 +162,6 @@ async def delete_repo(name: str):
 
     _delete_repo(name)
     return {"success": True, "name": name}
-
-
-@api.post("/repos/{name}/update")
-async def update_repo(name: str):
-    from core.repos import update_repo as _update_repo
-
-    return {"success": _update_repo(name), "name": name}
 
 
 # ── Runners ────────────────────────────────────────────────────────────

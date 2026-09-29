@@ -20,13 +20,12 @@ from mcp_server import handle_request, TOOL_DEFINITIONS, HANDLERS
 # Helpers
 # ---------------------------------------------------------------------------
 
-EXPECTED_TOOL_COUNT = 17
+EXPECTED_TOOL_COUNT = 16
 
 ALL_TOOL_NAMES = [
     "sisyphus_list_repos",
     "sisyphus_add_repo",
     "sisyphus_delete_repo",
-    "sisyphus_update_repo",
     "sisyphus_list_runners",
     "sisyphus_add_runner",
     "sisyphus_update_runner",
@@ -371,8 +370,6 @@ class TestToolForwarding:
     def test_delete_repo(self):
         assert self._call("sisyphus_delete_repo", name="n").args == ("DELETE", "/api/v1/repos/n")
 
-    def test_update_repo(self):
-        assert self._call("sisyphus_update_repo", name="n").args == ("POST", "/api/v1/repos/n/update")
 
     # runners
     def test_list_runners(self):

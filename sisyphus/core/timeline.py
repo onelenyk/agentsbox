@@ -378,6 +378,8 @@ def files(task_id: str, messages: list, workspace: Optional[str] = None) -> dict
         for f in sorted(adir.iterdir()):
             if not f.is_file() or f.name.startswith("."):
                 continue
+            if posted.get(f.name, {}).get("kind") == "view":
+                continue        # a page an agent showed — rendered in place, not a file to open
             by = posted.get(f.name, {}).get("author", "")
             if f.name.startswith("salvaged-"):
                 role = f.stem.rsplit("_", 1)[-1] if "_" in f.stem else ""

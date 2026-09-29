@@ -6,7 +6,7 @@ persona is just prompt text. Add a role by adding a dict entry.
 """
 
 # Base tools every worker gets.
-_BASE = ["get_context", "comment", "attach"]
+_BASE = ["get_context", "comment", "attach", "show_html"]
 
 ROLES = {
     "explorer": {
@@ -29,7 +29,7 @@ ROLES = {
             "result. Write the report in the language the task goal is written "
             "in; keep paths and commands as they are."
         ),
-        "tools": _BASE + ["propose_subtasks", "finish", "jira_issue", "jira_transition", "jira_comment"],
+        "tools": _BASE + ["propose_subtasks", "finish", "jira_issue", "jira_search", "jira_transition", "jira_comment"],
     },
     "engineer": {
         "persona": (

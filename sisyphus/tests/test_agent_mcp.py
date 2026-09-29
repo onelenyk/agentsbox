@@ -73,9 +73,9 @@ def test_missing_token_rejected(db_path):
 def test_tools_list_matches_role(db_path):
     c = _client()
     for role, expected in [
-        ("explorer", {"get_context", "comment", "attach", "propose_subtasks", "finish", "jira_issue", "jira_transition", "jira_comment"}),
-        ("engineer", {"get_context", "comment", "attach", "commit", "open_mr", "finish", "jira_issue", "jira_transition", "jira_comment"}),
-        ("reviewer", {"get_context", "comment", "attach", "approve", "request_changes", "jira_issue", "jira_transition", "jira_comment"}),
+        ("explorer", {"get_context", "comment", "attach", "show_html", "propose_subtasks", "finish", "jira_issue", "jira_search", "jira_transition", "jira_comment"}),
+        ("engineer", {"get_context", "comment", "attach", "show_html", "commit", "open_mr", "finish", "jira_issue", "jira_transition", "jira_comment"}),
+        ("reviewer", {"get_context", "comment", "attach", "show_html", "approve", "request_changes", "jira_issue", "jira_transition", "jira_comment"}),
     ]:
         _, token = _session(db_path, role)
         tools = _rpc(c, token, "tools/list").json()["result"]["tools"]
@@ -139,6 +139,96 @@ def test_attachment_served_over_api(db_path):
     assert r.status_code == 200
     assert "diff --git" in r.text
     assert _client().get(f"/api/v1/tasks/{task['id']}/attachments/missing.txt").status_code == 404
+
+
+# ── show_html: agent-generated views ────────────────────────────────────
+
+
+def test_show_html_stores_the_page_and_posts_a_view(db_path):
+    from core import attachments
+    task_id, token = _session(db_path)
+    out = _call(_client(), token, "show_html", {"title": "Jira · 2 issues", "html": "<h1>hi</h1>"})
+    assert out["result"]["isError"] is False
+    m = store.get_thread(task_id)[-1]
+    assert (m["kind"], m["text"], m["author"]) == ("view", "Jira · 2 issues", "explorer")
+    assert attachments.read(task_id, m["attachment"]) == "<h1>hi</h1>"
+    # a second view never overwrites the first
+    _call(_client(), token, "show_html", {"html": "<p>two</p>"})
+    second = store.get_thread(task_id)[-1]
+    assert second["attachment"] != m["attachment"] and second["text"] == "view"
+
+
+def test_show_html_refuses_empty_and_oversized(db_path):
+    from web.agent_mcp import VIEW_MAX_BYTES
+    _, token = _session(db_path)
+    assert _call(_client(), token, "show_html", {"html": "  "})["result"]["isError"] is True
+    big = "x" * (VIEW_MAX_BYTES + 1)
+    assert _call(_client(), token, "show_html", {"html": big})["result"]["isError"] is True
+
+
+def test_view_is_served_sandboxed_with_the_bridge(db_path):
+    """The isolation lives on the response: an opaque-origin sandbox and no
+    network, even when the URL is opened directly in a tab."""
+    task_id, token = _session(db_path)
+    _call(_client(), token, "show_html", {"html": "<h1>hi</h1><script>1</script>"})
+    name = store.get_thread(task_id)[-1]["attachment"]
+    r = _client().get(f"/api/tasks/{task_id}/view/{name}")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/html")
+    csp = r.headers["content-security-policy"]
+    assert csp.startswith("sandbox allow-scripts ")
+    assert "allow-same-origin" not in csp
+    assert "connect-src 'none'" in csp and "default-src 'none'" in csp
+    assert "<h1>hi</h1><script>1</script>" in r.text
+    assert "sisyphusView" in r.text                    # height/theme bridge appended
+    assert ":where(:root)" in r.text and "--panel:" in r.text   # the UI's tokens, both themes
+    assert ':where(:root[data-theme="light"])' in r.text
+    # a refresh re-requests the frame; an unchanged view answers 304, still sandboxed
+    again = _client().get(f"/api/tasks/{task_id}/view/{name}",
+                          headers={"If-None-Match": r.headers["etag"]})
+    assert again.status_code == 304
+    assert again.headers["content-security-policy"] == csp
+
+
+def test_view_tokens_never_precede_the_doctype():
+    """A <style> ahead of <!doctype> would drop the page into quirks mode, and
+    the agent's own head must come after ours so its variables win."""
+    from web.routes import _with_view_tokens
+    doc = "<!DOCTYPE html><html><head><title>t</title></head><body>x</body></html>"
+    out = _with_view_tokens(doc)
+    assert out.startswith("<!DOCTYPE html><html><head><style>")
+    assert out.index("--panel:") < out.index("<title>")
+    assert _with_view_tokens("<!doctype html><p>x</p>").startswith("<!doctype html><style>")
+    assert _with_view_tokens("<p>x</p>").startswith("<style>")
+
+
+def test_view_route_serves_only_html_attachments(db_path):
+    from core import attachments
+    task_id, _ = _session(db_path)
+    attachments.save_text(task_id, "change.patch", "diff")
+    c = _client()
+    assert c.get(f"/api/tasks/{task_id}/view/change.patch").status_code == 404
+    assert c.get(f"/api/tasks/{task_id}/view/missing.html").status_code == 404
+    assert c.get(f"/api/tasks/{task_id}/view/..%2Fx.html").status_code == 404
+
+
+def test_jira_search_caps_results_and_trims_descriptions(db_path, monkeypatch):
+    from core import jira
+    seen = {}
+
+    def fake_search(jql, actor, max_results=200, fields=None, task_id=None):
+        seen.update(jql=jql, n=max_results, actor=actor)
+        return [{"key": "A-1", "url": "u", "fields": {"summary": "s", "description": "d" * 1000}}]
+
+    monkeypatch.setattr(jira, "configured", lambda: True)
+    monkeypatch.setattr(jira, "search", fake_search)
+    task_id, token = _session(db_path)
+    out = _call(_client(), token, "jira_search", {"jql": "project = A", "max_results": 500})
+    assert out["result"]["isError"] is False
+    assert seen["n"] == 100 and seen["jql"] == "project = A"
+    assert seen["actor"] == f"agent:explorer@{task_id}"
+    body = json.loads(out["result"]["content"][0]["text"])
+    assert body["count"] == 1
+    assert len(body["issues"][0]["fields"]["description"]) == 401
 
 
 def test_finish_posts_result_and_revokes(db_path):

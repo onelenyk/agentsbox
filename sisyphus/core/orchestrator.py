@@ -231,6 +231,10 @@ Read the task thread, then CALL exactly one decision tool:
   changing no files — then pass that answer on with this. A question answered
   needs no branch, no merge request and no reviewer; shipping a document
   instead makes the human wait for a review of something they only asked about.
+  When the answer is a lot of structured data (a list of issues, a table),
+  instruct the worker to show it with show_html — the page appears in the
+  task's result area — and to keep its result a short summary. Your answer
+  then summarises too: the rows are already on the page, never repeat them.
 - decide_complete(why) — the task is done. ONLY after a reviewer has APPROVED on
   the thread (or all children are done); otherwise spawn a reviewer instead. A
   branch already reviewed by its own review task counts as approved — never
@@ -252,6 +256,7 @@ as text; make exactly one call, then stop."""
 # (core.agents._refresh_orchestrator_persona).
 SHIPPED_PERSONAS = {
     "63961b0fa071a676b50995f82578e44d48c0f16b73a5157ddea54cbc480c8fab",  # to 2026-09-22
+    "2ab632ca990f0468ad82e6c2c713bdafa8cad63e255615f157712ed650305b5b",  # to 2026-09-29
 }
 
 

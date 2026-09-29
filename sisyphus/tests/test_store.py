@@ -263,7 +263,7 @@ class TestMessageLane:
     def test_conversation_kinds_are_dialogue(self):
         from core.store import message_lane
         for kind in ("answer", "question", "result", "mr", "plan", "external",
-                     "child_finished"):
+                     "child_finished", "view"):
             assert message_lane(self._m(kind=kind)) == "dialogue", kind
 
     def test_commit_is_dialogue(self):

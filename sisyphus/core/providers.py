@@ -21,8 +21,9 @@ from . import attachments, git_ops
 def detect_platform(source: str) -> str:
     """Which forge (if any) a repo lives on, inferred from its clone source.
     A per-repo 'platform' override in config wins over this when present."""
+    from .repos import is_remote
     s = (source or "").lower()
-    if "://" in s or s.startswith("git@"):
+    if is_remote(s):
         if "github" in s:
             return "github"
         if "gitlab" in s:
@@ -104,7 +105,7 @@ def publish_change(session: dict, title: str, description: str) -> dict:
         return {"error": "task has no repo — nothing to publish"}
 
     source = repo.get("source", "")
-    platform = (repo.get("platform") or "").strip() or detect_platform(source)
+    platform = repos.repo_platform(repo)
     task_id = session["task_id"]
     # Open the MR against the branch this task was cut from. For a plan step that
     # is the plan's integration branch, so the MR's diff is just this step's delta

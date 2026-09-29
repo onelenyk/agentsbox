@@ -223,8 +223,26 @@
             else document.documentElement.dataset.theme = next;
             try { localStorage.setItem("theme", next === THEMES[0] ? "" : next); } catch (e) {}
             showTheme();
+            document.querySelectorAll("iframe.aview__frame").forEach(sendViewTheme);
         };
         showTheme();
+
+        // Agent views (_ui.html agent_view): a sandboxed frame reports its
+        // content height and gets the theme back. Only frames on this page
+        // are answered — a message from anywhere else matches none of them.
+        function sendViewTheme(f) {
+            if (f.contentWindow) f.contentWindow.postMessage(
+                { sisyphusTheme: document.documentElement.dataset.theme || THEMES[0] }, "*");
+        }
+        window.addEventListener("message", function (e) {
+            if (!e.data || !e.data.sisyphusView) return;
+            document.querySelectorAll("iframe.aview__frame").forEach(function (f) {
+                if (f.contentWindow !== e.source) return;
+                var h = Math.max(80, Math.min(2400, (e.data.h | 0) + 2));
+                f.style.setProperty("--h", h + "px");
+                if (!f.dataset.themed) { f.dataset.themed = "1"; sendViewTheme(f); }
+            });
+        });
 
         // How a task board is drawn (_ui.html view_switch): "list" or
         // "sprint". A ?view= in the address wins, so a link can say which.

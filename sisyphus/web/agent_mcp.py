@@ -65,6 +65,27 @@ def _attach(session, filename="", description="", **_):
     return {"ok": True}
 
 
+# A view is a whole page, not a note — big enough for a 50-row table with its
+# own styles and script, small enough that a runaway loop can't fill the disk.
+VIEW_MAX_BYTES = 1_000_000
+
+
+def _show_html(session, title="", html="", **_):
+    """Put a self-contained HTML page into the task — shown in the result
+    area in a sandboxed frame (see web.routes.task_view)."""
+    if not html.strip():
+        return {"error": "html required: a complete, self-contained page"}
+    data = html.encode("utf-8")
+    if len(data) > VIEW_MAX_BYTES:
+        return {"error": f"html is {len(data)} bytes; the limit is {VIEW_MAX_BYTES}"}
+    from core import attachments
+
+    name = attachments.save_bytes(session["task_id"], "view.html", data)
+    store.post_message(session["task_id"], session["role"], kind="view",
+                       text=(title or "").strip() or "view", attachment=name)
+    return {"ok": True, "file": name}
+
+
 def _propose_subtasks(session, items=None, **_):
     """An explorer's structured fan-out proposal: one {repo, goal} per repo. Posts
     a 'plan' message the orchestrator turns into child tasks (spawn_task)."""
@@ -543,6 +564,31 @@ def _jira_issue(session, key="", **_):
         return {"error": str(exc)}
 
 
+def _jira_search(session, jql="", max_results=50, **_):
+    from core import jira
+
+    if not jira.configured():
+        return {"error": "Jira is not configured on this daemon"}
+    if not jql.strip():
+        return {"error": "jql required"}
+    try:
+        n = max(1, min(int(max_results or 50), 100))
+    except (TypeError, ValueError):
+        n = 50
+    actor = f"agent:{session['role']}@{session['task_id']}"
+    try:
+        issues = jira.search(jql.strip(), actor, max_results=n, task_id=session["task_id"])
+    except jira.JiraError as exc:
+        return {"error": str(exc)}
+    # Fifty full descriptions would eat the agent's context for nothing; the
+    # full text of any one issue is a jira_issue call away.
+    for it in issues:
+        d = it["fields"].get("description") or ""
+        if len(d) > 400:
+            it["fields"]["description"] = d[:400] + "…"
+    return {"count": len(issues), "issues": issues}
+
+
 def _jira_transition(session, to_status="", key="", **_):
     from core import jira
 
@@ -619,6 +665,21 @@ TOOLS = {
                 {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}, _comment),
     "attach": ("Attach a file you saved in your working dir to the task.",
                {"type": "object", "properties": {"filename": {"type": "string"}, "description": {"type": "string"}}, "required": ["filename"]}, _attach),
+    "show_html": ("Show the human a page you generated — cards, a table, a chart — right in the "
+                  "task's result area. Use it whenever the answer is a lot of structured data (a "
+                  "list of issues, a table, a comparison). Pass one complete, self-contained HTML "
+                  "document (inline <style>/<script>; no external files, no network: fetch/XHR are "
+                  "blocked, https images and links opening in a new tab work). Style it with the "
+                  "UI's own CSS variables, already defined on the page and following the dark/light "
+                  "switch: var(--panel) var(--panel-2) var(--bg) var(--border) for surfaces, "
+                  "var(--text) var(--text-2) var(--muted) for text, var(--accent) var(--good) "
+                  "var(--warn) var(--bad) var(--info) for meaning, var(--sans) var(--mono), "
+                  "var(--r-sm) var(--r-md) corners, var(--sp-1)…var(--sp-13) spacing, "
+                  "var(--fs-sm) var(--fs-body) var(--fs-lg) sizes. Hard-coded colours will look "
+                  "foreign and break in the other theme. After showing the data, keep your finish "
+                  "summary short — totals and what stands out; never repeat the rows in text.",
+                  {"type": "object", "properties": {"title": {"type": "string"}, "html": {"type": "string"}},
+                   "required": ["html"]}, _show_html),
     "propose_subtasks": ("Propose a multi-repo fan-out: one {repo, goal} per repo.",
                          {"type": "object", "properties": {"items": {"type": "array", "items": {
                              "type": "object",
@@ -648,6 +709,11 @@ TOOLS = {
     "jira_issue": ("Read a Jira issue. Without a key, uses the task's own key from origin 'jira:<KEY>'; "
                    "with a key, any issue. Returns the shaped issue (key, url, fields).",
                    {"type": "object", "properties": {"key": {"type": "string"}}}, _jira_issue),
+    "jira_search": ("Search Jira with JQL (e.g. 'project = ABC AND status = \"To Do\" ORDER BY priority DESC'). "
+                    "Returns up to max_results (default 50, at most 100) issues: key, url, summary, status, "
+                    "priority, type, assignee, reporter, labels, dates; descriptions cut to 400 chars.",
+                    {"type": "object", "properties": {"jql": {"type": "string"}, "max_results": {"type": "integer"}},
+                     "required": ["jql"]}, _jira_search),
     "jira_transition": ("Move this task's Jira issue to a status (e.g. 'In Progress' when you start, "
                         "'In Review' when the MR is open). Only when the task came from Jira.",
                         {"type": "object", "properties": {"to_status": {"type": "string"}, "key": {"type": "string"}},
