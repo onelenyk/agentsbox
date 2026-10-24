@@ -254,6 +254,28 @@ def test_decider_prompt_pins_the_agent_roster(db_path):
     assert "MUST be one of" in p   # tells the model not to invent agent names
 
 
+def test_decider_prompt_names_the_repo(db_path):
+    from core.worker import _build_decider_prompt
+    from core.agents import get_agent
+    p = _build_decider_prompt(get_agent("orchestrator"), "the thread", ["engineer"],
+                              repo="burshtyn-game", base="refactor")
+    assert "'burshtyn-game'" in p and "'refactor'" in p
+
+
+def test_worker_prompt_states_where_it_works():
+    from core.worker import _build_prompt, _workplace_section
+    wp = _workplace_section("burshtyn-game", "/ws/repos/worktrees/task-1_engineer",
+                            "sisyphus/task-1", "refactor",
+                            source="/Users/me/burshtyn-game")
+    p = _build_prompt({"persona": "p", "tools": ["finish"]}, "goal", "do it", "",
+                      workplace=wp)
+    assert "/ws/repos/worktrees/task-1_engineer" in p
+    assert "sisyphus/task-1" in p and "targets: refactor" in p
+    assert "/Users/me/burshtyn-game is a person's own working copy" in p
+    assert p.index("## Where you work") < p.index("## Task goal")
+    assert _workplace_section("", "/x", "b", "main") == ""
+
+
 class TestDeciderRetry:
     @pytest.mark.asyncio
     async def test_retries_until_a_decision_is_recorded(self, db_path, tmp_path, monkeypatch):

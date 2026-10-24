@@ -60,6 +60,21 @@ def test_commit_all_advances_the_task_branch(repo, tmp_path):
     assert "feature.py" in stat
 
 
+def test_commit_all_refuses_a_checkout_moved_off_the_task_branch(repo, tmp_path):
+    # burshtyn-game 5.7: the engineer ran `git checkout refactor` in its checkout,
+    # committed there, and the merge request never saw the work — twice.
+    branch = git_ops.ensure_task_branch(str(repo), "task-1", "main")
+    wt = _attached_worktree(tmp_path, repo, branch)
+    _git(["checkout", "-b", "elsewhere"], wt)
+    (wt / "feature.py").write_text("print('hi')\n")
+
+    with pytest.raises(RuntimeError, match="not the task branch sisyphus/task-1"):
+        git_ops.commit_all(str(wt), "add feature", branch=branch)
+
+    _git(["checkout", branch], wt)
+    assert git_ops.commit_all(str(wt), "add feature", branch=branch)
+
+
 def test_commit_all_returns_none_when_nothing_to_commit(repo, tmp_path):
     branch = git_ops.ensure_task_branch(str(repo), "task-2", "main")
     wt = _attached_worktree(tmp_path, repo, branch)

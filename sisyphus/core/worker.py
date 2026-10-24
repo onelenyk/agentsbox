@@ -386,8 +386,31 @@ def _write_runner_config(rtype: str, worktree_path: str, output_dir: str,
     )
 
 
+def _workplace_section(repo: str, worktree: str, branch: str, base: str, source: str = "") -> str:
+    """Where this run works, stated as fact. Agents used to infer it from the
+    goal text, and burshtyn-game's autopilot goal named the human's own
+    checkout — so engineers read, wrote and committed there, a decider read the
+    wrong repo and asked a human (task-1fa293d3), and every planning pass spent
+    an explorer just to find its footing."""
+    if not repo:
+        return ""
+    lines = [f"## Where you work\nRepository: {repo}"]
+    if worktree:
+        lines.append(f"Your checkout (current directory): {worktree} — read, edit and run "
+                     f"everything here, and nowhere else.")
+    if branch:
+        lines.append(f"Task branch: {branch} (already checked out; commit and open_mr act on it)")
+    if base:
+        lines.append(f"The merge request targets: {base}")
+    if source:
+        lines.append(f"{source} is a person's own working copy — never read from it, write "
+                     f"to it, or run git in it; paths in the goal that point there mean the "
+                     f"same files in your checkout.")
+    return "\n".join(lines) + "\n\n"
+
+
 def _build_prompt(role_def: dict, goal: str, instruction: str, thread: str,
-                  prefix: str = f"{_MCP_SERVER_NAME}_") -> str:
+                  prefix: str = f"{_MCP_SERVER_NAME}_", workplace: str = "") -> str:
     # Name the tools explicitly, in the runner's own server-prefixed form
     # (*prefix*, from core.runner_profiles.tool_prefix — opencode spells it
     # `<server>_<tool>`, Claude Code `mcp__<server>__<tool>`) — a repo that
@@ -427,6 +450,7 @@ def _build_prompt(role_def: dict, goal: str, instruction: str, thread: str,
         "call, this run is recorded as FAILED — even if the text answer was "
         "completely correct.\n\n"
         f"{role_def['persona']}\n\n"
+        f"{workplace}"
         f"## Task goal\n{goal}\n\n"
         f"## Your instruction\n{instruction}\n\n"
         f"## Thread so far\n{thread}\n\n"
@@ -821,9 +845,18 @@ async def spawn_worker(
                                  + ("; ".join(bits) if bits else "nothing it declared survives")))
     prefix = runner_profiles.tool_prefix(rtype, _MCP_SERVER_NAME)
 
+    workplace = ""
+    if requested_repo:
+        from .git_ops import task_branch
+        from .repos import get_repo
+        repo_row = get_repo(requested_repo) or {}
+        workplace = _workplace_section(
+            requested_repo, worktree_path, task_branch(task_id),
+            task.get("base_branch") or repo_row.get("branch") or "main",
+            source=repo_row.get("source") or "")
     prompt = _build_prompt(role_def, task["goal"], instruction,
                            store.render_thread(task_id, for_prompt=True),
-                           prefix=prefix)
+                           prefix=prefix, workplace=workplace)
 
     agent_def = {"name": role, "opencode_config": {}}
     if device:
@@ -901,8 +934,16 @@ def _set_aside_note(provider: str, result) -> str:
             f"agent's class.")
 
 
+def _repo_branch(repo_name) -> str:
+    if not repo_name:
+        return ""
+    from .repos import get_repo
+    return (get_repo(repo_name) or {}).get("branch") or ""
+
+
 def _build_decider_prompt(agent: dict, thread_text: str, roster: list,
-                          prefix: str = f"{_MCP_SERVER_NAME}_", read_only: bool = False) -> str:
+                          prefix: str = f"{_MCP_SERVER_NAME}_", read_only: bool = False,
+                          repo: str = "", base: str = "") -> str:
     """Prompt for the orchestrator agent: read the thread, call exactly one
     decision tool. The persona (decision doctrine) comes from the agent row;
     *roster* is the exact set of worker agents it may spawn (so it can't invent
@@ -932,6 +973,14 @@ def _build_decider_prompt(agent: dict, thread_text: str, roster: list,
         f"{agent['persona']}\n\n"
     )
 
+    if repo:
+        # The decider is never given a checkout: it reads only the thread. Name
+        # the repo so it does not go looking — one read Sisyphus's own source,
+        # decided it had the wrong repo and asked a human (task-1fa293d3).
+        prompt += (f"## Repository\nThis task is on repository {repo!r}"
+                   + (f", merging into {base!r}" if base else "")
+                   + ". Every worker you spawn gets its own checkout of it on the task "
+                   "branch; you have no checkout and need none — decide from the thread.\n\n")
     if read_only:
         prompt += "This repository is read-only: investigate and answer, never change files.\n\n"
 
@@ -985,6 +1034,8 @@ async def spawn_decider(task_id: str, agent_name: str, thread_text: str,
         agent, thread_text, roster,
         prefix=runner_profiles.tool_prefix(rtype, _MCP_SERVER_NAME),
         read_only=read_only,
+        repo=repo_name or "",
+        base=(task.get("base_branch") if task else "") or _repo_branch(repo_name),
     )
 
     # A weaker/cheaper model sometimes finishes its turn without calling a

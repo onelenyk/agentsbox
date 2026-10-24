@@ -196,13 +196,16 @@ def view() -> list:
             row = {"index": i, "runner_id": opt["runner_id"], "model": model,
                    "runner": r["name"] if r else "(deleted runner)",
                    "shown_model": model or (r.get("model") if r else "") or "its default model",
-                   "provider": "", "state": "ready", "until": ""}
+                   "provider": "", "account": "", "state": "ready", "until": ""}
             if not r:
                 row["state"] = "gone"
             elif not r.get("enabled", 1):
                 row["state"] = "disabled"
             else:
                 row["provider"] = limits.provider_of(r, model)
+                row["account"] = _account_label(r, row["provider"])
+                row["shown_model"] = (model.split("/", 1)[1] if "/" in model
+                                      else row["shown_model"])
                 blocked = limits.blocked_until(row["provider"])
                 if blocked:
                     cooling = limits.cooldown_until(row["provider"])
@@ -241,3 +244,96 @@ def remove(name: str, index: int) -> dict:
 
 def add(name: str, runner_id: str, model: str = "") -> dict:
     return set_options(name, get_class(name)["options"] + [{"runner_id": runner_id, "model": model}])
+
+
+# ── accounts: what a class option can be drawn from ─────────────────────
+# A runner is a CLI; an account is what pays for a run. opencode holds keys for
+# several providers at once (DeepSeek, OpenCode Go, OpenRouter, …), and its
+# models already reach every one of them — but the form offered a flat list of
+# ~450 model ids under one runner name, with nothing saying which account each
+# spends or whether that account still has room. An account here is one
+# (runner, provider) pair: Claude for the claude-cli runner, one per provider
+# prefix for opencode.
+
+def account_key(runner_id: str, provider: str) -> str:
+    return f"{runner_id}|{provider}"
+
+
+def _account_of(runner: dict, model: str) -> str:
+    from . import limits
+    return account_key(runner["id"], limits.provider_of(runner, model))
+
+
+def _account_label(runner: dict, provider: str, group_label: str = "") -> str:
+    from . import limits
+    if (runner.get("type") or "") == "claude-cli":
+        return {"claude": "Claude subscription", "anthropic": "Anthropic API"}.get(provider, "Claude")
+    if group_label:
+        return group_label
+    from . import runner_catalog
+    return (runner_catalog.catalog().get(provider) or {}).get("name") \
+        or limits.PROVIDER_LABELS.get(provider, (provider, ""))[0] or provider
+
+
+def accounts(runners: Optional[list] = None) -> list:
+    """Every account an enabled runner can spend, with its models and state:
+    [{key, runner_id, runner, provider, label, signed_in, models, n_models,
+      state, until, used_by}]. Never raises: a runner whose catalog cannot be
+    read shows up with no models, and its option can still be typed."""
+    from . import limits, runner_catalog
+    from .runners import list_runners
+    runners = list_runners() if runners is None else runners
+    used: dict = {}
+    for cls in list_classes():
+        for i, opt in enumerate(cls["options"]):
+            r = next((x for x in runners if x["id"] == opt["runner_id"]), None)
+            if r:
+                used.setdefault(_account_of(r, opt.get("model") or ""), []).append(
+                    f"{cls['name']} #{i + 1}")
+    out = []
+    for r in runners:
+        if not r.get("enabled", 1):
+            continue
+        rtype = r.get("type") or "opencode"
+        try:
+            groups = runner_catalog.models(rtype, r.get("binary") or "")
+        except Exception:  # noqa: BLE001
+            groups = []
+        try:
+            login = runner_catalog.login_status(rtype, r.get("binary") or "")
+        except Exception:  # noqa: BLE001
+            login = {"ok": False}
+        if rtype == "claude-cli":
+            provider = limits.provider_of(r)
+            buckets = [(provider, "", [m for g in groups for m in g["models"]])]
+            signed = {provider} if login.get("ok") else set()
+        else:
+            buckets = [(g["id"], g["label"], g["models"]) for g in groups]
+            signed = set(login.get("providers") or [])
+        for provider, glabel, models in buckets:
+            until = limits.blocked_until(provider)
+            cooling = limits.cooldown_until(provider)
+            key = account_key(r["id"], provider)
+            out.append({
+                "key": key, "runner_id": r["id"], "runner": r["name"],
+                "provider": provider, "label": _account_label(r, provider, glabel),
+                # No readable auth.json says nothing about opencode's keys —
+                # only a list that leaves this provider out is a "no".
+                "signed_in": provider in signed if signed else rtype != "claude-cli",
+                "models": models, "n_models": len(models),
+                "state": ("cooldown" if until and cooling and cooling >= until
+                          else "limit" if until else "ready"),
+                "until": until.isoformat() if until else "",
+                "used_by": used.get(key, []),
+            })
+    # Accounts in use first, then the rest by name — the ones that matter now
+    # should not sit under 370 OpenRouter models.
+    out.sort(key=lambda a: (not a["used_by"], a["label"].lower()))
+    return out
+
+
+def split_account(value: str) -> tuple:
+    """(runner_id, provider) from an account key; a bare runner id is accepted
+    too, as the form used to send."""
+    runner_id, _, provider = (value or "").partition("|")
+    return runner_id, provider

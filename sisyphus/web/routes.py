@@ -1040,22 +1040,17 @@ async def _runners_plan_response(request: Request, error: str = ""):
     return _tmpl().TemplateResponse(request, "runners_plan.html", ctx)
 
 def _runners_plan_context(error: str = "") -> dict:
-    from core import limits, model_classes, runner_catalog
+    from core import limits, model_classes
     from core.runners import list_runners
     runners = list_runners()
-    # Model suggestions per runner, for the "add an option" field.
-    suggestions = {}
-    for r in runners:
-        try:
-            groups = runner_catalog.models(r.get("type") or "opencode", r.get("binary") or "")
-            suggestions[r["id"]] = [m["id"] for g in groups for m in g["models"]]
-        except Exception:  # noqa: BLE001 — suggestions only; typing a model still works
-            suggestions[r["id"]] = []
+    accounts = model_classes.accounts(runners)
     return {
         "subscriptions": limits.view(),
         "classes": model_classes.view(),
         "runners": runners,
-        "suggestions": suggestions,
+        "accounts": accounts,
+        # The add form opens on the account most likely wanted: one in use.
+        "first_account": accounts[0] if accounts else None,
         "error": error,
     }
 
@@ -1069,9 +1064,22 @@ async def limits_refresh(request: Request):
     err = await asyncio.to_thread(limits.poll_opencode_go)
     return await _runners_plan_response(request, error=f"OpenCode Go: {err}" if err else "")
 
-@router.post("/api/classes/{name}/add", response_class=HTMLResponse)
-async def classes_add(request: Request, name: str, runner_id: str = Form(...), model: str = Form("")):
+@router.get("/api/classes/models", response_class=HTMLResponse)
+async def classes_models(request: Request, account: str = ""):
+    """The model picker for one account — swapped in when the account changes."""
     from core import model_classes
+    found = await asyncio.to_thread(model_classes.accounts)
+    acct = next((a for a in found if a["key"] == account), None)
+    return _tmpl().TemplateResponse(request, "runners_plan_models.html", {"account": acct})
+
+@router.post("/api/classes/{name}/add", response_class=HTMLResponse)
+async def classes_add(request: Request, name: str, account: str = Form(""),
+                      runner_id: str = Form(""), model: str = Form("")):
+    from core import model_classes
+    if account:
+        runner_id, _ = model_classes.split_account(account)
+    if not runner_id:
+        return await _runners_plan_response(request, error="choose an account first")
     try:
         model_classes.add(name, runner_id, model.strip())
     except ValueError as exc:

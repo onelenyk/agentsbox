@@ -1,0 +1,18 @@
+{# The model half of a class's add form, for the account chosen beside it.
+   A short list is a select; a long one (OpenRouter has hundreds) is a field
+   that filters as you type, with the same names in its suggestions. #}
+{% if account and account.models %}
+{% if account.models|length > 40 %}
+<input name="model" class="plan__model" list="plan-models-{{ account.key|replace('|', '-') }}"
+       placeholder="type to search {{ account.n_models }} models" aria-label="Model" required>
+<datalist id="plan-models-{{ account.key|replace('|', '-') }}">
+    {% for m in account.models %}<option value="{{ m.id }}">{{ m.name }}{% if m.ctx %} · {{ m.ctx }}{% endif %}{% if m.price %} · {{ m.price }}{% endif %}</option>{% endfor %}
+</datalist>
+{% else %}
+<select name="model" class="plan__model" aria-label="Model">
+    {% for m in account.models %}<option value="{{ m.id }}">{{ m.name }}{% if m.ctx %} · {{ m.ctx }}{% endif %}{% if m.price %} · {{ m.price }}{% endif %}</option>{% endfor %}
+</select>
+{% endif %}
+{% else %}
+<input name="model" class="plan__model" placeholder="model id — this account lists none" aria-label="Model">
+{% endif %}

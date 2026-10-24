@@ -331,6 +331,13 @@ def init_mr_table() -> None:
     if "auto_merge_notes" not in cols:
         conn.execute("ALTER TABLE merge_requests ADD COLUMN auto_merge_notes TEXT")
 
+    # Which commit the review verdict is ABOUT — check_head's twin. Without it a
+    # verdict on commit A reads as the verdict on B, and a second reviewer's
+    # APPROVED three seconds after a CHANGES REQUESTED on the same commit simply
+    # overwrote it: 18 of 79 burshtyn-game MRs merged over an open rejection.
+    if "review_head" not in cols:
+        conn.execute("ALTER TABLE merge_requests ADD COLUMN review_head TEXT")
+
     conn.commit()
     conn.close()
 
@@ -463,6 +470,13 @@ def merge_block_reason(mr: dict, head: Optional[str] = None) -> Optional[str]:
                 if not review else f"review is {review}")
     if (mr.get("check_status") or "").strip() == "failed":
         return "the daemon's own check FAILED on this branch"
+    reviewed = (mr.get("review_head") or "").strip()
+    if reviewed:
+        if head is None:
+            head = current_head(mr)
+        if head and reviewed != head:
+            return (f"the approval covers {reviewed[:8]}, but the branch is now at "
+                    f"{head[:8]} — that commit has not been reviewed")
     return _stale_check_reason(mr, head)
 
 
@@ -487,6 +501,8 @@ def gate_state(mr: dict, head: Optional[str] = None) -> str:
                 "died": "died"}.get(review, "unreviewed")
     if (mr.get("check_status") or "").strip() == "failed":
         return "check-failed"
+    if stale_review(mr, head):
+        return "unreviewed"
     return "check-stale"
 
 
@@ -812,11 +828,44 @@ def save_forge_state(mr_id: str, state: dict) -> None:
     conn.close()
 
 
-def set_review_status(mr_id: str, review_status: str) -> None:
+def stale_review(mr: dict, head: Optional[str] = None) -> bool:
+    """True when the recorded verdict is about a commit the branch has moved
+    past. A silent record (no review_head — every verdict before the column
+    existed) is not proven stale, the same rule the check follows."""
+    reviewed = (mr.get("review_head") or "").strip()
+    if not reviewed or not (mr.get("review_status") or "").strip():
+        return False
+    if head is None:
+        head = current_head(mr)
+    return bool(head) and reviewed != head
+
+
+def set_review_status(mr_id: str, review_status: str, head: Optional[str] = None) -> bool:
+    """Record *review_status* for the commit the branch is at now (or *head*).
+    Returns False when the write was refused:
+
+      * the MR is no longer open — a verdict on merged code is history, and
+        writing it made the row say "changes requested" about what had landed;
+      * an APPROVED (or a fresh "pending") arrives for the very commit a
+        CHANGES REQUESTED is already recorded on — two reviewers disagreeing is not resolved by whoever
+        answered last; the rejection stands until the branch moves.
+    """
+    mr = get_mr(mr_id)
+    if not mr or mr.get("status") != "open":
+        logger.info("review %s for %s not recorded: the MR is not open", review_status, mr_id)
+        return False
+    if head is None:
+        head = current_head(mr)
+    if (review_status in ("approved", "pending")
+            and (mr.get("review_status") or "") == "changes_requested"
+            and head and (mr.get("review_head") or "") == head):
+        logger.info("review %s of %s at %s ignored: changes were requested on that commit",
+                    review_status, mr_id, head[:8])
+        return False
     conn = get_conn()
     conn.execute(
-        "UPDATE merge_requests SET review_status = ?, updated_at = ? WHERE id = ?",
-        (review_status, _now(), mr_id),
+        "UPDATE merge_requests SET review_status = ?, review_head = ?, updated_at = ? WHERE id = ?",
+        (review_status, head or None, _now(), mr_id),
     )
     conn.commit()
     conn.close()
@@ -824,6 +873,7 @@ def set_review_status(mr_id: str, review_status: str) -> None:
     # land in either order, so each of them attempts auto-merge on its own.
     if review_status == "approved":
         schedule_auto_merge(mr_id)
+    return True
 
 
 def _dict(row) -> Optional[dict]:

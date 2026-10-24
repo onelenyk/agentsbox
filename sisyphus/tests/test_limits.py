@@ -222,6 +222,48 @@ class TestRunnersPage:
         assert "OpenCode Go" in page and "42%" in page
         assert "Worker class" in page and "in use" in page
 
+    def test_each_opencode_provider_is_its_own_account(self, two_runners, monkeypatch):
+        """opencode holds keys for several providers at once; each is an account
+        an option can be drawn from, with its own models and limit state."""
+        from fastapi.testclient import TestClient
+        from core import runner_catalog
+        from web.app import app
+        claude, oc = two_runners
+        groups = {
+            "opencode": [
+                {"id": "deepseek", "label": "DeepSeek", "models": [
+                    {"id": "deepseek/deepseek-flash", "name": "DeepSeek Flash", "ctx": "1M", "price": "$0.1 / $0.2"}]},
+                {"id": "opencode-go", "label": "OpenCode Go", "models": [
+                    {"id": "opencode-go/deepseek-v4.1-flash", "name": "DeepSeek V4.1 Flash", "ctx": "", "price": ""}]},
+            ],
+            "claude-cli": [{"id": "alias", "label": "Latest", "models": [
+                {"id": "opus", "name": "opus", "ctx": "", "price": ""}]}],
+        }
+        monkeypatch.setattr(runner_catalog, "models", lambda rtype, binary: groups.get(rtype, []))
+        monkeypatch.setattr(runner_catalog, "login_status", lambda rtype, binary: (
+            {"ok": True, "providers": ["deepseek", "opencode-go"]} if rtype == "opencode" else {"ok": True}))
+        limits.record("opencode-go", "week", 100, _iso(600), "rejected")
+        model_classes.add("worker", oc["id"], "deepseek/deepseek-flash")
+
+        found = {a["provider"]: a for a in model_classes.accounts()
+                 if a["runner_id"] in (oc["id"], claude["id"])}
+        assert found["deepseek"]["used_by"] == ["worker #1"]
+        assert found["deepseek"]["n_models"] == 1 and found["deepseek"]["state"] == "ready"
+        assert found["opencode-go"]["state"] == "limit"
+        assert found["deepseek"]["key"] == model_classes.account_key(oc["id"], "deepseek")
+
+        client = TestClient(app)
+        picker = client.get("/api/classes/models",
+                            params={"account": found["opencode-go"]["key"]}).text
+        assert "opencode-go/deepseek-v4.1-flash" in picker and "deepseek/deepseek-flash" not in picker
+
+        client.post("/api/classes/worker/add", data={
+            "account": found["opencode-go"]["key"], "model": "opencode-go/deepseek-v4.1-flash"})
+        assert model_classes.get_class("worker")["options"][-1] == {
+            "runner_id": oc["id"], "model": "opencode-go/deepseek-v4.1-flash"}
+        page = client.get("/api/runners/plan").text
+        assert "Accounts" in page and "DeepSeek" in page and "worker #2" in page
+
     def test_unpinning_an_agent_from_the_edit_form_clears_the_pin(self, two_runners):
         from fastapi.testclient import TestClient
         from web.app import app

@@ -26,6 +26,27 @@
     </div>
     {% endif %}
 
+    {% if accounts %}
+    <div class="panel">
+        <div class="result__label">Accounts
+            <span class="muted plan__hint">what a class option can spend — every provider opencode holds a key for, and Claude</span>
+        </div>
+        <ul class="plan__accts">
+            {% for a in accounts %}
+            <li class="plan__acct{{ ' is-live' if a.used_by }}">
+                <span class="plan__what"><span class="plan__runner">{{ a.label }}</span>
+                    <span class="muted">{{ a.runner }} · {{ a.n_models }} model{{ '' if a.n_models == 1 else 's' }}</span></span>
+                {% if not a.signed_in %}<span class="badge badge--warn">not signed in</span>
+                {% elif a.state == 'limit' %}<span class="badge badge--bad">limit · back {{ a.until|when }}</span>
+                {% elif a.state == 'cooldown' %}<span class="badge badge--warn" title="Its last run never reached the model">set aside · back {{ a.until|when }}</span>
+                {% else %}<span class="badge badge--ok">ready</span>{% endif %}
+                {% if a.used_by %}<span class="badge badge--accent">{{ a.used_by|join(', ') }}</span>{% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
     <div class="card-grid plan__grid">
         {% for c in classes %}
         <div class="panel">
@@ -41,7 +62,7 @@
                 {% for o in c.options %}
                 <li class="plan__opt{{ ' is-live' if o.in_use }}">
                     <span class="plan__n">{{ loop.index }}</span>
-                    <span class="plan__what"><span class="plan__runner">{{ o.runner }}</span> <span class="mono muted">{{ o.shown_model }}</span></span>
+                    <span class="plan__what" title="{{ o.runner }} · {{ o.model or o.shown_model }}"><span class="plan__runner">{{ o.account or o.runner }}</span> <span class="mono muted">{{ o.shown_model }}</span></span>
                     {% if o.in_use %}<span class="badge badge--accent">in use</span>
                     {% elif o.state == 'limit' %}<span class="badge badge--bad">limit · back {{ o.until|when }}</span>
                     {% elif o.state == 'cooldown' %}<span class="badge badge--warn" title="Its last run never reached the model">set aside · back {{ o.until|when }}</span>
@@ -60,12 +81,13 @@
             {% else %}
             <p class="muted plan__note">No options — its agents run on the default runner.</p>
             {% endif %}
-            {% if runners %}
+            {% if accounts %}
             <form class="plan__add" hx-post="/api/classes/{{ c.name }}/add" hx-target="#runners-plan" hx-swap="outerHTML">
-                <select name="runner_id" aria-label="Runner" onchange="this.form.elements.model.setAttribute('list', 'plan-models-' + this.value)">
-                    {% for r in runners %}<option value="{{ r.id }}">{{ r.name }}</option>{% endfor %}
+                <select name="account" aria-label="Account"
+                        hx-get="/api/classes/models" hx-trigger="change" hx-target="next .plan__pick" hx-swap="innerHTML">
+                    {% for a in accounts %}<option value="{{ a.key }}">{{ a.label }}{{ ' · ' ~ a.runner if a.label != a.runner }}</option>{% endfor %}
                 </select>
-                <input name="model" list="plan-models-{{ runners[0].id }}" placeholder="model — blank uses the runner's own" aria-label="Model">
+                <span class="plan__pick">{% with account = first_account %}{% include "runners_plan_models.html" %}{% endwith %}</span>
                 <button class="btn btn--ghost btn--sm" type="submit">+ Add</button>
             </form>
             {% endif %}
@@ -73,7 +95,4 @@
         {% endfor %}
     </div>
 
-    {% for r in runners %}
-    <datalist id="plan-models-{{ r.id }}">{% for m in suggestions.get(r.id, []) %}<option value="{{ m }}">{% endfor %}</datalist>
-    {% endfor %}
 </div>
