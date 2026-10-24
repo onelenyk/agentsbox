@@ -30,6 +30,10 @@ Action = Literal["spawn_worker", "spawn_task", "ask_human", "answer", "note", "d
 
 MAX_PASSES = 25              # per-task budget — a runaway task fails loudly
 MAX_CONSECUTIVE_REPEATS = 3  # thrash circuit breaker
+# The noop of a task parked until a subscription window resets. It repeats
+# verbatim on every resume that finds the window still shut, and that is waiting,
+# not thrash: the breaker failed task-733dc5c6 after six of them.
+LIMIT_WAIT_WHY = "waiting for a subscription window to reset"
 DEFAULT_DAILY_BUDGET_USD = 10.0   # applies when config carries no daily_budget_usd at all
 
 
@@ -298,7 +302,7 @@ async def _decide(task: dict, thread_text: str) -> Decision:
         except NoRunner as exc:
             # Not a question for a human: a window will reset on its own.
             _park_for_limits(task["id"], orchestrator_agent_name(), str(exc))
-            return Decision(action="noop", why="waiting for a subscription window to reset")
+            return Decision(action="noop", why=LIMIT_WAIT_WHY)
         if not raw:
             malformed = None
             logger.warning("decider attempt %d/%d for %s produced no decision",
@@ -720,6 +724,10 @@ def _mr_review(task_id: str) -> dict:
     if not mr:
         return {"verdict": "", "running": False}
     verdict = (mr.get("review_status") or "").strip()
+    # A verdict about a commit the branch has moved past says nothing about the
+    # branch as it stands — the new head needs its own review.
+    if mergerequests.stale_review(mr):
+        verdict = ""
     running = any(
         t["status"] in ("active", "waiting", "paused")
         and t.get("agent") == "mr-reviewer"
@@ -869,8 +877,12 @@ def _obvious_step(task: dict, thread: list) -> Optional[Decision]:
         # The branch's own independent review (mr-reviewer, spawned by open_mr)
         # is a review too: while it runs, or once it has a verdict, a second
         # reviewer here would only duplicate it — the pass says so itself.
+        # "pending" counts as running: open_mr records it before the review
+        # hook spends ~30s on the check, and in that window this rule used to
+        # see no review at all and stand up a second reviewer — 83 of 88 MR
+        # openings on burshtyn-game got two.
         review = _mr_review(task["id"])
-        if review["running"] or review["verdict"] in ("approved", "changes_requested"):
+        if review["running"] or review["verdict"] in ("pending", "approved", "changes_requested"):
             return None
 
         # Check that no reviewer result message comes after the engineer result.
@@ -1214,7 +1226,7 @@ async def handle_event(
 
     store.post_message(task_id, "orchestrator", kind="note", text=f"[{decision.action}] {decision.why}")
 
-    if _consecutive_repeat(task_id) > MAX_CONSECUTIVE_REPEATS:
+    if decision.why != LIMIT_WAIT_WHY and _consecutive_repeat(task_id) > MAX_CONSECUTIVE_REPEATS:
         store.post_message(
             task_id, "orchestrator", kind="note",
             text=f"[fail] circuit breaker — {decision.action!r} repeated too many times",

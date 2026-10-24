@@ -591,6 +591,16 @@ class TestTheBranchsOwnReviewCounts:
             assert orchestrator._obvious_step(task, store.get_thread(task["id"])) is None
 
     @pytest.mark.asyncio
+    async def test_no_second_reviewer_while_the_review_is_only_pending(self, db_path):
+        # open_mr records "pending" before the hook spends ~30s on the check and
+        # creates the mr-reviewer task; in that window nothing is running yet.
+        task = store.create_task("fix", repo="sisyphus")
+        store.post_message(task["id"], "engineer", kind="result", text="done")
+        self._mr(task["id"])
+        with patch("core.orchestrator._mr_review", return_value={"verdict": "pending", "running": False}):
+            assert orchestrator._obvious_step(task, store.get_thread(task["id"])) is None
+
+    @pytest.mark.asyncio
     async def test_the_branch_reviews_approval_is_done(self, db_path):
         task = store.create_task("fix", repo="sisyphus")
         store.post_message(task["id"], "engineer", kind="result", text="done")

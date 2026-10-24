@@ -2423,8 +2423,18 @@ a.state__rest:hover { color: var(--text-2); }
 .plan__runner { font-weight: var(--fw-semibold); }
 .plan__moves { display: flex; gap: var(--sp-2); }
 .plan__add { display: flex; gap: var(--sp-4); margin-top: var(--sp-6); }
-.plan__add select { flex: 0 0 auto; width: auto; }
-.plan__add input { flex: 1 1 auto; min-width: 0; }
+.plan__add select[name=account] { flex: 0 0 auto; width: auto; max-width: 45%; }
+.plan__pick { flex: 1 1 auto; min-width: 0; display: flex; }
+.plan__model { flex: 1 1 auto; min-width: 0; width: 100%; }
+.plan__hint { font-weight: var(--fw-normal); font-size: var(--fs-base); }
+/* Accounts: what the class options spend, the ones in use lit like a live option. */
+.plan__accts { list-style: none; margin: var(--sp-6) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
+.plan__acct {
+  display: flex; align-items: center; gap: var(--sp-5);
+  padding: var(--sp-3) var(--sp-5); border: 1px solid var(--border); border-radius: var(--r);
+  font-size: var(--fs-body);
+}
+.plan__acct.is-live { border-color: var(--accent-bd); background: var(--accent-bg); }
 
 /* ─ integrations_view.html ────────────────────────────────────────────────
    Provider cards and integration events table. */

@@ -209,3 +209,55 @@ class TestRecordPointTriggers:
         mergerequests.set_check_result(mr["id"], "passed", command="pytest -q",
                                        head=mergerequests.current_head(mr))
         assert attempts == [mr["id"]]
+
+
+class TestReviewVerdictIsAboutACommit:
+    """The review verdict is bound to the commit it judged, like the check.
+    burshtyn-game, mr-874d4b53: an in-task reviewer recorded CHANGES REQUESTED,
+    the independent mr-reviewer APPROVED three seconds later on the same commit,
+    and the approval simply overwrote the rejection and merged."""
+
+    def test_approval_does_not_overwrite_changes_on_the_same_commit(
+            self, db_path, tmp_path, monkeypatch, no_auto_trigger):
+        mr, real = _auto_mr(tmp_path, monkeypatch)
+        assert mergerequests.set_review_status(mr["id"], "changes_requested")
+        assert not mergerequests.set_review_status(mr["id"], "approved")
+        assert not mergerequests.set_review_status(mr["id"], "pending")
+        mergerequests.set_check_result(mr["id"], "passed", command="pytest -q",
+                                       head=mergerequests.current_head(mr))
+
+        got = mergerequests.get_mr(mr["id"])
+        assert got["review_status"] == "changes_requested"
+        assert mergerequests.try_auto_merge(got) is None
+        assert got["status"] == "open"
+
+    def test_approval_of_an_older_commit_does_not_open_the_gate(
+            self, db_path, tmp_path, monkeypatch, no_auto_trigger):
+        mr, real = _auto_mr(tmp_path, monkeypatch)
+        mergerequests.set_review_status(mr["id"], "approved",
+                                        head="beef0000beef0000beef0000beef0000beef0000")
+        mergerequests.set_check_result(mr["id"], "passed", command="pytest -q",
+                                       head=mergerequests.current_head(mr))
+
+        got = mergerequests.get_mr(mr["id"])
+        assert mergerequests.stale_review(got)
+        assert "has not been reviewed" in mergerequests.merge_block_reason(got)
+        assert mergerequests.gate_state(got) == "unreviewed"
+        assert mergerequests.try_auto_merge(got) is None
+
+    def test_a_new_commit_can_be_approved_after_changes(
+            self, db_path, tmp_path, monkeypatch, no_auto_trigger):
+        mr, real = _auto_mr(tmp_path, monkeypatch)
+        mergerequests.set_review_status(mr["id"], "changes_requested",
+                                        head="beef0000beef0000beef0000beef0000beef0000")
+        assert mergerequests.set_review_status(mr["id"], "approved")
+        assert mergerequests.get_mr(mr["id"])["review_status"] == "approved"
+
+    def test_no_verdict_is_written_on_a_merged_mr(
+            self, db_path, tmp_path, monkeypatch, no_auto_trigger):
+        mr, real = _auto_mr(tmp_path, monkeypatch)
+        _approved_passed(mr["id"])
+        assert mergerequests.try_auto_merge(mergerequests.get_mr(mr["id"]))
+
+        assert not mergerequests.set_review_status(mr["id"], "changes_requested")
+        assert mergerequests.get_mr(mr["id"])["review_status"] == "approved"

@@ -185,7 +185,8 @@ def _commit(session, message="", allow_mode_change=False, **_):
     try:
         restored = git_ops.restore_dropped_exec_bits(
             session["worktree"], goal=goal, allow_mode_change=allow_mode_change)
-        sha = git_ops.commit_all(session["worktree"], message)
+        sha = git_ops.commit_all(session["worktree"], message,
+                                 branch=git_ops.task_branch(session["task_id"]))
     except Exception as exc:  # noqa: BLE001
         return {"error": f"commit failed: {exc}"}
     if sha is None:
@@ -229,6 +230,12 @@ def _open_mr(session, title="", description="", **_):
         text = f"{title}: {result.get('url', '')}".strip(": ")
         store.post_message(session["task_id"], session["role"], kind="mr", text=text)
 
+    # Say "a review is coming" on the row NOW, before the hook spends ~30s on the
+    # check: the orchestrator reads this, and with nothing on the row it stood up
+    # a second reviewer of its own beside the mr-reviewer about to be created.
+    mr = mergerequests.latest_for_task(session["task_id"])
+    if mr and mr.get("status") == "open":
+        mergerequests.set_review_status(mr["id"], "pending")
     _spawn_review_hook(session["task_id"])
 
     return {"ok": True, "branch": result.get("branch")}
@@ -273,6 +280,16 @@ def _review_hook(task_id: str) -> None:
                                            text=verify.summarise(res, head=res.get("head", "")))
     except Exception:
         logger.warning("review hook failed for open_mr on task %s", task_id, exc_info=True)
+        # open_mr recorded "pending" for a review this hook was to create. If none
+        # stands, clear it — a pending nobody is working on would hold the task
+        # forever, and an empty verdict lets the orchestrator review it instead.
+        try:
+            mr = mergerequests.latest_for_task(task_id)
+            if mr and reviews.find_review_task(mr) is None \
+                    and (mr.get("review_status") or "") == "pending":
+                mergerequests.set_review_status(mr["id"], "")
+        except Exception:  # noqa: BLE001
+            logger.warning("could not clear the pending review on task %s", task_id, exc_info=True)
 
 
 _last_review_hook: "Optional[threading.Thread]" = None

@@ -89,11 +89,23 @@ def ensure_task_branch(bare_path: str, task_id: str, base_branch: str) -> str:
     return branch
 
 
-def commit_all(worktree: str, message: str) -> "str | None":
+def commit_all(worktree: str, message: str, branch: str = "") -> "str | None":
     """Stage everything (minus daemon artifacts) and commit on the worktree's
     current branch. Returns the new commit SHA, or None if there was nothing to
     commit. The worktree is checked out ON the task branch for the engineer, so
-    the commit advances that branch."""
+    the commit advances that branch.
+
+    *branch*, when given, is the branch the commit must land on. An agent that
+    ran `git checkout refactor` in its checkout committed there instead, and the
+    work never reached the merge request (burshtyn-game 5.7, done twice and
+    lost twice) — so refuse rather than commit somewhere the MR cannot see."""
+    if branch:
+        head = _run(["git", "-C", worktree, "symbolic-ref", "--quiet", "--short", "HEAD"])
+        on = head.stdout.strip() if head.returncode == 0 else "a detached HEAD"
+        if on != branch:
+            raise RuntimeError(
+                f"the checkout is on {on}, not the task branch {branch} — run "
+                f"`git checkout {branch}` (bring your changes along) and commit again")
     _run(["git", "-C", worktree, "add", "-A", "--", "."] + _COMMIT_EXCLUDES)
     staged = _run(["git", "-C", worktree, "diff", "--cached", "--quiet"])
     if staged.returncode == 0:

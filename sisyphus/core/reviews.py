@@ -65,6 +65,18 @@ def ensure_review_task(mr: dict) -> Optional[dict]:
     if len(mr_title) > max_title_len:
         mr_title = mr_title[:max_title_len - 1] + "…"
 
+    # What the branch was FOR. Without it the reviewer judged only the diff and
+    # its title: burshtyn-game 3.6 was marked done with story.js never split,
+    # and nothing in the review's prompt said that was the item's bar.
+    origin = store.get_task(mr.get("task_id", "")) if mr.get("task_id") else None
+    origin_goal = (origin or {}).get("goal", "").strip()
+    origin_block = (
+        f"\nThe task this branch was made for — judge the diff against it, and "
+        f"approve only when every acceptance criterion it points to is met:\n"
+        f"<<<\n{origin_goal[:4000]}\n>>>\n"
+        if origin_goal else ""
+    )
+
     goal = (
         f"Review-of-MR: {mr_id}\n"
         f"Origin-task: {mr.get('task_id', '')}\n"
@@ -73,6 +85,7 @@ def ensure_review_task(mr: dict) -> Optional[dict]:
         f"Source branch: {mr.get('source_branch', '?')}\n"
         f"Target branch: {mr.get('target_branch', '?')}\n"
         f"{base_line}"
+        f"{origin_block}"
         f"Any git command you run yourself must compare against that baseline "
         f"commit, never HEAD~1 — HEAD~1 is only the previous commit on this "
         f"branch and hides anything changed earlier on it.\n"
