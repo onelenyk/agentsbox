@@ -3,7 +3,7 @@
 **A self-hosted orchestrator for autonomous AI coding agents.**
 
 Give it a goal; it plans, dispatches specialist agents (explorer → engineer →
-reviewer), runs them in isolated git worktrees through a local CLI runner
+qa → reviewer), runs them in isolated git worktrees through a local CLI runner
 (opencode or Claude Code), and drives the work to done — with a review loop, a
 machine-verified merge-request flow, budget guards, and a live "Mission Control"
 web UI. It can also run **proactively**: scheduled or webhook-triggered
@@ -13,11 +13,14 @@ It runs directly on the host — no container. No hosted backend, and no raw mod
 HTTP in the core: every AI decision, including the orchestrator's, runs through
 your local runner.
 
+> **Status, 2026-10-11: feature-frozen.** See
+> [Where it stands](../README.md#where-it-stands) in the front README.
+
 ---
 
 ## Highlights
 
-- **Autonomous SDLC loop** — orchestrator coordinates explorer/engineer/reviewer;
+- **Autonomous SDLC loop** — orchestrator coordinates explorer/engineer/qa/reviewer;
   a task is done only after a reviewer approves.
 - **One decision per pass** — the orchestrator is a *cold function*: `(thread +
   event) → one action`. State lives entirely in the append-only thread, so a
@@ -38,6 +41,26 @@ your local runner.
 - **Pluggable runners** — opencode and Claude Code CLI behind one profile layer
   (argv, env, MCP wiring per CLI); auto-detect finds installed CLIs, and a smoke
   test proves a runner can actually call a tool before it is trusted with work.
+- **Model classes** — two classes, `orchestrator` (a strong model, used a
+  little) and `worker` (a cheap one, used a lot), each an ordered list of
+  runner + model. A spawn takes the first option whose provider still has room
+  in its subscription windows.
+- **Devices & QA** — the **Devices** page lists Android emulators, iOS
+  simulators and connected phones with live state. A `qa` agent gets one leased
+  before it starts and returned when it ends; it builds, installs and drives
+  the app, stores screenshots on the task, and gives a verdict as its first
+  word (PASS / FAIL / INCONCLUSIVE, or REPRODUCED / NOT REPRODUCED). A FAIL
+  goes back to the engineer and blocks done. Physical phones are never used
+  until allowed one by one.
+- **Repo health** — a build · tests · coverage card per repo, run on a fresh
+  shallow clone with the setup hook applied and re-run daily. The numbers come
+  from JUnit and JaCoCo/Kover/Cobertura XML. A `repo-profiler` agent proposes
+  the commands from the repo's docs and build files; you confirm them.
+- **Agent views** — an agent can put a self-contained HTML page (a table, a
+  chart) in the task's result area with `show_html`; it is served sandboxed,
+  with no network, in the UI's own theme.
+- **Tools page** — what workers can run, the versions, the PATH they get and
+  where each entry comes from; `worker_env` is editable there.
 - **Autopilot** — named automations fire on a **schedule** (cron/interval) or a
   **webhook** (jira/github/gitlab) and create tasks; `{{payload}}` templating.
 - **Guardrails** — restart recovery, total/idle timeouts, a global worker-concurrency
@@ -68,7 +91,8 @@ your local runner.
                         │   (agent)    worktree, MCP tools, usage recorded │
                         └─────────────────────────────────────────────────┘
         SQLite (workspace/sisyphus.db): tasks · messages · runners · agents
-                       · usage · merge_requests · autopilots
+                       · usage · merge_requests · autopilots · model_classes
+                       · devices · device_leases · repo_health_runs
 ```
 
 - **Task** `{id, goal, repo, status, parent_id, agent}` + a **Thread** of
@@ -108,8 +132,9 @@ open http://localhost:7677
 ```
 
 `WORKSPACE_ROOT` (SQLite db, per-task clones, backups, logs) defaults to
-`./workspace` next to the repo. Then **Repos → Add** your git repo — it shows
-up under **projects** in the sidebar. Open it, say in plain words what should
+`./workspace` next to the repo. Then **Repos → Add** your git repo (a local
+path, or a GitHub/GitLab clone URL — nothing is cloned until a task needs it) —
+it shows up under **Projects** in the sidebar. Open it, say in plain words what should
 get done, and press Enter; the orchestrator takes it from there.
 
 ### Always-on (macOS / launchd)
@@ -119,6 +144,9 @@ python sisyphus.py daemon install    # start at login, restart on crash
 python sisyphus.py daemon status     # live? supervised? version
 python sisyphus.py daemon logs -f
 ```
+
+Or open the desktop app — a native window over the same UI that starts the
+daemon with it and stops it on quit. See [`desktop/README.md`](desktop/README.md).
 
 Credentials are entered in the UI under **Integrations → Keys & tokens** and kept in Sisyphus's vault. See [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
 
@@ -134,6 +162,9 @@ Credentials are entered in the UI under **Integrations → Keys & tokens** and k
   (with the repo's own `check:` verdict already attached) and **merge into a
   chosen branch**, **land** the branch, or **close** it — all local. Repos cloned
   from GitHub/GitLab publish real PRs/MRs instead.
+- **Check it on a device** — set `qa: android` (or `ios`) on a repo and every
+  delivered change is run on a device before review; or pin a task to the `qa`
+  agent to reproduce a bug. Screenshots appear as a strip on the task page.
 - **Automate** — **Autopilot → + New** for a `0 3 * * *` "scan repos for stuck MRs"
   or a jira `issue_created` → "Analyze {{ issue.key }}".
 - **Stay safe** — **Backups → Create backup** before experiments; restore always
@@ -178,6 +209,11 @@ sisyphus dev      install-hooks        # pre-push hook that runs the test suite
   - `autopilot_tick_seconds` (30) — schedule check cadence
   - `forge_poll` — `enabled` + `interval_seconds`: follow published PRs/MRs by
     polling (the loopback daemon can never receive a webhook)
+  - `devices.idle_minutes` (30) — stop an emulator Sisyphus booted after this
+    long unused; `devices.max_leases` (1) — devices in use at once
+  - `health_interval_hours` (24) — how often a repo's health card is re-run
+  - `worker_env` — extra environment for every worker (`PATH`, `ANDROID_HOME`,
+    `JAVA_HOME`); editable on the **Tools** page
   - `default_timeout`, `max_review_loops`, `log_level`, `api.token`, `api.allow_localhost`
 - **per-repo keys** (under `repos:`):
   - `check:` — shell command the daemon runs against every MR in a throwaway
@@ -185,7 +221,15 @@ sisyphus dev      install-hooks        # pre-push hook that runs the test suite
   - `setup:` — copy files / run commands into each fresh worktree (things git
     does not carry, e.g. `local.properties`)
   - `platform:` (`local`/`github`/`gitlab`, else inferred from the source URL)
-    and `token:` — a per-repo forge credential that beats the global one
+    and `token:` — a per-repo forge credential that beats the global one. Source
+    and platform must agree: a path is local, a URL on one forge cannot be
+    saved as the other
+  - `qa:` (`android`/`ios`) — run the `qa` agent on every delivered change
+    before review and require its PASS
+  - `health:` — `build`, `test`, optional `coverage`, the `junit` and
+    `coverage_report` globs, `timeout` per stage
+  - `auto_merge:` — an MR that cleared the gate merges itself
+  - `target:` (`local`/`production`) — how strict Home's readiness card is
 
 Data lives under `workspace/` (SQLite db, per-task bare clones, backups, logs) — gitignored.
 
@@ -205,6 +249,11 @@ core/          domain + engine
   runners.py       CLI-backend configs + runner_detect.py (binary resolution)
   mergerequests.py local merge-request entity + git actions
   verify.py        run the repo's check: command against an MR, record verdict
+  health.py        repo health card: build · tests · coverage from the reports
+  devices.py       emulators, simulators, phones; leases for agents that need one
+  tools.py         what workers can run, their PATH, editing worker_env
+  model_classes.py which runner + model drives an agent, chosen at spawn
+  roles.py         worker roles: persona + allowed tools
   providers.py     publish a branch: local MR, or a real GitHub/GitLab PR
   forge_poll.py    follow published PRs/MRs by polling the forge
   repo_check.py    connection check: reachable → authenticated → can push
@@ -221,6 +270,7 @@ web/           FastAPI app
 mcp_server.py  MCP stdio server (thin client of the daemon)
 sisyphus.py    CLI entrypoint
 deploy/        launchd LaunchAgent template
+desktop/       Sisyphus.app — WebKit shell that owns the daemon
 docs/          architecture + feature notes
 ```
 

@@ -34,7 +34,7 @@ exactly one pass. The decision is one of:
 
 | action | meaning |
 |---|---|
-| `spawn_worker(agent, instruction)` | run a worker agent (explorer/engineer/reviewer/…) |
+| `spawn_worker(agent, instruction)` | run a worker agent (explorer/engineer/qa/reviewer/…) |
 | `spawn_task(subtasks)` | fan out — one child task per `{repo, goal}` |
 | `ask_human(question)` | park as `waiting` until a human replies |
 | `complete` | done — **only** after a reviewer approved (or all children done) |
@@ -118,7 +118,26 @@ Firing renders a `{{payload}}` goal template → `store.create_task` →
 `emit("created")`. Autopilot tasks flow through the *same* guardrails as any task.
 `skip_if_running` stops monitors piling up.
 
-## 8. Data model (SQLite, `workspace/sisyphus.db`)
+## 8. Devices, QA and repo health
+
+- **Devices** (`core/devices.py`) are discovered live from `adb`, `emulator`,
+  `xcrun simctl` and `devicectl`; only the human's decisions are stored. A role
+  that declares `devices` (today: `qa`) gets one leased before its worker
+  starts and returned in a `finally`. With none free, the worker waits.
+  Emulators Sisyphus booted stay warm and are stopped after
+  `devices.idle_minutes`; one the human launched is left alone. Stale leases
+  are cleared at boot.
+- **QA** is a worker role, not a separate engine. Its verdict is the first word
+  of its result. The orchestrator sends a FAIL back to the engineer with the
+  findings and will not complete over it; `repos[].qa` makes the run mandatory
+  before review.
+- **Repo health** (`core/health.py`) runs a per-repo profile — build, test,
+  optional coverage — on a throwaway shallow clone with the setup hook applied,
+  and parses JUnit and JaCoCo/Kover/Cobertura XML itself. It runs on the
+  human's button and daily after that; a repo never run is never started by
+  the loop.
+
+## 9. Data model (SQLite, `workspace/sisyphus.db`)
 
 | table | holds |
 |---|---|
@@ -129,11 +148,16 @@ Firing renders a `{{payload}}` goal template → `store.create_task` →
 | `usage` | per-run token/cost ledger |
 | `merge_requests` | local MR entity |
 | `autopilots` | scheduled/webhook automations |
+| `model_classes` | ordered runner + model options per class |
+| `provider_limits`, `limit_waits` | subscription windows, and tasks parked on them |
+| `devices`, `device_leases`, `device_boots` | which devices agents may use, who holds one, what we started |
+| `repo_health_runs`, `repo_health_proposals` | health card runs, and profiles awaiting confirmation |
+| `integration_events`, `jira_sync` | what was done in Jira and the forges |
 
 WAL mode; each operation opens and closes its own connection. Backups
 (`core/backup.py`) snapshot the whole file consistently via `VACUUM INTO`.
 
-## 9. Surfaces share one core
+## 10. Surfaces share one core
 
 Web UI (`web/routes.py`, htmx), JSON API (`web/api.py`, `/api/v1`), the MCP server
 (`mcp_server.py`, a thin HTTP client of the daemon), and the CLI (`sisyphus.py`)

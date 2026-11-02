@@ -4,6 +4,30 @@
 > `python3 tools/goal_report.py`, which recounts them from git, `sisyphus.db`
 > and [`known-gaps.md`](known-gaps.md) every time it runs.
 
+## Status, 2026-10-11: frozen short of the goal
+
+Feature work stopped on 2026-09-26. The scoreboard below got as far as L1 and
+most of the way to L2 — on this repository. Then the system was pointed at a
+backlog it did not write: about fifty sprint bugs in a mobile codebase. After
+two days, one agent in a terminal, kept going in a loop, had most of them
+nearly fixed, and the pipeline had not.
+
+What the run record showed:
+
+- **Every hand-off was a place to lose context.** Instructions given to a
+  parent task did not reach its subtasks. Tracker fields the bug depended on
+  did not reach the agent. A QA run tested a different scenario from the one
+  the bug described.
+- **The pipeline needed more attention than the bugs.** Time went into
+  repairing orchestration, which is the cost the system exists to remove.
+- **Deciding was expensive.** A strong model for the orchestrator cost a few
+  dollars per task before any work was done.
+
+So the north star stays written here as what was aimed at, not as a plan. The
+bar that replaced it: a tool has to beat its author's current workflow on his
+real work first. The parts that did — QA on a device, repo health, the merge
+gate, the sandbox — are listed in the [front README](../../README.md#where-it-stands).
+
 ## The north star
 
 **Most of what lands on this repo's trunk arrives through a Sisyphus merge
@@ -28,13 +52,13 @@ python3 tools/goal_report.py            # last 30 days
 python3 tools/goal_report.py --days 7 --json
 ```
 
-| Metric | What it counts | Baseline 2026-08-23 | 2026-08-24 | Target |
-|---|---|---|---|---|
-| **Self-build** | commits on the trunk delivered through a `Merge sisyphus/task-*`, over all non-merge commits | **19.2%** (38 / 198, 24 merges) | 18.7% (38 / 203) | 50% |
-| Autonomy | delivering tasks (those that opened an MR) whose thread has no human message | 65.6% (21 / 32, 11 questions asked) | 65.6% (21 / 32) | 95% |
-| Evidence | merged MRs carrying *both* a reviewer's approval and a check the daemon ran itself | 15.4% (4 / 26; 11 approved) | 15.4% (4 / 26) | 100% |
-| Reliability | terminal tasks that did not fail | 92.2% (7 of 90 failed, 6 of them silently) | 92.4% (7 of 92) | 99% |
-| Known gaps | entries in `known-gaps.md` not marked CLOSED | 1 open, 12 closed | **0 open**, 13 closed | 0 open |
+| Metric | What it counts | Baseline 2026-08-23 | 2026-08-24 | 2026-10-11 | Target |
+|---|---|---|---|---|---|
+| **Self-build** | commits on the trunk delivered through a `Merge sisyphus/task-*`, over all non-merge commits | **19.2%** (38 / 198, 24 merges) | 18.7% (38 / 203) | **38.3%** (46 / 120, 34 merges) | 50% |
+| Autonomy | delivering tasks (those that opened an MR) whose thread has no human message | 65.6% (21 / 32, 11 questions asked) | 65.6% (21 / 32) | 89.7% (26 / 29, 1 question asked) | 95% |
+| Evidence | merged MRs carrying *both* a reviewer's approval and a check the daemon ran itself | 15.4% (4 / 26; 11 approved) | 15.4% (4 / 26) | 96.7% (29 / 30) | 100% |
+| Reliability | terminal tasks that did not fail | 92.2% (7 of 90 failed, 6 of them silently) | 92.4% (7 of 92) | 99.1% (1 of 111 failed) | 99% |
+| Known gaps | entries in `known-gaps.md` not marked CLOSED | 1 open, 12 closed | **0 open**, 13 closed | 2 open, 25 closed | 0 open |
 
 Only one number moved on 2026-08-24, and one moved the wrong way. That is the
 metric working. Four of the five backlog items were closed that day by a human
@@ -67,7 +91,8 @@ denominator:
 | **L2 — Majority** | 50% | autonomy ≥ 85%, evidence 100% | More than half the trunk is agent-built, and every merge cites a record. |
 | **L3 — Default** | 75% | autonomy ≥ 95%, 0 open gaps | Working in a terminal is the exception that has to be justified. |
 
-We are below L1.
+L1 was reached (self-build 38.3%, reliability 99.1% on 2026-10-11). L2 was
+not: self-build is short of 50% and evidence of 100%.
 
 ## Production readiness
 
@@ -83,6 +108,12 @@ actually works—whether runs finish, merges land, and code reaches the trunk.
 | Merge latency | median hours from MR created_at to merged_at | time a decision stalls a merge | — |
 | Stale-check blocks | thread notes naming "check-stale" or "auto-merge waiting" | times the merge gate timed out | 0 in 14 days |
 | Human turns | answer messages by human per task with an MR | interventions per delivery | ≤ 1.0 |
+
+On 2026-10-11, over 30 days: wasted runs 3.4% (6 of 177), provider faults 1,
+duplicate workers 1, lost work 1, stale-check blocks 0, human turns 0.17 per
+delivered task, median merge latency 0.1h. The report also names six tasks
+whose MR merged over an unanswered CHANGES REQUESTED. The pilot conditions
+below were not met.
 
 **Conditions to justify a production pilot:** wasted < 5% in 14 days, duplicates 0, lost 0,
 provider faults 0, stale-check blocks 0. These are pipeline health thresholds, not effort

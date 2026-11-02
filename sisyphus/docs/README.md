@@ -7,6 +7,12 @@ Living documents — kept current, read these first:
   Its numbers come from `tools/goal_report.py`, never from a keyboard.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — the domain model and engine: Task + Thread,
   the cold orchestrator loop, workers, merge requests.
+- [`INTEGRATIONS.md`](INTEGRATIONS.md) — Jira and the forges, the journal of every call
+  made to them, and where credentials live.
+- [`PRODUCTION.md`](PRODUCTION.md) — what has to be true before pointing it at a
+  repo that matters.
+- [`design-system.md`](design-system.md) — the UI's tokens and components, and
+  the tests that forbid raw values.
 - [`testing.md`](testing.md) — the test taxonomy (unit / component / process /
   e2e), the order stability is built in, and the rules that keep it honest.
 - [`known-gaps.md`](known-gaps.md) — honest ledger of what is still broken or
