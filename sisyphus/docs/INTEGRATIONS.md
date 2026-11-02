@@ -88,11 +88,11 @@ When you enable Jira intake (not yet implemented; this is how it will work):
 3. **Link**: the task's thread saves the Jira URL and other metadata
 4. **Transitions**: agent tool calls update the Jira issue as the task moves through states
 
-The goal template for an issue has a fixed shape (example for bug KMP-123):
+The goal template for an issue has a fixed shape (example for bug ABC-123):
 
 ```
-KMP-123 · Crash on app start
-Jira: https://acme.atlassian.net/browse/KMP-123 · Bug · Priority: High · Status: To Do
+ABC-123 · Crash on app start
+Jira: https://acme.atlassian.net/browse/ABC-123 · Bug · Priority: High · Status: To Do
 Labels: ios, urgent; Components: mobile-app; Reporter: alice
 
 Description (from Jira):
@@ -127,7 +127,7 @@ the JQL, checks which ones are new, and creates tasks.
 jira:
   intake:
     enabled: true
-    jql: "project = KMP AND type = Bug AND status = \"To Do\""
+    jql: "project = ABC AND type = Bug AND status = \"To Do\""
     repo: my-app
     interval_seconds: 300
     max_per_pass: 50
