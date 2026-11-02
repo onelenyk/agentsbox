@@ -256,3 +256,91 @@ def test_integrations_page_has_the_keys_section(client):
     assert "credentials-view" in r.text
     v = client.get("/api/credentials/view")
     assert "Sisyphus vault" in v.text and "JIRA_API_TOKEN" in v.text and "keycard" in v.text
+
+
+# ── the vault, with the `security` tool faked: never the real keychain ───────
+
+class FakeSecurity:
+    """Answers `security`; `login` is the login keychain, `vault` the vault."""
+
+    def __init__(self, path):
+        self.path, self.login, self.vault, self.stdin = path, {}, {}, []
+        self.err = ""
+
+    def __call__(self, argv, input=None, **kw):
+        import re
+        import subprocess
+        if argv[1] == "-i":
+            self.stdin.append(input)
+            out = ""
+            if "create-keychain" in input:
+                self.path.write_text("vault")
+            for line in input.splitlines():
+                arg = dict(re.findall(r'-([sa]) "([^"]*)"', line))
+                if line.startswith("add-generic-password") and str(self.path) in line:
+                    self.vault[arg["a"]] = re.search(r'-w "([^"]*)"', line).group(1)
+                elif line.startswith("add-generic-password"):
+                    self.login[arg["a"]] = re.search(r'-w "([^"]*)"', line).group(1)
+                elif line.startswith("find-generic-password"):
+                    out = self.vault.get(arg["a"], "")
+                elif line.startswith("delete-generic-password"):
+                    self.vault.pop(arg["a"], None)
+            return subprocess.CompletedProcess(argv, 0, out, self.err)
+        account = argv[argv.index("-a") + 1]
+        if argv[1] == "delete-generic-password":
+            self.login.pop(account, None)
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        value = self.login.get(account, "")
+        return subprocess.CompletedProcess(argv, 0 if value else 44, value, "")
+
+
+@pytest.fixture
+def vault(tmp_path, monkeypatch):
+    from core import keychain
+    path = tmp_path / "v.keychain-db"
+    fake = FakeSecurity(path)
+    monkeypatch.setenv("SISYPHUS_VAULT", str(path))
+    monkeypatch.setattr(keychain, "available", lambda: True)
+    monkeypatch.setattr(keychain, "_password", None)
+    monkeypatch.setattr(keychain.subprocess, "run", fake)
+    return fake
+
+
+def test_vault_is_created_on_first_save_and_holds_the_value(vault):
+    from core import keychain
+    keychain.store("runner-1", "sk-abcdefgh")
+    assert keychain.read("runner-1") == "sk-abcdefgh"
+    assert keychain._UNLOCK_ACCOUNT in vault.login       # its password, outside it
+    assert "runner-1" not in vault.login
+    keychain.delete("runner-1")
+    assert keychain.read("runner-1") is None
+
+
+def test_vault_without_its_password_says_so(vault):
+    from core import keychain
+    vault.path.write_text("vault")
+    with pytest.raises(keychain.KeychainError, match="password is gone"):
+        keychain._vault_password()
+
+
+def test_vault_that_cannot_be_created_is_an_error(vault, monkeypatch):
+    from core import keychain
+    vault.err = "security: error"
+    with pytest.raises(keychain.KeychainError, match="could not"):
+        keychain.store("runner-1", "sk-abcdefgh")
+
+
+def test_a_key_left_in_the_login_keychain_moves_into_the_vault(vault):
+    from core import keychain
+    vault.login["old"] = "sk-legacy-1"
+    assert keychain.read("old") == "sk-legacy-1"
+    assert vault.vault["old"] == "sk-legacy-1" and "old" not in vault.login
+
+
+def test_a_bad_key_never_reaches_the_security_line(vault):
+    from core import keychain
+    with pytest.raises(keychain.KeychainError, match="does not look like"):
+        keychain.store("r", "has space")
+    with pytest.raises(keychain.KeychainError, match="spaces, quotes"):
+        keychain.store("r", 'a"b', service="other")
+    assert vault.stdin == []

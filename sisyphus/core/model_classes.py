@@ -196,7 +196,8 @@ def view() -> list:
             row = {"index": i, "runner_id": opt["runner_id"], "model": model,
                    "runner": r["name"] if r else "(deleted runner)",
                    "shown_model": model or (r.get("model") if r else "") or "its default model",
-                   "provider": "", "account": "", "state": "ready", "until": ""}
+                   "provider": "", "account": "", "account_key": "",
+                   "state": "ready", "until": ""}
             if not r:
                 row["state"] = "gone"
             elif not r.get("enabled", 1):
@@ -204,6 +205,7 @@ def view() -> list:
             else:
                 row["provider"] = limits.provider_of(r, model)
                 row["account"] = _account_label(r, row["provider"])
+                row["account_key"] = account_key(r["id"], row["provider"])
                 row["shown_model"] = (model.split("/", 1)[1] if "/" in model
                                       else row["shown_model"])
                 blocked = limits.blocked_until(row["provider"])

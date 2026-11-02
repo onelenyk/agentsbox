@@ -1384,6 +1384,17 @@ async def runners_set_default(runner_id: str):
     resp.headers["HX-Trigger"] = "runnersUpdated"
     return resp
 
+@router.post("/api/runners/{runner_id}/enable")
+async def runners_enable(runner_id: str, on: int = Form(1)):
+    """Turn a runner on or off. Off keeps its row and sign-in; class options
+    on it are skipped until it is back."""
+    from core.runners import update_runner
+    from fastapi.responses import Response
+    update_runner(runner_id, enabled=1 if on else 0)
+    resp = Response(status_code=200)
+    resp.headers["HX-Trigger"] = "runnersUpdated"
+    return resp
+
 @router.post("/api/runners/{runner_id}/health")
 async def runners_health(runner_id: str):
     from core.runners import health_check

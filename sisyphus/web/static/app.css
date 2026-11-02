@@ -2407,6 +2407,7 @@ a.state__rest:hover { color: var(--text-2); }
 .plan__act { margin-left: auto; }
 .plan__bar { margin-bottom: var(--sp-4); }
 .plan__fill { width: var(--w, 0%); }
+.plan__bar.is-stale { opacity: .5; }
 .bar-fill.warn { background: var(--warn); }
 .bar-fill.bad { background: var(--bad); }
 .plan__note { font-size: var(--fs-base); color: var(--text-2); margin-top: var(--sp-4); }
@@ -2435,6 +2436,8 @@ a.state__rest:hover { color: var(--text-2); }
   font-size: var(--fs-body);
 }
 .plan__acct.is-live { border-color: var(--accent-bd); background: var(--accent-bg); }
+.plan__idle > summary { cursor: pointer; }
+.plan__idle[open] > summary { margin-bottom: 0; }
 
 /* ─ integrations_view.html ────────────────────────────────────────────────
    Provider cards and integration events table. */

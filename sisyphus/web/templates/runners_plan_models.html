@@ -1,6 +1,8 @@
 {# The model half of a class's add form, for the account chosen beside it.
    A short list is a select; a long one (OpenRouter has hundreds) is a field
-   that filters as you type, with the same names in its suggestions. #}
+   that filters as you type, with the same names in its suggestions. `pick`
+   opens the select on the model the class already uses, not the catalog's
+   first entry (a free model of the week, as often as not). #}
 {% if account and account.models %}
 {% if account.models|length > 40 %}
 <input name="model" class="plan__model" list="plan-models-{{ account.key|replace('|', '-') }}"
@@ -10,7 +12,7 @@
 </datalist>
 {% else %}
 <select name="model" class="plan__model" aria-label="Model">
-    {% for m in account.models %}<option value="{{ m.id }}">{{ m.name }}{% if m.ctx %} · {{ m.ctx }}{% endif %}{% if m.price %} · {{ m.price }}{% endif %}</option>{% endfor %}
+    {% for m in account.models %}<option value="{{ m.id }}"{{ ' selected' if m.id == pick }}>{{ m.name }}{% if m.ctx %} · {{ m.ctx }}{% endif %}{% if m.price %} · {{ m.price }}{% endif %}</option>{% endfor %}
 </select>
 {% endif %}
 {% else %}

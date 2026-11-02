@@ -200,6 +200,8 @@ class TestTheInstalledCliVersionIsWatched:
 
         r = runners.add_runner("probe", binary="opencode", runner_type="opencode")
         monkeypatch.setattr("core.runner_detect.resolve", lambda b: "/abs/opencode")
+        monkeypatch.setattr("core.runner_catalog.login_status",
+                            lambda rtype, binary: {"ok": True, "summary": "", "detail": ""})
         with patch.object(runners.subprocess, "run",
                           return_value=SimpleNamespace(stdout="99.0.0\n", stderr="", returncode=0)):
             result = await runners.health_check(r["id"])
@@ -220,6 +222,8 @@ class TestHealthTellsTheTruthAboutABaseUrl:
                                base_url="https://openrouter.ai/api/v1")
         monkeypatch.setattr("core.runner_detect.resolve", lambda b: "/abs/opencode")
         monkeypatch.setattr("core.runners._version_note", lambda runner, path: None)
+        monkeypatch.setattr("core.runner_catalog.login_status",
+                            lambda rtype, binary: {"ok": True, "summary": "", "detail": ""})
 
         def head(req, timeout=5):      # what OpenRouter actually answers to HEAD
             raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, None)

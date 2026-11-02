@@ -281,8 +281,23 @@ def _opencode_go_key() -> str:
     return (entry.get("key") or entry.get("access") or "") if isinstance(entry, dict) else ""
 
 
+# The last poll that failed, kept so the Runners page can say the reading is
+# old and why — a failure used to leave weeks-old numbers looking current.
+# In-process only: the daemon is the one process that polls.
+_last_poll_error: dict = {}
+
+
 def poll_opencode_go() -> Optional[str]:
     """Fetch and record OpenCode Go's windows. Returns an error, or None."""
+    err = _poll_opencode_go()
+    if err:
+        _last_poll_error["opencode-go"] = {"error": err, "at": _now().isoformat()}
+    else:
+        _last_poll_error.pop("opencode-go", None)
+    return err
+
+
+def _poll_opencode_go() -> Optional[str]:
     key = _opencode_go_key()
     if not key:
         return "not signed in to OpenCode Go"
@@ -295,6 +310,8 @@ def poll_opencode_go() -> Optional[str]:
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             body = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        return f"usage request failed: HTTP {exc.code} {_api_error(exc)}".rstrip()
     except (urllib.error.URLError, ValueError, OSError) as exc:
         return f"usage request failed: {exc}"
     usage = (body or {}).get("usage") or {}
@@ -305,6 +322,19 @@ def poll_opencode_go() -> Optional[str]:
             record("opencode-go", window, float(w.get("percent") or 0),
                    w.get("resetsAt"), status)
     return None
+
+
+def _api_error(exc: "urllib.error.HTTPError") -> str:
+    """The provider's own reason from an error body ("api_key_expired"),
+    or nothing — the status alone says little about what to do."""
+    try:
+        body = json.loads(exc.read().decode() or "{}")
+    except Exception:  # noqa: BLE001
+        return ""
+    err = body.get("error") if isinstance(body, dict) else None
+    if isinstance(err, dict):
+        return str(err.get("code") or err.get("type") or "")
+    return ""
 
 
 def providers_in_use() -> list:
@@ -407,13 +437,20 @@ def view() -> list:
         # A cool-down that has run out is history, not a window.
         spans = [w for w in windows(provider)
                  if w["span"] != "cooldown" or cooldown_until(provider)]
+        now = _now()
         for w in spans:
             w["tone"] = tone(w["percent"], w["status"])
+            # Past its reset, the share it shows is from a window that is over.
+            resets = _parse_ts(w["resets_at"])
+            w["stale"] = bool(resets and resets <= now)
         until = blocked_until(provider)
+        failed = _last_poll_error.get(provider) or {}
         out.append({
             "provider": provider, "label": label, "source": source,
             "windows": spans, "polled": provider == "opencode-go",
             "checked_at": max((w["checked_at"] for w in spans), default=""),
             "blocked_until": until.isoformat() if until else "",
+            "poll_error": failed.get("error", ""),
+            "poll_failed_at": failed.get("at", ""),
         })
     return out

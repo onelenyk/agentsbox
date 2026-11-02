@@ -6,6 +6,7 @@ the evidence: a version that counted the wrong thing would still print a number.
 """
 import sqlite3
 import subprocess
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -15,6 +16,13 @@ from core import store
 from core.db import get_conn
 from tools.goal_report import (autonomy, evidence, open_gaps, readiness, reliability,
                                render, self_build, _rate)
+
+
+def _days_ago(days, hours=0):
+    """A timestamp inside the report's window, however old this test gets — a
+    literal date ages out of `days=30` and the count silently becomes 0."""
+    when = datetime.now(timezone.utc) - timedelta(days=days) + timedelta(hours=hours)
+    return when.isoformat(timespec="seconds")
 
 
 def _git(repo, *args):
@@ -561,6 +569,13 @@ def test_readiness_merged_over_objection_renders_count_and_keys(db_path):
     assert "SIS-1" in rendered
 
 
+def _latency_row(hours, mr_id):
+    """(created_at, merged_at, id) for an MR merged `hours` after it opened,
+    two days ago — inside the 30-day window whatever today is."""
+    opened = datetime.now(timezone.utc) - timedelta(days=2)
+    return (opened.isoformat(), (opened + timedelta(hours=hours)).isoformat(), mr_id)
+
+
 def test_readiness_merge_latency_calculates_median_hours(db_path):
     mrs.init_mr_table()
     t = store.create_task("latency test", repo="sisyphus")
@@ -569,7 +584,7 @@ def test_readiness_merge_latency_calculates_median_hours(db_path):
     mr1 = mrs.create_mr(t["id"], "sisyphus", "sisyphus/task-1", "main")
     get_conn().execute(
         "UPDATE merge_requests SET created_at=?, merged_at=? WHERE id=?",
-        ("2026-09-24T10:00:00+00:00", "2026-09-24T11:00:00+00:00", mr1["id"])
+        _latency_row(1, mr1["id"])
     ).connection.commit()
     get_conn().execute("UPDATE merge_requests SET status='merged' WHERE id=?",
                       (mr1["id"],)).connection.commit()
@@ -578,7 +593,7 @@ def test_readiness_merge_latency_calculates_median_hours(db_path):
     mr2 = mrs.create_mr(t["id"], "sisyphus", "sisyphus/task-2", "main")
     get_conn().execute(
         "UPDATE merge_requests SET created_at=?, merged_at=? WHERE id=?",
-        ("2026-09-24T10:00:00+00:00", "2026-09-24T13:00:00+00:00", mr2["id"])
+        _latency_row(3, mr2["id"])
     ).connection.commit()
     get_conn().execute("UPDATE merge_requests SET status='merged' WHERE id=?",
                       (mr2["id"],)).connection.commit()
@@ -587,7 +602,7 @@ def test_readiness_merge_latency_calculates_median_hours(db_path):
     mr3 = mrs.create_mr(t["id"], "sisyphus", "sisyphus/task-3", "main")
     get_conn().execute(
         "UPDATE merge_requests SET created_at=?, merged_at=? WHERE id=?",
-        ("2026-09-24T10:00:00+00:00", "2026-09-24T15:00:00+00:00", mr3["id"])
+        _latency_row(5, mr3["id"])
     ).connection.commit()
     get_conn().execute("UPDATE merge_requests SET status='merged' WHERE id=?",
                       (mr3["id"],)).connection.commit()
@@ -612,7 +627,7 @@ def test_readiness_merge_latency_handles_two_merges(db_path):
     mr1 = mrs.create_mr(t["id"], "sisyphus", "sisyphus/task-1", "main")
     get_conn().execute(
         "UPDATE merge_requests SET created_at=?, merged_at=? WHERE id=?",
-        ("2026-09-24T10:00:00+00:00", "2026-09-24T12:00:00+00:00", mr1["id"])
+        _latency_row(2, mr1["id"])
     ).connection.commit()
     get_conn().execute("UPDATE merge_requests SET status='merged' WHERE id=?",
                       (mr1["id"],)).connection.commit()
@@ -621,7 +636,7 @@ def test_readiness_merge_latency_handles_two_merges(db_path):
     mr2 = mrs.create_mr(t["id"], "sisyphus", "sisyphus/task-2", "main")
     get_conn().execute(
         "UPDATE merge_requests SET created_at=?, merged_at=? WHERE id=?",
-        ("2026-09-24T10:00:00+00:00", "2026-09-24T14:00:00+00:00", mr2["id"])
+        _latency_row(4, mr2["id"])
     ).connection.commit()
     get_conn().execute("UPDATE merge_requests SET status='merged' WHERE id=?",
                       (mr2["id"],)).connection.commit()
@@ -646,13 +661,13 @@ def test_readiness_stale_check_blocks_counts_unresolved_notes(db_path):
     stuck_note = store.post_message(stuck["id"], "system", kind="note", text=stale_reason)
     conn = get_conn()
     conn.execute("UPDATE messages SET created_at=? WHERE id=?",
-                 ("2026-09-01T10:00:00+00:00", stuck_note["id"])).connection.commit()
+                 (_days_ago(10), stuck_note["id"])).connection.commit()
 
     # Resolved by an auto-merge: the daemon re-checked the head and landed the MR.
     landed = store.create_task("auto-merged away", repo="sisyphus")
     landed_note = store.post_message(landed["id"], "system", kind="note", text=stale_reason)
     conn.execute("UPDATE messages SET created_at=? WHERE id=?",
-                 ("2026-09-02T10:00:00+00:00", landed_note["id"])).connection.commit()
+                 (_days_ago(9), landed_note["id"])).connection.commit()
     store.post_message(landed["id"], "system", kind="note",
                        text="Auto-merged sisyphus/task-landed into main (bbbb2222) — review approved")
 
@@ -661,9 +676,9 @@ def test_readiness_stale_check_blocks_counts_unresolved_notes(db_path):
     rc_mr = mrs.create_mr(rechecked["id"], "sisyphus", "sisyphus/task-rechecked", "main")
     rc_note = store.post_message(rechecked["id"], "system", kind="note", text=stale_reason)
     conn.execute("UPDATE messages SET created_at=? WHERE id=?",
-                 ("2026-09-03T10:00:00+00:00", rc_note["id"])).connection.commit()
+                 (_days_ago(8), rc_note["id"])).connection.commit()
     conn.execute("UPDATE merge_requests SET check_ran_at=? WHERE id=?",
-                 ("2026-09-03T11:00:00+00:00", rc_mr["id"])).connection.commit()
+                 (_days_ago(8, hours=1), rc_mr["id"])).connection.commit()
 
     # Never about the check: a review block, and prose that mentions the words.
     review_blocked = store.create_task("review wait", repo="sisyphus")
@@ -695,7 +710,7 @@ def test_readiness_stale_check_blocks_renders_the_unresolved_count(db_path):
     note = store.post_message(stuck["id"], "system", kind="note", text=stale_reason)
     conn = get_conn()
     conn.execute("UPDATE messages SET created_at=? WHERE id=?",
-                 ("2026-09-01T10:00:00+00:00", note["id"])).connection.commit()
+                 (_days_ago(10), note["id"])).connection.commit()
 
     rd = readiness(conn, days=30)
     rendered = render({"days": 30, "target": 50,

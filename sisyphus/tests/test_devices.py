@@ -256,3 +256,229 @@ def test_qa_is_a_seeded_device_agent_without_commit(db_path):
     tools = agents.agent_tools("qa")
     assert "device_screenshot" in tools and "commit" not in tools and "open_mr" not in tools
     assert ROLES["qa"]["devices"] == ["android", "ios"]
+
+
+# ── driving the real tools (their command lines faked) ───────────────────────
+
+class Rig:
+    """A machine with one AVD, one USB phone and two simulators. Answers the
+    commands core.devices runs, and records them."""
+
+    def __init__(self, home):
+        self.home = home
+        self.calls = []
+        self.adb = "List of devices attached\n3B16 device usb:0-1 model:Pixel_7a\n"
+        self.fail = {}
+        self.ios_usb = {"result": {"devices": [
+            {"hardwareProperties": {"udid": "U1", "marketingName": "iPhone 15"},
+             "deviceProperties": {"name": "Phone", "osVersionNumber": "26.0"},
+             "connectionProperties": {"pairingState": "paired", "tunnelState": "connected"}},
+            {"hardwareProperties": {"reality": "virtual"}}]}}
+
+    def __call__(self, argv, timeout=30, input=None):
+        import subprocess
+        line = " ".join(argv)
+        self.calls.append(line)
+        for needle, err in self.fail.items():
+            if needle in line:
+                return subprocess.CompletedProcess(argv, 1, "", err)
+        out = ""
+        if line.endswith("devices -l") or line.endswith("adb devices"):
+            out = self.adb
+        elif "-list-avds" in line:
+            out = "INFO starting\nPixel_A\n"
+        elif "emu avd name" in line:
+            out = "Pixel_A\nOK\n"
+        elif "sys.boot_completed" in line:
+            out = "1\n"
+        elif "ro.build.version.release" in line:
+            out = "14\n"
+        elif "simctl list devices" in line:
+            out = json.dumps(SIMCTL)
+        elif "simctl list runtimes" in line:
+            out = json.dumps({"runtimes": [{"identifier": "x.iOS-26-2", "name": "iOS 26.2",
+                                            "platform": "iOS"}]})
+        elif "devicectl" in line:
+            with open(argv[argv.index("--json-output") + 1], "w") as f:
+                json.dump(self.ios_usb, f)
+        elif "simctl create" in line:
+            out = "NEW-UDID\n"
+        return subprocess.CompletedProcess(argv, 0, out, "")
+
+    def ran(self, text):
+        return any(text in c for c in self.calls)
+
+
+@pytest.fixture
+def rig(db_path, tmp_path, monkeypatch):
+    devices.init_devices_tables()
+    avd = tmp_path / "Pixel_A.avd"
+    avd.mkdir()
+    (avd / "config.ini").write_text(CONFIG_INI)
+    r = Rig(tmp_path)
+    monkeypatch.setenv("ANDROID_AVD_HOME", str(tmp_path))
+    monkeypatch.setattr(devices, "_run", r)
+    monkeypatch.setattr(devices, "android_tool", lambda name: f"/sdk/{name}")
+    monkeypatch.setattr(devices.time, "sleep", lambda s: None)
+    monkeypatch.setattr(devices.subprocess, "Popen", lambda argv, **kw: r.calls.append(" ".join(argv)))
+    devices._invalidate()
+    yield r
+    devices._invalidate()
+
+
+def _emulator_running(rig):
+    rig.adb = "List of devices attached\nemulator-5554 device product:x model:y\n"
+
+
+def test_discover_finds_every_kind_with_live_state(rig):
+    by_id = {d["id"]: d for d in devices.discover(fresh=True)}
+    assert by_id["android-usb:3B16"]["specs"]["os"] == "Android 14"
+    assert by_id["android-usb:3B16"]["allowed"] is False      # phones wait for a yes
+    assert by_id["android-avd:Pixel_A"]["state"] == "off"
+    assert by_id["ios-sim:AAA"]["state"] == "ready" and by_id["ios-sim:BBB"]["state"] == "off"
+    assert by_id["ios-usb:U1"]["state"] == "ready"
+    assert not any("virtual" in i for i in by_id) and len(by_id) == 5
+
+
+def test_a_running_emulator_is_matched_to_its_avd(rig):
+    _emulator_running(rig)
+    d = devices.get("android-avd:Pixel_A", fresh=True)
+    assert d["state"] == "ready" and d["serial"] == "emulator-5554"
+
+
+def test_a_tool_that_is_not_installed_reads_as_not_found(monkeypatch):
+    def missing(*a, **k):
+        raise FileNotFoundError
+    monkeypatch.setattr(devices.subprocess, "run", missing)
+    assert devices._run(["nope"]).returncode == 127
+    monkeypatch.setattr(devices, "android_tool", lambda name: None)
+    assert devices._adb("devices").returncode == 127
+    assert devices.list_avds() == []
+
+
+def test_start_boots_a_headless_emulator_and_waits(rig):
+    devices.start("android-avd:Pixel_A")
+    boot = next(c for c in rig.calls if "-avd Pixel_A" in c)
+    assert "-no-window" in boot and "-port 5554" in boot
+    assert rig.ran("wait-for-device")
+    assert devices.get("android-avd:Pixel_A", fresh=True)["booted_by_us"] is True
+
+
+def test_start_refuses_a_phone_and_an_unknown_id(rig):
+    with pytest.raises(devices.DeviceError, match="physical"):
+        devices.start("android-usb:3B16")
+    with pytest.raises(devices.DeviceError, match="no device"):
+        devices.start("ghost")
+
+
+def test_start_a_simulator_and_report_failure(rig):
+    assert devices.start("ios-sim:AAA")["state"] == "ready"       # already up: nothing to do
+    assert not rig.ran("simctl boot ")
+    devices.start("ios-sim:BBB", window=True)
+    assert rig.ran("simctl boot BBB") and rig.ran("-a Simulator")
+    rig.fail["simctl boot"] = "no runtime"
+    with pytest.raises(devices.DeviceError, match="no runtime"):
+        devices.start("ios-sim:BBB")
+
+
+def test_stop_kills_the_emulator_it_finds_and_respects_a_lease(rig):
+    _emulator_running(rig)
+
+    def gone(argv, timeout=30, input=None):
+        result = Rig.__call__(rig, argv, timeout, input)
+        if "emu kill" in " ".join(argv):
+            rig.adb = "List of devices attached\n"
+        return result
+    devices._run = gone
+    devices.stop("android-avd:Pixel_A")
+    assert rig.ran("emu kill")
+    devices.stop("android-avd:Pixel_A")       # already off: quiet
+
+
+def test_stop_refuses_a_leased_device_unless_forced(rig):
+    lease = devices.acquire("ios", "t1", "qa")
+    with pytest.raises(devices.DeviceError, match="in use"):
+        devices.stop(lease["device_id"])
+    devices.stop(lease["device_id"], force=True)
+    assert rig.ran("simctl shutdown")
+
+
+def test_wipe_erases_a_simulator_and_rewipes_an_emulator(rig):
+    devices.wipe("ios-sim:BBB")
+    assert rig.ran("simctl erase BBB")
+    devices.wipe("android-avd:Pixel_A")
+    assert rig.ran("-wipe-data")
+    rig.fail["simctl erase"] = "busy"
+    with pytest.raises(devices.DeviceError, match="busy"):
+        devices.wipe("ios-sim:BBB")
+    with pytest.raises(devices.DeviceError, match="never wiped"):
+        devices.wipe("android-usb:3B16")
+
+
+def test_delete_removes_both_kinds_and_reports_failure(rig):
+    devices.delete("android-avd:Pixel_A")
+    assert rig.ran("avdmanager delete avd -n Pixel_A")
+    devices.delete("ios-sim:BBB")
+    assert rig.ran("simctl delete BBB")
+    rig.fail["simctl delete"] = "locked"
+    with pytest.raises(devices.DeviceError, match="locked"):
+        devices.delete("ios-sim:BBB")
+    with pytest.raises(devices.DeviceError, match="not deleted"):
+        devices.delete("android-usb:3B16")
+
+
+def test_android_images_newest_first(rig, tmp_path, monkeypatch):
+    for api in ("33", "35"):
+        img = tmp_path / "system-images" / f"android-{api}" / "google_apis" / "arm64-v8a"
+        img.mkdir(parents=True)
+        (img / "system.img").write_text("x")
+    monkeypatch.setattr(devices, "android_sdk", lambda: str(tmp_path))
+    assert [i["api"] for i in devices.android_images()] == ["35", "33"]
+    monkeypatch.setattr(devices, "android_sdk", lambda: "")
+    assert devices.android_images() == []
+
+
+def test_create_writes_the_preset_into_config_ini(rig, tmp_path, monkeypatch):
+    monkeypatch.setattr(devices, "android_images",
+                        lambda: [{"package": "system-images;android-35;g;a"}])
+    (tmp_path / "New_One.avd").mkdir()
+    (tmp_path / "New_One.avd" / "config.ini").write_text("hw.ramSize=1\nkeep=me\n")
+    assert devices.create("android", "phone", "New One!") == "android-avd:New_One"
+    cfg = devices.parse_ini((tmp_path / "New_One.avd" / "config.ini").read_text())
+    assert cfg["hw.ramSize"] == "4096" and cfg["keep"] == "me"
+
+
+def test_create_refuses_what_it_cannot_build(rig, monkeypatch):
+    monkeypatch.setattr(devices, "android_images", lambda: [])
+    with pytest.raises(devices.DeviceError, match="unknown preset"):
+        devices.create("android", "huge", "x")
+    with pytest.raises(devices.DeviceError, match="name is required"):
+        devices.create("android", "phone", "  ")
+    with pytest.raises(devices.DeviceError, match="system image"):
+        devices.create("android", "phone", "x")
+    with pytest.raises(devices.DeviceError, match="unknown platform"):
+        devices.create("symbian", "phone", "x")
+
+
+def test_create_a_simulator_on_the_installed_runtime(rig):
+    assert devices.create("ios", "phone", "Mine") == "ios-sim:NEW-UDID"
+    rig.fail["simctl create"] = "bad type"
+    with pytest.raises(devices.DeviceError, match="bad type"):
+        devices.create("ios", "phone", "Mine")
+
+
+def test_screenshot_of_each_platform(rig, monkeypatch):
+    import subprocess
+    png = b"\x89PNG data"
+    monkeypatch.setattr(devices.subprocess, "run",
+                        lambda *a, **k: subprocess.CompletedProcess(a, 0, png, b""))
+    assert devices.screenshot({"platform": "android", "serial": "s"}) == png
+    monkeypatch.setattr(devices.subprocess, "run",
+                        lambda *a, **k: subprocess.CompletedProcess(a, 0, b"nope", b"denied"))
+    with pytest.raises(devices.DeviceError, match="denied"):
+        devices.screenshot({"platform": "android", "serial": "s"})
+    with pytest.raises(devices.DeviceError, match="physical iPhone"):
+        devices.screenshot({"platform": "ios", "kind": "physical", "serial": "s"})
+    rig.fail["screenshot"] = "not booted"
+    with pytest.raises(devices.DeviceError, match="not booted"):
+        devices.screenshot({"platform": "ios", "kind": "simulator", "serial": "s"})

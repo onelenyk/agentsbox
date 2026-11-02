@@ -15,7 +15,9 @@ The complementary half — that a runner CLI can be spawned and reach these tool
 at all — is core.runner_smoke.
 """
 import os
+import shlex
 import subprocess
+import sys
 
 import pytest
 
@@ -45,7 +47,7 @@ def project(tmp_path, monkeypatch, db_path):
     _git(src, "commit", "-m", "init")
 
     repo = {"name": "myrepo", "source": str(src), "branch": "main",
-            "check": "python3 -m pytest -q"}
+            "check": f"{shlex.quote(sys.executable)} -m pytest -q"}
     monkeypatch.setattr("core.repos.get_repo", lambda name: repo if name == "myrepo" else None)
     monkeypatch.setattr("core.repos.load_repos", lambda: [repo])
 

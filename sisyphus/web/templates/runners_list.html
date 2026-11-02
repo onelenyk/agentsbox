@@ -1,12 +1,13 @@
 {% if runners %}
 <div class="card-grid">
     {% for r in runners %}
-    <div class="ecard">
+    <div class="ecard{{ ' is-off' if not r.enabled }}">
         <div class="ecard__head">
             <div class="ecard__glyph green">{{ 'CC' if r.type == 'claude-cli' else 'OC' }}</div>
             <div>
                 <div class="ecard__name">{{ r.name }}</div>
-                <div class="health ecard__health {{ 'is-healthy' if r.health_status == 'healthy' else ('is-unhealthy' if r.health_status == 'unhealthy' else '') }}"><span class="dot"></span>{{ r.health_status }}</div>
+                {% if r.enabled %}<div class="health ecard__health {{ 'is-healthy' if r.health_status == 'healthy' else ('is-unhealthy' if r.health_status == 'unhealthy' else '') }}"><span class="dot"></span>{{ r.health_status }}</div>
+                {% else %}<div class="health ecard__health"><span class="dot"></span>disabled — no agent runs on it</div>{% endif %}
             </div>
             {% if r.is_default %}<span class="badge badge--accent right">default</span>{% endif %}
         </div>
@@ -20,7 +21,7 @@
         {# Same column carries a fatal reason and a harmless note (see
            core.runners.health_check) — colour by status, or a healthy runner's
            note reads as a failure. #}
-        {% if r.health_error %}<div class="ecard__note {{ 'ecard__note--bad' if r.health_status == 'unhealthy' else 'ecard__note--warn' }}">{{ r.health_error[:160] }}</div>{% endif %}
+        {% if r.health_error and r.enabled %}<div class="ecard__note {{ 'ecard__note--bad' if r.health_status == 'unhealthy' else 'ecard__note--warn' }}">{{ r.health_error[:160] }}</div>{% endif %}
         <div class="ecard__foot">
             <div class="acts acts--start">
                 <button class="btn btn--ghost btn--sm" hx-post="/api/runners/{{ r.id }}/health" hx-swap="none">Check</button>
@@ -30,7 +31,9 @@
                         hx-swap="none" hx-disabled-elt="this"
                         hx-on:htmx:before-request="this.textContent='Testing…'"
                         hx-on:htmx:after-request="this.textContent='Smoke test'">Smoke test</button>
-                {% if not r.is_default %}<button class="btn btn--ghost btn--sm" hx-post="/api/runners/{{ r.id }}/set-default" hx-swap="none">★ Default</button>{% endif %}
+                {% if not r.enabled %}<button class="btn btn--ghost btn--sm" hx-post="/api/runners/{{ r.id }}/enable" hx-vals='{"on": 1}' hx-swap="none">Enable</button>
+                {% elif not r.is_default %}<button class="btn btn--ghost btn--sm" hx-post="/api/runners/{{ r.id }}/set-default" hx-swap="none">★ Default</button>
+                <button class="btn btn--ghost btn--sm" hx-post="/api/runners/{{ r.id }}/enable" hx-vals='{"on": 0}' hx-swap="none">Disable</button>{% endif %}
                 <button class="btn btn--ghost btn--sm" hx-get="/api/runners/{{ r.id }}/edit-form" hx-target="body" hx-swap="beforeend">Edit</button>
                 <button class="btn btn--danger btn--sm" hx-post="/api/runners/{{ r.id }}/delete" hx-confirm="Delete {{ r.name }}?" hx-swap="none">Delete</button>
             </div>

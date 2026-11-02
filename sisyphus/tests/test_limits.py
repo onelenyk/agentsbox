@@ -264,6 +264,58 @@ class TestRunnersPage:
         page = client.get("/api/runners/plan").text
         assert "Accounts" in page and "DeepSeek" in page and "worker #2" in page
 
+    def test_a_failed_poll_is_shown_and_old_windows_read_as_over(self, two_runners, monkeypatch):
+        """A poll that fails used to leave weeks-old numbers looking current."""
+        from fastapi.testclient import TestClient
+        from web.app import app
+        _, oc = two_runners
+        model_classes.add("worker", oc["id"], "opencode-go/deepseek-v4.1-flash")
+        limits.record("opencode-go", "week", 23, _iso(-3600))
+        monkeypatch.setattr(limits, "_poll_opencode_go",
+                            lambda: "usage request failed: HTTP 401 api_key_expired")
+        limits.poll_opencode_go()
+        go = next(s for s in limits.view() if s["provider"] == "opencode-go")
+        assert "api_key_expired" in go["poll_error"]
+        assert [w["stale"] for w in go["windows"]] == [True]
+        page = TestClient(app).get("/api/runners/plan").text
+        assert "Can't read the limits now" in page and "window over" in page
+
+        monkeypatch.setattr(limits, "_poll_opencode_go", lambda: None)
+        limits.poll_opencode_go()
+        assert not next(s for s in limits.view() if s["provider"] == "opencode-go")["poll_error"]
+
+    def test_accounts_no_class_spends_are_folded_away(self, two_runners, monkeypatch):
+        from fastapi.testclient import TestClient
+        from core import runner_catalog
+        from web.app import app
+        _, oc = two_runners
+        groups = [{"id": p, "label": p.title(), "models": [
+                      {"id": f"{p}/m1", "name": "M1", "ctx": "", "price": ""},
+                      {"id": f"{p}/m2", "name": "M2", "ctx": "", "price": ""}]}
+                  for p in ("opencode-go", "deepseek", "openrouter")]
+        monkeypatch.setattr(runner_catalog, "models",
+                            lambda rtype, binary: groups if rtype == "opencode" else [])
+        monkeypatch.setattr(runner_catalog, "login_status", lambda rtype, binary: {"ok": True})
+        model_classes.add("worker", oc["id"], "opencode-go/m2")
+
+        page = TestClient(app).get("/api/runners/plan").text
+        assert "more signed in, not used by any class" in page
+        # The add form opens on the model the class already uses.
+        assert '<option value="opencode-go/m2" selected>' in page
+
+    def test_a_disabled_runner_says_so_and_can_be_turned_back_on(self, two_runners):
+        from fastapi.testclient import TestClient
+        from core.runners import get_runner, update_runner
+        from web.app import app
+        claude, _ = two_runners
+        update_runner(claude["id"], enabled=0)
+        client = TestClient(app)
+        cards = client.get("/api/runners/list").text
+        assert "disabled — no agent runs on it" in cards and "Enable" in cards
+        r = client.post(f"/api/runners/{claude['id']}/enable", data={"on": 1})
+        assert r.status_code == 200 and r.headers["HX-Trigger"] == "runnersUpdated"
+        assert get_runner(claude["id"])["enabled"] == 1
+
     def test_unpinning_an_agent_from_the_edit_form_clears_the_pin(self, two_runners):
         from fastapi.testclient import TestClient
         from web.app import app
@@ -320,3 +372,67 @@ class TestProviderFaults:
             assert limits.cooldown_until("test-provider") is None
         finally:
             lifecycle._STOPPING = False
+
+
+class TestPollingOpenCodeGo:
+    """The real request path: what the provider answers becomes a window, or an
+    error that says what to do."""
+
+    class _Resp:
+        def __init__(self, body):
+            self.body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return self.body
+
+    def test_no_key_says_sign_in(self, db_path, monkeypatch):
+        monkeypatch.setattr(limits, "_opencode_go_key", lambda: "")
+        assert "not signed in" in limits.poll_opencode_go()
+        assert "opencode-go" in limits._last_poll_error
+        limits._last_poll_error.clear()
+
+    def test_an_http_error_carries_the_providers_own_reason(self, db_path, monkeypatch):
+        import io
+        import urllib.error
+        monkeypatch.setattr(limits, "_opencode_go_key", lambda: "k")
+
+        def refuse(req, timeout=15):
+            raise urllib.error.HTTPError(req.full_url, 401, "no", {},
+                                         io.BytesIO(b'{"error": {"code": "api_key_expired"}}'))
+        monkeypatch.setattr(limits.urllib.request, "urlopen", refuse)
+        assert limits.poll_opencode_go() == "usage request failed: HTTP 401 api_key_expired"
+        limits._last_poll_error.clear()
+
+    def test_an_unreadable_error_body_is_just_the_status(self, db_path, monkeypatch):
+        import io
+        import urllib.error
+        exc = urllib.error.HTTPError("u", 500, "no", {}, io.BytesIO(b"<html>"))
+        assert limits._api_error(exc) == ""
+
+    def test_a_good_answer_records_its_windows(self, db_path, monkeypatch):
+        monkeypatch.setattr(limits, "_opencode_go_key", lambda: "k")
+        body = {"usage": {"rolling": {"percent": 12, "resetsAt": _iso(60)},
+                          "weekly": {"percent": 100, "status": "limited", "resetsAt": _iso(600)},
+                          "monthly": "not a window"}}
+        monkeypatch.setattr(limits.urllib.request, "urlopen",
+                            lambda req, timeout=15: self._Resp(json.dumps(body).encode()))
+        assert limits.poll_opencode_go() is None
+        got = {w["span"]: w for w in limits.windows("opencode-go")}
+        assert set(got) == {"5h", "week"}
+        assert got["5h"]["percent"] == 12 and got["week"]["status"] == "rejected"
+
+    def test_the_key_comes_from_opencodes_own_auth_file(self, tmp_path, monkeypatch):
+        from core import runner_catalog
+        auth = tmp_path / "auth.json"
+        monkeypatch.setattr(runner_catalog, "OPENCODE_AUTH_PATH", auth)
+        assert limits._opencode_go_key() == ""            # no file
+        auth.write_text('{"opencode-go": {"key": "sk-1"}}')
+        assert limits._opencode_go_key() == "sk-1"
+        auth.write_text('{"opencode-go": "garbled"}')
+        assert limits._opencode_go_key() == ""

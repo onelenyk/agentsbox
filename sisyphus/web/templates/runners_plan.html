@@ -1,5 +1,16 @@
 {# What runs the agents: how much of each subscription is left, and the two
    model classes that pick a runner from it. Swapped whole on every change. #}
+{% macro acct_row(a) -%}
+<li class="plan__acct{{ ' is-live' if a.used_by }}">
+    <span class="plan__what"><span class="plan__runner">{{ a.label }}</span>
+        <span class="muted">via {{ a.runner }} · {{ a.n_models }} model{{ '' if a.n_models == 1 else 's' }}</span></span>
+    {% if not a.signed_in %}<span class="badge badge--warn">not signed in</span>
+    {% elif a.state == 'limit' %}<span class="badge badge--bad">limit · back {{ a.until|when }}</span>
+    {% elif a.state == 'cooldown' %}<span class="badge badge--warn" title="Its last run never reached the model">set aside · back {{ a.until|when }}</span>
+    {% else %}<span class="badge badge--ok">ready</span>{% endif %}
+    {% if a.used_by %}<span class="badge badge--accent">{{ a.used_by|join(', ') }}</span>{% endif %}
+</li>
+{%- endmacro %}
 <div id="runners-plan" class="plan" hx-get="/api/runners/plan" hx-trigger="runnersUpdated from:body" hx-swap="outerHTML">
     {% if error %}<div class="ecard__note ecard__note--bad plan__error">{{ error }}</div>{% endif %}
 
@@ -12,14 +23,16 @@
                 {% if s.polled %}<button class="btn btn--ghost btn--sm plan__act" hx-post="/api/limits/refresh" hx-target="#runners-plan" hx-swap="outerHTML" hx-disabled-elt="this">Refresh</button>{% endif %}
             </div>
             {% for w in s.windows %}
-            <div class="bar-row plan__bar">
+            <div class="bar-row plan__bar{{ ' is-stale' if w.stale }}">
                 <span class="cap">{{ w.label }}</span>
                 <span class="bar-track"><span class="bar-fill plan__fill {{ w.tone }}{{ ' is-zero' if w.percent < 1 }}" style="--w:{{ w.percent|round|int }}%"></span></span>
-                <span class="val">{{ w.percent|round|int }}%{% if w.resets_at %} · resets {{ w.resets_at|when }}{% endif %}</span>
+                {% if w.stale %}<span class="val muted">{{ w.percent|round|int }}% · window over {{ w.resets_at|when }}</span>
+                {% else %}<span class="val">{{ w.percent|round|int }}%{% if w.resets_at %} · resets {{ w.resets_at|when }}{% endif %}</span>{% endif %}
             </div>
             {% else %}
             <p class="muted plan__note">No reading yet.</p>
             {% endfor %}
+            {% if s.poll_error %}<div class="ecard__note ecard__note--bad">Can't read the limits now — {{ s.poll_error }} · tried {{ s.poll_failed_at|when }}</div>{% endif %}
             <p class="muted plan__note">{{ s.source }}{% if s.checked_at %} · last read {{ s.checked_at|when }}{% endif %}</p>
         </div>
         {% endfor %}
@@ -27,23 +40,25 @@
     {% endif %}
 
     {% if accounts %}
+    {% set live = accounts|selectattr('used_by')|list %}
+    {% set idle = accounts|rejectattr('used_by')|list %}
     <div class="panel">
         <div class="result__label">Accounts
-            <span class="muted plan__hint">what a class option can spend — every provider opencode holds a key for, and Claude</span>
+            <span class="muted plan__hint">what the class options spend</span>
         </div>
-        <ul class="plan__accts">
-            {% for a in accounts %}
-            <li class="plan__acct{{ ' is-live' if a.used_by }}">
-                <span class="plan__what"><span class="plan__runner">{{ a.label }}</span>
-                    <span class="muted">{{ a.runner }} · {{ a.n_models }} model{{ '' if a.n_models == 1 else 's' }}</span></span>
-                {% if not a.signed_in %}<span class="badge badge--warn">not signed in</span>
-                {% elif a.state == 'limit' %}<span class="badge badge--bad">limit · back {{ a.until|when }}</span>
-                {% elif a.state == 'cooldown' %}<span class="badge badge--warn" title="Its last run never reached the model">set aside · back {{ a.until|when }}</span>
-                {% else %}<span class="badge badge--ok">ready</span>{% endif %}
-                {% if a.used_by %}<span class="badge badge--accent">{{ a.used_by|join(', ') }}</span>{% endif %}
-            </li>
-            {% endfor %}
-        </ul>
+        {% if live %}
+        <ul class="plan__accts">{% for a in live %}{{ acct_row(a) }}{% endfor %}</ul>
+        {% else %}
+        <p class="muted plan__note">No class spends an account yet — add an option below.</p>
+        {% endif %}
+        {% if idle %}
+        {# A runner holds keys for more providers than anyone uses; listed in
+           full they read as if all of them were spent. #}
+        <details class="plan__idle">
+            <summary class="muted plan__note">{{ idle|length }} more signed in, not used by any class</summary>
+            <ul class="plan__accts">{% for a in idle %}{{ acct_row(a) }}{% endfor %}</ul>
+        </details>
+        {% endif %}
     </div>
     {% endif %}
 
@@ -87,7 +102,7 @@
                         hx-get="/api/classes/models" hx-trigger="change" hx-target="next .plan__pick" hx-swap="innerHTML">
                     {% for a in accounts %}<option value="{{ a.key }}">{{ a.label }}{{ ' · ' ~ a.runner if a.label != a.runner }}</option>{% endfor %}
                 </select>
-                <span class="plan__pick">{% with account = first_account %}{% include "runners_plan_models.html" %}{% endwith %}</span>
+                <span class="plan__pick">{% with account = first_account, pick = c.options|selectattr('account_key', 'equalto', first_account.key)|map(attribute='model')|first %}{% include "runners_plan_models.html" %}{% endwith %}</span>
                 <button class="btn btn--ghost btn--sm" type="submit">+ Add</button>
             </form>
             {% endif %}
